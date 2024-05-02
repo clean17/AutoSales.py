@@ -22,3 +22,8 @@ source .venv/bin/activate
 ```
 
 5. 패키지 설치
+
+## 해야할 일
+
+1. kiwoom.py 분석
+
