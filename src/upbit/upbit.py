@@ -34,8 +34,8 @@ secret_key = config['DEFAULT']['SecretKey']
 upbit = pyupbit.Upbit(access_key, secret_key)
 
 # 매수하고자 하는 총 금액과 지정가
-total_krw = 10000        # 1만 원
-target_price = 80000000  # 지정가 8000만 원
+total_krw = 2000        # 1만 원
+target_price = 93000000  # 지정가 8000만 원
 
 # 비트코인의 현재 가격 가져오기
 current_price = pyupbit.get_current_price("KRW-BTC")
@@ -48,3 +48,9 @@ result = upbit.buy_limit_order("KRW-BTC", target_price, btc_amount)
 
 # 결과 출력
 print(result)
+
+'''
+InsufficientFundsBid - 계좌 잔액 부족
+UnderMinTotalBid - 주문 요청 금액이 최소 주문 금액보다 낮음
+'''
+
