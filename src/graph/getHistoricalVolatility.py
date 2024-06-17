@@ -1,3 +1,4 @@
+
 import ccxt
 import pandas as pd
 import numpy as np
@@ -35,10 +36,3 @@ plt.title('Bitcoin 30-Day Historical Volatility')
 plt.xlabel('Date')
 plt.ylabel('Volatility')
 plt.show()
-
-'''
-최근 (24.04.06) 역사적 변동성은 0.7 => 대략 70% 변동성
-비트코인 영업일 365의 제곱근은 대략 19
-70 / 19 = 대략 3.7%
-=> 하루 평균 3.7%가 변동되었다.
-'''

@@ -10,8 +10,8 @@ from sklearn.preprocessing import MinMaxScaler
 # 데이터 수집
 today = datetime.today().strftime('%Y%m%d')
 last_year = (datetime.today() - timedelta(days=365)).strftime('%Y%m%d')
-# ticker = "005930"  # 삼성전자
-ticker = "012750"  # 에스원
+ticker = "005930"  # 삼성전자
+# ticker = "012750"  # 에스원
 
 ohlcv = stock.get_market_ohlcv_by_date(fromdate=last_year, todate=today, ticker=ticker)
 fundamental = stock.get_market_fundamental_by_date(fromdate=last_year, todate=today, ticker=ticker)

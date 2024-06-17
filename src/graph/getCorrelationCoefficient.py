@@ -1,3 +1,6 @@
+'''
+비트코인과 이더리움의 상관관계 그래프 보기
+'''
 import ccxt
 import pandas as pd
 from datetime import datetime, timedelta
@@ -8,6 +11,7 @@ from sklearn.preprocessing import StandardScaler
 exchange = ccxt.binance({
     'rateLimit': 1200,
     'enableRateLimit': True,
+    'timeout': 30000,  # 30초
 })
 
 # 데이터를 가져올 함수 정의

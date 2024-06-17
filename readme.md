@@ -20,6 +20,10 @@ Linux
 ```
 source .venv/bin/activate
 ```
+파이썬 파일 실행
+```py
+python [file].py
+```
 
 5. 패키지 설치
 
@@ -27,3 +31,51 @@ source .venv/bin/activate
 
 1. kiwoom.py 분석
 
+## 실행 결과
+
+### 비트코인 이더리움 상관관계
+```py
+/src/graph (main)
+$ python getCorrelationCoefficient.py
+```
+![alt text](image.png)
+
+### 비트코인 30일간 역사적 변동성 체크
+```py
+/src/graph (main)
+$ python getHistoricalVolatility.py
+
+'''
+최근 (24.04.06) 역사적 변동성은 0.7 => 대략 70% 변동성
+비트코인 영업일 365의 제곱근은 대략 19
+70 / 19 = 대략 3.7%
+=> 하루 평균 3.7%가 변동되었다.
+'''
+```
+![alt text](image-1.png)
+
+### 비트코인 일별 수익률, 역사적 변동성 계산 및 표준화 그래프
+비트코인의 종가와 변동성을 분석하여, 이 둘의 변화 패턴을 시각적으로 비교
+```py
+/src/graph (main)
+$ python getHistoricalVolatilityAndStandardization.py 
+```
+![alt text](image-2.png)
+### LSTM으로 분석한 향후 7일간의 비트코인 가격 예측
+```py
+/src/graph (main)
+$ python getPredictedBTCbyLSTM.py
+
+'''
+실제 종가 (파란색 선): 지난 1년간의 비트코인 실제 종가
+예측된 종가 (빨간색 점선): LSTM 모델을 사용하여 예측한 다음 7일간의 비트코인 종가
+'''
+```
+![alt text](image-3.png)
+
+### LSTM으로 분석한 향후 7일간의 삼성전자 가격 예측
+```py
+/src/graph (main)
+$ python getPredictedStockByLSTM.py 
+```
+![alt text](image-4.png)
