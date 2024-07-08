@@ -2,6 +2,7 @@ dist/
 build/
 .venv32/
 config.ini
+*.csv
 
 # Ignore Python cache files
 .idea/
