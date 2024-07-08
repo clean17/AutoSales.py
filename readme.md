@@ -1,16 +1,36 @@
 ## 파이썬 가상환경
 
 파이썬 가상환경에서 32비트를 별도로 사용한다면
-1. 가상 환경을 생성 
+### 1. 가상 환경을 생성 
 ```
 python -m venv [가상환경이름]
 ```
-2. 생성한 가상환경 디렉토리 이동후 `pyvenv.cfg`열기
-3. home 부분 수정
+### 2. 가상환경 활성화
+```bash
+$ source venv/bin/activate 
+
+$ source venv/Scripts/activate  # windows
+
+$ venv\Scripts\activate.bat     # cmd
+```
+
+### push 전 requirements.txt 생성
+```bash
+$ pip freeze > requirements.txt
+```
+### pull 후 가상환경에 패키지 설치
+```bash
+$ pip install -r requirements.txt
+```
+
+## 2개의 파이썬중 버전 선택
+### 1. 생성한 가상환경 디렉토리 이동후 `pyvenv.cfg`열기
+### 2. home 부분 수정
+설치된 python이 2개이상일 경우 3.8.7이하의 버전을 선택해야 한다 (라이브러리가 최신버전을 지원 x)
 ```
 home = C:\Python -> home = C:\Python32
 ```
-4. 파이썬 인터프리터 변경 vs code에서 `Ctrl+Shift+P` 입력 후
+### 3. 파이썬 인터프리터 변경 vs code에서 `Ctrl+Shift+P` 입력
 Python Select Interpreter 설정에서 생성한 가상환경 선택
 또는 윈도우에서
 ```
@@ -20,12 +40,20 @@ Linux
 ```
 source .venv/bin/activate
 ```
-파이썬 파일 실행
+- 파이썬 파일 실행
 ```py
 python [file].py
 ```
 
-5. 패키지 설치
+
+- 패키지 설치
+```py
+pip install [package]
+```
+- 설치된 라이브러리 목록 확인 > requirements.txt 생성
+```py
+pipreqs [src/]
+```
 
 ## 해야할 일
 

@@ -1,0 +1,15 @@
+ccxt==4.2.89
+ccxt==4.2.91
+matplotlib==3.8.4
+matplotlib==3.7.5
+numpy==1.24.4
+openpyxl==3.1.2
+pandas==2.0.3
+pykiwoom==0.1.6
+pykrx==1.0.45
+PyQt5==5.15.10
+PyQt5_sip==12.13.0
+pyupbit==0.2.33
+scikit_learn==1.4.1.post1
+tensorflow==2.16.1
+tensorflow_intel==2.16.1
