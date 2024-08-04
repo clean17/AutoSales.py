@@ -7,6 +7,7 @@ from tensorflow.keras.layers import LSTM, Dense
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import MinMaxScaler
 import os
+from datetime import datetime, timedelta
 
 
 # 예측 기간 (1달)
@@ -98,10 +99,6 @@ if not os.path.exists(output_dir):
 # 현재 작업 디렉토리를 기준으로 output_dir 설정
 # output_dir = os.path.join(os.getcwd(), 'images')
 
-# 디렉터리가 존재하지 않으면 생성
-if not os.path.exists(output_dir):
-    os.makedirs(output_dir)
-
 # 수익률 20% 이상인 종목의 그래프 시각화
 for ticker, (future_return, actual_prices, predicted_prices, stock_name) in predicted_stocks.items():
     last_date = actual_prices.index[-1]
@@ -110,18 +107,18 @@ for ticker, (future_return, actual_prices, predicted_prices, stock_name) in pred
     plt.figure(figsize=(20, 6))
     plt.plot(actual_prices.index, actual_prices, label=f'Actual Prices ({stock_name} {ticker})', color='blue')
     predicted_prices_with_continuity = np.insert(predicted_prices, 0, actual_prices.iloc[-1])
-    plt.plot(prediction_dates, predicted_prices_with_continuity, label=f'Predicted Prices ({ticker})', color='red', linestyle='--')
+    plt.plot(prediction_dates, predicted_prices_with_continuity, label=f'Predicted Prices ({stock_name} {ticker})', color='red', linestyle='--')
 
-    plt.title(f'Actual Prices vs Predicted Prices for {stock_name} {ticker} (Expected Return: {future_return:.2f}%)')
+    plt.title(f'Actual Prices vs Predicted Prices for {today} {stock_name} {ticker} (Expected Return: {future_return:.2f}%)')
     plt.xlabel('Date')
     plt.ylabel('Price')
     plt.legend()
     plt.xticks(rotation=45)
-    # plt.show()
+#     plt.show()
 
     last_price = actual_prices.iloc[-1]
 
     # 이미지 파일로 저장
-    file_path = os.path.join(output_dir, f'{ticker}_{stock_name}_{last_price}.png')
+    file_path = os.path.join(output_dir, f'{today}_{ticker}_{stock_name}_{last_price}.png')
     plt.savefig(file_path)
     plt.close()
