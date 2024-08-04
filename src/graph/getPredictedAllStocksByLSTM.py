@@ -14,7 +14,7 @@ prediction_period = 30
 # 예측 성장률 (20%)
 expected_growth_rate = 20
 # 데이터 수집 기간 (6개월)
-data_collection_period = 180
+data_collection_period = 365
 
 
 def fetch_stock_data(ticker, fromdate, todate):
@@ -85,25 +85,25 @@ for ticker in tickers:
         last_close = data['종가'].iloc[-1]
         future_return = (predictions[-1] / last_close - 1) * 100
         if future_return > expected_growth_rate:
-            predicted_stocks[ticker] = (future_return, data['종가'], predictions)
+            predicted_stocks[ticker] = (future_return, data['종가'], predictions, stock_name)
     else:
         print(f"Insufficient data for {ticker}")  # 데이터가 충분하지 않은 경우 메시지를 출력합니다.
 
 
 # 이미지 저장 경로 설정 (절대경로.. C:\)
-# output_dir = '/images'
-# if not os.path.exists(output_dir):
-#     os.makedirs(output_dir)
+output_dir = 'D:\stocks'
+if not os.path.exists(output_dir):
+    os.makedirs(output_dir)
 
 # 현재 작업 디렉토리를 기준으로 output_dir 설정
-output_dir = os.path.join(os.getcwd(), 'images')
+# output_dir = os.path.join(os.getcwd(), 'images')
 
 # 디렉터리가 존재하지 않으면 생성
 if not os.path.exists(output_dir):
     os.makedirs(output_dir)
 
 # 수익률 20% 이상인 종목의 그래프 시각화
-for ticker, (future_return, actual_prices, predicted_prices) in predicted_stocks.items():
+for ticker, (future_return, actual_prices, predicted_prices, stock_name) in predicted_stocks.items():
     last_date = actual_prices.index[-1]
     prediction_dates = pd.date_range(start=last_date + timedelta(days=1), periods=prediction_period+1)
 
