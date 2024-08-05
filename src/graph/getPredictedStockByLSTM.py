@@ -6,11 +6,17 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import MinMaxScaler
-from keras.layers import BatchNormalization, Dropout
-from keras.regularizers import l2
 from tensorflow.keras.models import load_model
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_squared_error
+
+'''
+정규화   - kernel_regularizer=l2(0.01) > L2정규화: 과적합 방지
+Dropout - 과적합방지, 일반화 향상
+ReLU    - 비선형 학습(복잡한 패턴)
+3가지 옵션 모두 예측치가 엇나감
+'''
+
+
+
 
 # 데이터 수집
 today = datetime.today().strftime('%Y%m%d')
@@ -18,61 +24,104 @@ last_year = (datetime.today() - timedelta(days=365)).strftime('%Y%m%d')
 # ticker = "005930"  # 삼성전자
 # ticker = "012750"  # 에스원
 ticker = "248070"
+prediction_period = 7
 
 ohlcv = stock.get_market_ohlcv_by_date(fromdate=last_year, todate=today, ticker=ticker)
 fundamental = stock.get_market_fundamental_by_date(fromdate=last_year, todate=today, ticker=ticker)
 data = pd.concat([ohlcv['종가'], fundamental['PER']], axis=1).dropna()
 
+
+
+
+
 # 데이터 전처리
-scaler = MinMaxScaler(feature_range=(0, 1))
-scaled_data = scaler.fit_transform(data)
+# scaler = MinMaxScaler(feature_range=(0, 1))
+# scaled_data = scaler.fit_transform(data)
+
+# look_back = 1
+# X, Y = create_dataset(scaled_data, look_back)
 
 def create_dataset(dataset, look_back=1):
     X, Y = [], []
-    for i in range(len(dataset)-look_back-1):
-        a = dataset[i:(i+look_back), :]
+    for i in range(len(dataset) - look_back - 1):
+        a = dataset[i:(i + look_back), :]
         X.append(a)
         Y.append(dataset[i + look_back, 0])
     return np.array(X), np.array(Y)
 
-look_back = 1
-X, Y = create_dataset(scaled_data, look_back)
+
+
+
 
 # LSTM 모델 생성 및 학습
-'''
-유닛증가 - 50 > 100
-정규화   - kernel_regularizer=l2(0.01) > L2정규화: 과적합 방지
- ㄴ 정규화를 하지 않으면 테스트 데이터에 치중, 새로운 데이터에 성능이 저하될 수 있다... 예상치가 너무 높아서 비활성화함
-Dropout - 과적합방지, 일반화 향상
- ㄴ 없는 경우가 더 예측이 정확
-ReLU    - 비선형 학습(복잡한 패턴)
- ㄴ 없는 경우가 더 예측이 정확
-'''
-model = Sequential([
-    LSTM(256, return_sequences=True, input_shape=(X.shape[1], X.shape[2])),
-    LSTM(128, return_sequences=True),
-    LSTM(64, return_sequences=False),
-    Dense(128),
-    Dense(64),
-    Dense(32),
-    Dense(1)
-])
-model.compile(optimizer='adam', loss='mean_squared_error')
+def create_model(input_shape):
+    model = Sequential([
+        LSTM(256, return_sequences=True, input_shape=input_shape),
+        LSTM(128, return_sequences=True),
+        LSTM(64, return_sequences=False),
+        Dense(128),
+        Dense(64),
+        Dense(32),
+        Dense(1)
+    ])
+    model.compile(optimizer='adam', loss='mean_squared_error')
+    return model
 
-model.fit(X, Y, batch_size=32, epochs=20) # epochs 학습 횟수 batch_size 학습에 사용할 샘플의 수
+def train_and_save_model(data, look_back=1, model_path='my_model.Keras'):
+    scaler = MinMaxScaler(feature_range=(0, 1))
+    scaled_data = scaler.fit_transform(data)
+
+    X, Y = create_dataset(scaled_data, look_back)
+    model = create_model((X.shape[1], X.shape[2]))
+    model.fit(X, Y, batch_size=32, epochs=50, verbose=0, validation_split=0.1)
+    # model.fit(X, Y, batch_size=32, epochs=50) # epochs 학습 횟수 batch_size 학습에 사용할 샘플의 수 # epochs 증가
+    model.save(model_path)
+    return scaler
+
+# 모델 학습 및 저장
+scaler = train_and_save_model(data, model_path='my_model.Keras')
+
+
+
+
+
+
+# 모델 불러오기 및 예측
+def predict_stock_price_with_saved_model(data, scaler, model_path='my_model.Keras', look_back=1, days_to_predict=prediction_period):
+    scaled_data = scaler.transform(data)
+
+    def create_dataset(dataset, look_back=1):
+        X = []
+        for i in range(len(dataset) - look_back - 1):
+            a = dataset[i:(i + look_back), :]
+            X.append(a)
+        return np.array(X)
+
+    X = create_dataset(scaled_data, look_back)
+    model = load_model(model_path)
+    predictions = model.predict(X[-days_to_predict:])
+    return predictions
 
 # 주가 예측
-predictions = model.predict(X[-7:])
+# predictions = model.predict(X[-7:])
+predictions = predict_stock_price_with_saved_model(data, scaler, model_path='my_model.Keras')
+
+
+
+
+
 
 # 예측 결과 시각화
-predicted_prices = scaler.inverse_transform(np.concatenate((predictions, np.zeros((7, X.shape[2] - 1))), axis=1))[:, 0]
+# predicted_prices = scaler.inverse_transform(np.concatenate((predictions, np.zeros((7, X.shape[2] - 1))), axis=1))[:, 0]
+predicted_prices = scaler.inverse_transform(np.concatenate((predictions.reshape(-1, 1), np.zeros((prediction_period, data.shape[1] - 1))), axis=1))[:, 0]
+# predicted_prices = scaler.inverse_transform(np.concatenate((predictions.reshape(-1, 1), np.zeros((7, data.shape[1] - 1))), axis=1))[:, 0]
 actual_prices = data['종가'].values[-7:]
 
 # 마지막 실제 가격 데이터 날짜 가져오기
 last_date = ohlcv.index[-1]
 
 # 예측된 가격을 위한 날짜 생성
-prediction_dates = pd.date_range(start=last_date + timedelta(days=1), periods=8)
+prediction_dates = pd.date_range(start=last_date + timedelta(days=1), periods=prediction_period+1)
 
 # 예측 결과 시각화 수정
 plt.figure(figsize=(26, 10))
