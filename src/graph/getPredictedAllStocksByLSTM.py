@@ -104,19 +104,20 @@ for ticker, (future_return, actual_prices, predicted_prices, stock_name) in pred
     last_date = actual_prices.index[-1]
     prediction_dates = pd.date_range(start=last_date + timedelta(days=1), periods=prediction_period+1)
 
-    plt.figure(figsize=(20, 6))
-    plt.plot(actual_prices.index, actual_prices, label=f'Actual Prices ({stock_name} {ticker})', color='blue')
-    predicted_prices_with_continuity = np.insert(predicted_prices, 0, actual_prices.iloc[-1])
-    plt.plot(prediction_dates, predicted_prices_with_continuity, label=f'Predicted Prices ({stock_name} {ticker})', color='red', linestyle='--')
+    today = datetime.today().strftime('%Y%m%d')
+    last_price = actual_prices.iloc[-1]
 
-    plt.title(f'Actual Prices vs Predicted Prices for {today} {stock_name} {ticker} (Expected Return: {future_return:.2f}%)')
+    plt.figure(figsize=(20, 6))
+    plt.plot(actual_prices.index, actual_prices, label=f'Actual Prices ({stock_name}  {ticker})', color='blue')
+    predicted_prices_with_continuity = np.insert(predicted_prices, 0, actual_prices.iloc[-1])
+    plt.plot(prediction_dates, predicted_prices_with_continuity, label=f'Predicted Prices ({stock_name}  {ticker})', color='red', linestyle='--')
+
+    plt.title(f'Actual Prices vs Predicted Prices for {today}  {stock_name}  {ticker}  {last_price}(Expected Return: {future_return:.2f}%)')
     plt.xlabel('Date')
     plt.ylabel('Price')
     plt.legend()
     plt.xticks(rotation=45)
 #     plt.show()
-
-    last_price = actual_prices.iloc[-1]
 
     # 이미지 파일로 저장
     file_path = os.path.join(output_dir, f'{today}_{ticker}_{stock_name}_{last_price}.png')
