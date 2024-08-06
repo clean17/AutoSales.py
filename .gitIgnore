@@ -57,3 +57,8 @@ out/
 
 ### Custom ###
 images/
+models/
+my_model.Keras/
+my_model_origin.Keras/
+*.h5
+*.keras

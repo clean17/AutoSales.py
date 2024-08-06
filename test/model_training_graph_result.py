@@ -7,6 +7,8 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout
 import matplotlib.pyplot as plt
 
+
+
 # # 데이터 수집
 # ticker = "005930.KS"  # 삼성전자
 # data = yf.download(ticker, start="2021-01-01", end="2022-12-31")
@@ -14,12 +16,19 @@ import matplotlib.pyplot as plt
 # # 필요한 컬럼 선택 및 NaN 값 처리
 # data = data[['Open', 'High', 'Low', 'Close', 'Volume']].fillna(0)
 
+
+
 # 데이터 수집
 ticker = '000150'  # 예시: 000150 종목 코드
 data = stock.get_market_ohlcv_by_date("2020-01-01", "2023-09-20", ticker)
 
 # 필요한 컬럼 선택 및 NaN 값 처리
 data = data[['시가', '고가', '저가', '종가', '거래량']].fillna(0)
+
+'''
+pykrx 데이터가 훨씬 세세하다 (모델 예측이 더 잘나온다)
+'''
+
 
 # 데이터 스케일링
 scaler = MinMaxScaler(feature_range=(0, 1))
