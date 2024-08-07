@@ -21,12 +21,10 @@ fundamental['PER'] = fundamental['PER'].fillna(0)
 
 # 주가 데이터와 재무 지표 결합 및 NaN 값 처리
 data = pd.concat([ohlcv, fundamental['PER']], axis=1).fillna(0)
-print('######', len(data))
 
 # 데이터 스케일링
 scaler = MinMaxScaler(feature_range=(0, 1))
 scaled_data = scaler.fit_transform(data)
-print('######', len(scaled_data))
 
 # 시계열 데이터를 윈도우로 나누기
 def create_dataset(dataset, look_back=60):
