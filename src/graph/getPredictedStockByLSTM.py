@@ -1,31 +1,50 @@
-from pykrx import stock
+import os
 import pandas as pd
 import numpy as np
+from pykrx import stock
 from datetime import datetime, timedelta
-from tensorflow.keras.models import Sequential
+from sklearn.preprocessing import MinMaxScaler
+from tensorflow.keras.models import Sequential, load_model
 from tensorflow.keras.layers import LSTM, Dense
 import matplotlib.pyplot as plt
-from sklearn.preprocessing import MinMaxScaler
-from tensorflow.keras.models import load_model
+import tensorflow as tf
 
-'''
-정규화   - kernel_regularizer=l2(0.01) > L2정규화: 과적합 방지
-Dropout - 과적합방지, 일반화 향상
-ReLU    - 비선형 학습(복잡한 패턴)
-3가지 옵션 모두 예측치가 엇나감
-'''
+# Set random seed for reproducibility
+tf.random.set_seed(42)
 
+# 예측 기간
+PREDICTION_PERIOD = 7
+# 데이터 수집 기간
+DATA_COLLECTION_PERIOD = 720
+
+today = datetime.today().strftime('%Y%m%d')
+start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y%m%d')
+
+
+output_dir = 'D:\\stocks'
+# model_dir = os.path.join(output_dir, 'models')
+model_dir = 'models'
+if not os.path.exists(output_dir):
+    os.makedirs(output_dir)
+if not os.path.exists(model_dir):
+    os.makedirs(model_dir)
+
+# 주식 데이터와 기본적인 재무 데이터를 가져온다
+def fetch_stock_data(ticker, fromdate, todate):
+    ohlcv = stock.get_market_ohlcv_by_date(fromdate, todate, ticker)
+    fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker)
+    fundamental['PER'] = fundamental['PER'].fillna(0)
+    data = pd.concat([ohlcv, fundamental['PER']], axis=1).fillna(0)
+    return data
 
 def create_dataset(dataset, look_back=60):
-    # 시계열 데이터를 윈도우로 나누기, 60: 최근 60일 데이터를 기반으로 예측
     X, Y = [], []
     for i in range(len(dataset) - look_back):
         X.append(dataset[i:i+look_back])
         Y.append(dataset[i+look_back, 3])  # 종가(Close) 예측
     return np.array(X), np.array(Y)
 
-
-# LSTM 모델 생성 및 학습
+# LSTM 모델 학습 및 예측 함수 정의
 def create_model(input_shape):
     model = Sequential([
         LSTM(256, return_sequences=True, input_shape=input_shape),
@@ -39,113 +58,54 @@ def create_model(input_shape):
     model.compile(optimizer='adam', loss='mean_squared_error')
     return model
 
+count = 0
+ticker = '000150'
+stock_name = stock.get_market_ticker_name(ticker)
 
-def train_and_save_model(data, look_back=60, model_path='my_model.keras'):
-    scaler = MinMaxScaler(feature_range=(0, 1))
-    scaled_data = scaler.fit_transform(data)
+data = fetch_stock_data(ticker, start_date, today)
 
-    X, Y = create_dataset(scaled_data, look_back)
+scaler = MinMaxScaler(feature_range=(0, 1))
+scaled_data = scaler.fit_transform(data.values)
+X, Y = create_dataset(scaled_data, 60)
+
+model_file_path = os.path.join(model_dir, f'{ticker}_model_v1.Keras')
+if os.path.exists(model_file_path):
+    model = load_model(model_file_path)
+else:
     model = create_model((X.shape[1], X.shape[2]))
-    model.fit(X, Y, batch_size=32, epochs=50, verbose=0, validation_split=0.1)
-    model.save(model_path, save_format='keras')
-    return scaler
+    # 지금은 매번 학습할 예정이다
+    # model.fit(X, Y, epochs=3, batch_size=32, verbose=1, validation_split=0.1)
+    # model.save(model_file_path)
 
+# 입력 X에 대한 예측 Y 학습
+model.fit(X, Y, epochs=50, batch_size=32, verbose=1, validation_split=0.1) # verbose=1 은 콘솔에 진척도
+model.save(model_file_path)
 
-# 모델을 사용하여 예측 함수
-def predict_stock_price_with_saved_model(data, scaler, model_path='my_model.keras', look_back=60, days_to_predict=7):
-    scaled_data = scaler.transform(data)
+close_scaler = MinMaxScaler()
+close_prices_scaled = close_scaler.fit_transform(data[['종가']].values)
 
-    def create_prediction_dataset(dataset, look_back=60):
-        X = []
-        for i in range(len(dataset) - look_back + 1):
-            X.append(dataset[i:(i + look_back), :])
-        return np.array(X)
+# 예측, 입력 X만 필요하다
+predictions = model.predict(X[-PREDICTION_PERIOD:])
+predicted_prices = close_scaler.inverse_transform(predictions).flatten()
 
-    X = create_prediction_dataset(scaled_data, look_back)
-    model = load_model(model_path)
+last_close = data['종가'].iloc[-1]
+future_return = (predicted_prices[-1] / last_close - 1) * 100
 
-    # Ensure we have enough data to predict the requested days
-    if len(X) < days_to_predict:
-        raise ValueError(f"Not enough data to predict {days_to_predict} days. Available data points: {len(X)}")
+extended_prices = np.concatenate((data['종가'].values, predicted_prices))
+extended_dates = pd.date_range(start=data.index[0], periods=len(extended_prices))
+last_price = data['종가'].iloc[-1]
 
-    predictions = model.predict(X[-days_to_predict:])
-    predictions = predictions.reshape(-1, 1)
-
-    # Make sure the dimensions match for concatenation
-    zeros_array = np.zeros((predictions.shape[0], data.shape[1] - 1))
-    predictions_extended = np.concatenate((zeros_array, predictions), axis=1)
-
-    original_predictions = scaler.inverse_transform(predictions_extended)[:, -1]
-
-    return original_predictions
-
-
-
-
-
-
-# 데이터 수집
-today = datetime.today().strftime('%Y%m%d')
-last_year = (datetime.today() - timedelta(days=365)).strftime('%Y%m%d')
-# ticker = "005930"  # 삼성전자
-# ticker = "012750"  # 에스원
-ticker = "000150"
-
-
-# 주요 피처(시가, 고가, 저가, 종가, 거래량) + 재무 지표(PER)
-ohlcv = stock.get_market_ohlcv_by_date(fromdate=last_year, todate=today, ticker=ticker)
-fundamental = stock.get_market_fundamental_by_date(fromdate=last_year, todate=today, ticker=ticker)
-
-# PER 값이 없는 경우 대체 값 사용 (예: 0으로 채우기)
-fundamental['PER'] = fundamental['PER'].fillna(0)
-
-# 주가 데이터와 재무 지표 결합 및 NaN 값 처리
-# data = pd.concat([ohlcv['종가'], fundamental['PER']], axis=1).dropna()
-data = pd.concat([ohlcv, fundamental['PER']], axis=1).dropna()
-
-# 필요한 컬럼 선택 및 NaN 값 처리
-data = data[['시가', '고가', '저가', '종가', '거래량', 'PER']].fillna(0)
-
-# 모델 학습 및 저장
-my_model_path = 'new_model_origin.keras'
-scaler = train_and_save_model(data, model_path=my_model_path)
-
-
-
-# 주가 예측
-prediction_period = 7 # 예측일
-# predictions = model.predict(X[-7:])
-predictions = predict_stock_price_with_saved_model(data, scaler, model_path=my_model_path, look_back=60, days_to_predict=prediction_period)
-
-
-
-# 예측 결과 시각화
-# predicted_prices = scaler.inverse_transform(np.concatenate((predictions, np.zeros((7, X.shape[2] - 1))), axis=1))[:, 0]
-predicted_prices = scaler.inverse_transform(np.concatenate((np.zeros((predictions.shape[0], data.shape[1] - 1)), predictions.reshape(-1, 1)), axis=1))[:, -1]
-# predicted_prices = scaler.inverse_transform(np.concatenate((predictions.reshape(-1, 1), np.zeros((7, data.shape[1] - 1))), axis=1))[:, 0]
-# actual_prices = data['종가'].values[-7:]
-
-# 마지막 실제 가격 데이터 날짜 가져오기
-last_date = ohlcv.index[-1]
-
-# 예측된 가격을 위한 날짜 생성
-prediction_dates = pd.date_range(start=last_date + timedelta(days=1), periods=prediction_period+1)
-
-# 예측 결과 시각화 수정
 plt.figure(figsize=(26, 10))
-
-# 실제 가격 데이터 플롯
-plt.plot(ohlcv.index, ohlcv['종가'], label='Actual Prices', color='blue')
-
-# 예측 시작 지점에 실제 데이터의 마지막 가격을 포함하여 연속적으로 만들기
-predicted_prices_with_continuity = np.insert(predicted_prices, 0, ohlcv['종가'].iloc[-1])
-
-# 수정된 예측 가격 데이터 플롯
-plt.plot(prediction_dates, predicted_prices_with_continuity, label='Predicted Prices', color='red', linestyle='--')
-
-plt.title('Actual Prices vs Predicted Prices')
+plt.plot(extended_dates[:len(data['종가'].values)], data['종가'].values, label='Actual Prices', color='blue')
+plt.plot(extended_dates[len(data['종가'].values)-1:], np.concatenate(([data['종가'].values[-1]], predicted_prices)), label='Predicted Prices', color='red', linestyle='--')
+plt.title(f'{ticker} - Actual vs Predicted Prices {today} {stock_name} [ {last_price} ] (Expected Return: {future_return:.2f}%)')
 plt.xlabel('Date')
 plt.ylabel('Price')
 plt.legend()
 plt.xticks(rotation=45)
 plt.show()
+
+# timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+# file_path = os.path.join(output_dir, f'{today} [ {future_return:.2f}% ] {stock_name} {ticker} [ {last_price} ] {timestamp}.png')
+# plt.savefig(file_path)
+# plt.close()
