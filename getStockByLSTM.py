@@ -110,14 +110,14 @@ for ticker in tickers:
         monitor='val_loss',
         save_best_only=True,
         mode='min',
-        verbose=1
+        verbose=0
     )
 
     # 입력 X에 대한 예측 Y 학습
     # model.fit(X, Y, epochs=50, batch_size=32, verbose=1, validation_split=0.1) # verbose=1 은 콘솔에 진척도
     # 모델 학습
-    model.fit(X_train, Y_train, epochs=50, batch_size=32, verbose=1,
-          validation_data=(X_val, Y_val), callbacks=[checkpoint]) # 체크포인트 자동저장
+    model.fit(X_train, Y_train, epochs=50, batch_size=32, verbose=0,
+              validation_data=(X_val, Y_val), callbacks=[checkpoint]) # 체크포인트 자동저장
 
     close_scaler = MinMaxScaler()
     close_prices_scaled = close_scaler.fit_transform(data[['종가']].values)

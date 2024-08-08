@@ -4,10 +4,12 @@ import numpy as np
 from pykrx import stock
 from datetime import datetime, timedelta
 from sklearn.preprocessing import MinMaxScaler
+from sklearn.model_selection import train_test_split
 from tensorflow.keras.models import Sequential, load_model
-from tensorflow.keras.layers import LSTM, Dense
+from tensorflow.keras.layers import LSTM, Dense, Dropout
 import matplotlib.pyplot as plt
 import tensorflow as tf
+from tensorflow.keras.callbacks import ModelCheckpoint
 
 # Set random seed for reproducibility
 tf.random.set_seed(42)
@@ -15,7 +17,7 @@ tf.random.set_seed(42)
 # 예측 기간
 PREDICTION_PERIOD = 7
 # 데이터 수집 기간
-DATA_COLLECTION_PERIOD = 720
+DATA_COLLECTION_PERIOD = 365
 
 today = datetime.today().strftime('%Y%m%d')
 start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y%m%d')
@@ -45,12 +47,28 @@ def create_dataset(dataset, look_back=60):
     return np.array(X), np.array(Y)
 
 # LSTM 모델 학습 및 예측 함수 정의
+# def create_model(input_shape):
+#     model = Sequential([
+#         LSTM(256, return_sequences=True, input_shape=input_shape),
+#         LSTM(128, return_sequences=True),
+#         LSTM(64, return_sequences=False),
+#         Dense(128),
+#         Dense(64),
+#         Dense(32),
+#         Dense(1)
+#     ])
+#     model.compile(optimizer='adam', loss='mean_squared_error')
+#     return model
+
 def create_model(input_shape):
     model = Sequential([
         LSTM(256, return_sequences=True, input_shape=input_shape),
+        Dropout(0.2),  # 드롭아웃 추가
         LSTM(128, return_sequences=True),
+        Dropout(0.2),  # 드롭아웃 추가
         LSTM(64, return_sequences=False),
         Dense(128),
+        Dropout(0.2),  # 드롭아웃 추가
         Dense(64),
         Dense(32),
         Dense(1)
@@ -58,28 +76,57 @@ def create_model(input_shape):
     model.compile(optimizer='adam', loss='mean_squared_error')
     return model
 
-count = 0
-ticker = '000150'
+
+# ticker = '000150'
+ticker = '002710'
 stock_name = stock.get_market_ticker_name(ticker)
 
+# 데이터 로드 및 스케일링
 data = fetch_stock_data(ticker, start_date, today)
-
 scaler = MinMaxScaler(feature_range=(0, 1))
 scaled_data = scaler.fit_transform(data.values)
+
+# 데이터셋 생성
 X, Y = create_dataset(scaled_data, 60)
+
+# 데이터셋 분할
+# train_size = int(len(X) * 0.8)
+# X_train, X_val = X[:train_size], X[train_size:]
+# Y_train, Y_val = Y[:train_size], Y[train_size:]
+
+# 난수 데이터셋 분할
+X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=0.2, random_state=42)
+
 
 model_file_path = os.path.join(model_dir, f'{ticker}_model_v1.Keras')
 if os.path.exists(model_file_path):
     model = load_model(model_file_path)
 else:
-    model = create_model((X.shape[1], X.shape[2]))
+    # 단순히 모델만 생성
+    model = create_model((X_train.shape[1], X_train.shape[2]))
     # 지금은 매번 학습할 예정이다
     # model.fit(X, Y, epochs=3, batch_size=32, verbose=1, validation_split=0.1)
     # model.save(model_file_path)
 
+# 모델 생성
+# model = create_model((X_train.shape[1], X_train.shape[2]))
+
+# 체크포인트 설정
+checkpoint = ModelCheckpoint(
+    model_file_path,
+    monitor='val_loss',
+    save_best_only=True,
+    mode='min',
+    verbose=1
+)
+
 # 입력 X에 대한 예측 Y 학습
-model.fit(X, Y, epochs=50, batch_size=32, verbose=1, validation_split=0.1) # verbose=1 은 콘솔에 진척도
-model.save(model_file_path)
+# model.fit(X, Y, epochs=50, batch_size=32, verbose=1, validation_split=0.1) # verbose=1 은 콘솔에 진척도
+# 모델 학습
+model.fit(X_train, Y_train, epochs=50, batch_size=32, verbose=1,
+          validation_data=(X_val, Y_val), callbacks=[checkpoint])
+
+# model.save(model_file_path) # 체크포인트가 자동으로 최적의 상태를 저장한다
 
 close_scaler = MinMaxScaler()
 close_prices_scaled = close_scaler.fit_transform(data[['종가']].values)
