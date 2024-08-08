@@ -5,7 +5,7 @@ import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense
+from tensorflow.keras.layers import LSTM, Dense, Dropout
 from tensorflow.keras.callbacks import ModelCheckpoint
 import matplotlib.pyplot as plt
 
@@ -35,7 +35,7 @@ y = np.array(y)
 X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
 
 # 모델 정의 및 학습
-model = Sequential([
+model = Sequential([ # 첫번째 모델
     LSTM(256, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])),
     LSTM(128, return_sequences=True),
     LSTM(64, return_sequences=False),
@@ -44,42 +44,79 @@ model = Sequential([
     Dense(32),
     Dense(1)
 ])
+# model = Sequential([ # 두번째 모델
+#     LSTM(256, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])),
+#     Dropout(0.2),  # 드롭아웃 추가
+#     LSTM(128, return_sequences=True),
+#     Dropout(0.2),  # 드롭아웃 추가
+#     LSTM(64, return_sequences=False),
+#     Dense(128),
+#     Dropout(0.2),  # 드롭아웃 추가
+#     Dense(64),
+#     Dense(32),
+#     Dense(1)
+# ])
 model.compile(optimizer='adam', loss='mean_squared_error')
 
 # 모델 체크포인트 설정
 checkpoint = ModelCheckpoint('checkpoint.h5', monitor='val_loss', save_best_only=True, mode='min', verbose=1)
 
 # 모델 학습
-history = model.fit(X_train, y_train, epochs=50, batch_size=64, validation_data=(X_val, y_val), callbacks=[checkpoint])
+history = model.fit(X_train, y_train, epochs=50, batch_size=32, validation_data=(X_val, y_val), callbacks=[checkpoint])
 
 # 베스트 모델 로드
 model.load_weights('checkpoint.h5')
 
+# 예측 값 (predictions)과 실제 값 (y_val)
+predictions = model.predict(X_val)
+
+# MSE : 작을수록 좋다
+mse = mean_squared_error(y_val, predictions)
+print("Mean Squared Error:", mse)
+
+# MAE : 작을수록 좋다
+mae = mean_absolute_error(y_val, predictions)
+print("Mean Absolute Error:", mae)
+
+# RMSE : 작을수록 좋다
+rmse = np.sqrt(mse)
+print("Root Mean Squared Error:", rmse)
+
+# R-squared : 1에 가까울수록 좋다
+r2 = r2_score(y_val, predictions)
+print("R-squared:", r2)
+
 '''
+ # 첫번째 모델
 Mean Squared Error: 0.0015389196947469608
 Mean Absolute Error: 0.026108635373992564
 Root Mean Squared Error: 0.039229066962482816
 R-squared: 0.9625979185023417
 
+Mean Squared Error: 0.0010377053046394288
+Mean Absolute Error: 0.02196434952639314
+Root Mean Squared Error: 0.03221343360524346
+R-squared: 0.9747794907640986
+
+Mean Squared Error: 0.0009223075914731872
+Mean Absolute Error: 0.01909549573758318
+Root Mean Squared Error: 0.03036951747185304
+R-squared: 0.9775841300751816
+
+
+ # 두번째 모델
+Mean Squared Error: 0.001495403046561555
+Mean Absolute Error: 0.025586915380050586
+Root Mean Squared Error: 0.03867044150978309
+R-squared: 0.9636555521316281
+
+Mean Squared Error: 0.0014755793851861153
+Mean Absolute Error: 0.02666502293425685
+Root Mean Squared Error: 0.03841327095140578
+R-squared: 0.9641373486807768
+
+결론 : 드롭아웃을 추가하면 성능이 떨어진다
 '''
-# 예측 값 (predictions)과 실제 값 (y_val)
-predictions = model.predict(X_val)
-
-# MSE
-mse = mean_squared_error(y_val, predictions)
-print("Mean Squared Error:", mse)
-
-# MAE
-mae = mean_absolute_error(y_val, predictions)
-print("Mean Absolute Error:", mae)
-
-# RMSE
-rmse = np.sqrt(mse)
-print("Root Mean Squared Error:", rmse)
-
-# R-squared
-r2 = r2_score(y_val, predictions)
-print("R-squared:", r2)
 
 # 스케일러 객체 다시 생성
 scaler_output = MinMaxScaler()
