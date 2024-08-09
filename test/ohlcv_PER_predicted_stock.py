@@ -55,7 +55,7 @@ model_path = 'my_model1.keras'
 model.save(model_path)
 
 # 모델 로드 및 예측
-model_loaded = load_model(model_path)
+model_loaded = tf.keras.models.load_model(model_path)
 predictions = model_loaded.predict(X[-7:]).flatten()
 
 # 종가 데이터에 대한 스케일러 생성 및 훈련

@@ -7,7 +7,7 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
 from tensorflow.keras.models import Sequential, load_model
 from tensorflow.keras.layers import LSTM, Dense
-from tensorflow.keras.callbacks import ModelCheckpoint
+from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
 import matplotlib.pyplot as plt
 import tensorflow as tf
 
@@ -17,7 +17,7 @@ tf.random.set_seed(42)
 # 예측 기간
 PREDICTION_PERIOD = 7
 # 예측 성장률
-EXPECTED_GROWTH_RATE = 15
+EXPECTED_GROWTH_RATE = 5
 # 데이터 수집 기간
 DATA_COLLECTION_PERIOD = 365
 
@@ -68,13 +68,14 @@ def create_model(input_shape):
     model.compile(optimizer='adam', loss='mean_squared_error')
     return model
 
-count = 0
+count = 20
 
 @tf.function(reduce_retracing=True)
 def predict_model(model, data):
     return model(data)
 
-for ticker in tickers:
+# for ticker in tickers:
+for ticker in tickers[count-1:]:
     count += 1
     print(f"Processing {count}/{len(tickers)} : {ticker}")
     data = fetch_stock_data(ticker, start_date, today)
@@ -88,26 +89,27 @@ for ticker in tickers:
 
     model_file_path = os.path.join(model_dir, f'{ticker}_model_v1.Keras')
     if os.path.exists(model_file_path):
-        model = load_model(model_file_path)
+        model = tf.keras.models.load_model(model_file_path)
     else:
         model = create_model((X_train.shape[1], X_train.shape[2]))
 
-    checkpoint = ModelCheckpoint(
-        model_file_path,
+    early_stopping = EarlyStopping(
         monitor='val_loss',
-        save_best_only=True,
+        patience=5,  # 10 에포크 동안 개선 없으면 종료
+        verbose=1,
         mode='min',
-        verbose=0
+        restore_best_weights=True  # 최적의 가중치를 복원
     )
 
-    model.fit(X_train, Y_train, epochs=50, batch_size=32, verbose=0,
-              validation_data=(X_val, Y_val), callbacks=[checkpoint])
+    model.fit(X_train, Y_train, epochs=30, batch_size=32, verbose=0,
+              validation_data=(X_val, Y_val), callbacks=[early_stopping])
 
     close_scaler = MinMaxScaler()
     close_prices_scaled = close_scaler.fit_transform(data[['Close']].values)
 
     predictions = predict_model(model, X[-PREDICTION_PERIOD:])
     predicted_prices = close_scaler.inverse_transform(predictions.numpy()).flatten()
+    model.save(model_file_path)
 
     last_close = data['Close'].iloc[-1]
     future_return = (predicted_prices[-1] / last_close - 1) * 100
