@@ -7,7 +7,7 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
 from tensorflow.keras.models import Sequential, load_model
 from tensorflow.keras.layers import LSTM, Dense
-from tensorflow.keras.callbacks import ModelCheckpoint
+from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
 import matplotlib.pyplot as plt
 import tensorflow as tf
 
@@ -17,7 +17,7 @@ tf.random.set_seed(42)
 # 예측 기간
 PREDICTION_PERIOD = 7
 # 예측 성장률
-EXPECTED_GROWTH_RATE = 15
+EXPECTED_GROWTH_RATE = 5
 # 데이터 수집 기간
 DATA_COLLECTION_PERIOD = 365
 
@@ -98,28 +98,35 @@ for ticker in tickers:
 
     model_file_path = os.path.join(model_dir, f'{ticker}_model_v1.Keras')
     if os.path.exists(model_file_path):
-        model = load_model(model_file_path)
+        model = tf.keras.models.load_model(model_file_path)
     else:
         model = create_model((X_train.shape[1], X_train.shape[2]))
         # 지금은 매번 학습할 예정이다
         # model.fit(X, Y, epochs=3, batch_size=32, verbose=1, validation_split=0.1)
         # model.save(model_file_path)
 
+    early_stopping = EarlyStopping(
+        monitor='val_loss',
+        patience=10,  # 10 에포크 동안 개선 없으면 종료
+        verbose=1,
+        mode='min',
+        restore_best_weights=True  # 최적의 가중치를 복원
+    )
 
     # 체크포인트 설정
-    checkpoint = ModelCheckpoint(
-        model_file_path,
-        monitor='val_loss',
-        save_best_only=True,
-        mode='min',
-        verbose=0
-    )
+    # checkpoint = ModelCheckpoint(
+    #     model_file_path,
+    #     monitor='val_loss',
+    #     save_best_only=True,
+    #     mode='min',
+    #     verbose=0
+    # )
 
     # 입력 X에 대한 예측 Y 학습
     # model.fit(X, Y, epochs=50, batch_size=32, verbose=1, validation_split=0.1) # verbose=1 은 콘솔에 진척도
     # 모델 학습
-    model.fit(X_train, Y_train, epochs=50, batch_size=32, verbose=0,
-              validation_data=(X_val, Y_val), callbacks=[checkpoint]) # 체크포인트 자동저장
+    model.fit(X_train, Y_train, epochs=20, batch_size=32, verbose=0, # 충분히 모델링 되었으므로 20번만
+              validation_data=(X_val, Y_val), callbacks=[early_stopping]) # 체크포인트 자동저장
 
     close_scaler = MinMaxScaler()
     close_prices_scaled = close_scaler.fit_transform(data[['종가']].values)
@@ -131,6 +138,7 @@ for ticker in tickers:
     # 텐서 입력 사용하여 예측 실행 (권고)
     predictions = predict_model(model, X[-PREDICTION_PERIOD:])
     predicted_prices = close_scaler.inverse_transform(predictions.numpy()).flatten()
+    model.save(model_file_path)
 
     last_close = data['종가'].iloc[-1]
     future_return = (predicted_prices[-1] / last_close - 1) * 100
