@@ -17,7 +17,7 @@ tf.random.set_seed(42)
 # 예측 기간
 PREDICTION_PERIOD = 7
 # 예측 성장률
-EXPECTED_GROWTH_RATE = 25
+EXPECTED_GROWTH_RATE = 15
 # 데이터 수집 기간
 DATA_COLLECTION_PERIOD = 365
 
@@ -74,12 +74,14 @@ def create_model(input_shape):
     return model
 
 count = 0
+# count = 450  # count를 450부터 시작하도록 설정
 
 @tf.function(reduce_retracing=True)
 def predict_model(model, data):
     return model(data)
 
 # for ticker in tickers[:10]:
+# for ticker in tickers[count-1:]:  # 450번째 ticker부터 시작
 for ticker in tickers:
     count += 1
     stock_name = ticker_to_name.get(ticker, 'Unknown Stock')
