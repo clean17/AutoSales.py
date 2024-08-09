@@ -96,7 +96,7 @@ Y_train, Y_val = Y[:train_size], Y[train_size:]
 
 model_file_path = os.path.join(model_dir, f'{ticker}_model_v1.Keras')
 if os.path.exists(model_file_path):
-    model = load_model(model_file_path)
+    model = tf.keras.models.load_model(model_file_path)
 else:
     model = create_model((X_train.shape[1], X_train.shape[2]))
     #지금은 매번 학습할 예정이다

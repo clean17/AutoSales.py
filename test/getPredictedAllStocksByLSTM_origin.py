@@ -103,7 +103,7 @@ def predict_stock_price_with_saved_model(data, scaler, model_path='my_model.Kera
         return np.array(X)
 
     X = create_dataset(scaled_data, look_back)
-    model = load_model(model_path)
+    model = tf.keras.models.load_model(model_path)
 
 
     # Convert numpy array to Tensor
