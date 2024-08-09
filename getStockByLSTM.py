@@ -73,26 +73,31 @@ def create_model(input_shape):
     model.compile(optimizer='adam', loss='mean_squared_error')
     return model
 
-count = 0
-# count = 450  # count를 450부터 시작하도록 설정
+# count = 0
+count = 900  # count를 450부터 시작하도록 설정
 
 @tf.function(reduce_retracing=True)
 def predict_model(model, data):
     return model(data)
 
-# for ticker in tickers[:10]:
-# for ticker in tickers[count-1:]:  # 450번째 ticker부터 시작
-for ticker in tickers:
-    count += 1
+for ticker in tickers[count:]:
     stock_name = ticker_to_name.get(ticker, 'Unknown Stock')
-    print(f"Processing {count}/{len(tickers)} : {stock_name} {ticker}")
+    print(f"Processing {count+1}/{len(tickers)} : {stock_name} {ticker}")
+    count += 1
+
     data = fetch_stock_data(ticker, start_date, today)
     if data.empty or len(data) < 60: # 데이터가 충분하지 않으면 건너뜀
         continue
 
     scaler = MinMaxScaler(feature_range=(0, 1))
     scaled_data = scaler.fit_transform(data.values)
-    X, Y = create_dataset(tf.convert_to_tensor(scaled_data), 60)
+    # X, Y = create_dataset(tf.convert_to_tensor(scaled_data), 60)
+
+    # Python 객체 대신 TensorFlow 텐서를 사용
+    # Convert the scaled_data to a TensorFlow tensor
+    scaled_data_tensor = tf.convert_to_tensor(scaled_data, dtype=tf.float32)
+    X, Y = create_dataset(scaled_data_tensor.numpy(), 60)  # numpy()로 변환하여 create_dataset 사용
+
     # 난수 데이터셋 분할
     X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=0.2, random_state=42)
 
@@ -136,7 +141,10 @@ for ticker in tickers:
     # predicted_prices = close_scaler.inverse_transform(predictions).flatten()
 
     # 텐서 입력 사용하여 예측 실행 (권고)
-    predictions = predict_model(model, X[-PREDICTION_PERIOD:])
+    # predictions = predict_model(model, X[-PREDICTION_PERIOD:])
+    # Make predictions with the model
+    predictions = predict_model(model, tf.convert_to_tensor(X[-PREDICTION_PERIOD:], dtype=tf.float32))
+
     predicted_prices = close_scaler.inverse_transform(predictions.numpy()).flatten()
     model.save(model_file_path)
 

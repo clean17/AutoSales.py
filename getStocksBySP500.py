@@ -1,4 +1,5 @@
 import os
+import pytz
 import pandas as pd
 import numpy as np
 import yfinance as yf
@@ -21,8 +22,18 @@ EXPECTED_GROWTH_RATE = 5
 # 데이터 수집 기간
 DATA_COLLECTION_PERIOD = 365
 
-today = datetime.today().strftime('%Y-%m-%d')
-start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y-%m-%d')
+# 미국 동부 시간대 설정
+us_timezone = pytz.timezone('America/New_York')
+now_us = datetime.now(us_timezone)
+# 현재 시간 출력
+today_us = now_us.strftime('%Y-%m-%d %H:%M:%S')
+print("미국 동부 시간 기준 현재 시각:", today_us)
+# 데이터 수집 시작일 계산
+start_date_us = (now_us - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y-%m-%d')
+print("미국 동부 시간 기준 데이터 수집 시작일:", start_date_us)
+
+# today = datetime.today().strftime('%Y-%m-%d')
+# start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y-%m-%d')
 
 # S&P 500 종목 리스트 가져오기
 url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
@@ -68,23 +79,27 @@ def create_model(input_shape):
     model.compile(optimizer='adam', loss='mean_squared_error')
     return model
 
-count = 20
+count = 40
 
 @tf.function(reduce_retracing=True)
 def predict_model(model, data):
     return model(data)
 
 # for ticker in tickers:
-for ticker in tickers[count-1:]:
+for ticker in tickers[count:]:
+    print(f"Processing {count+1}/{len(tickers)} : {ticker}")
     count += 1
-    print(f"Processing {count}/{len(tickers)} : {ticker}")
-    data = fetch_stock_data(ticker, start_date, today)
+    data = fetch_stock_data(ticker, start_date_us, today_us)
     if data.empty or len(data) < 60:  # 데이터가 충분하지 않으면 건너뜀
         continue
 
     scaler = MinMaxScaler(feature_range=(0, 1))
     scaled_data = scaler.fit_transform(data.values)
-    X, Y = create_dataset(tf.convert_to_tensor(scaled_data), 60)
+
+    # Convert the scaled_data to a TensorFlow tensor
+    scaled_data_tensor = tf.convert_to_tensor(scaled_data, dtype=tf.float32)
+
+    X, Y = create_dataset(scaled_data_tensor.numpy(), 60)  # numpy()로 변환하여 create_dataset 사용
     X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=0.2, random_state=42)
 
     model_file_path = os.path.join(model_dir, f'{ticker}_model_v1.Keras')
@@ -107,7 +122,8 @@ for ticker in tickers[count-1:]:
     close_scaler = MinMaxScaler()
     close_prices_scaled = close_scaler.fit_transform(data[['Close']].values)
 
-    predictions = predict_model(model, X[-PREDICTION_PERIOD:])
+    # Make predictions with the model
+    predictions = predict_model(model, tf.convert_to_tensor(X[-PREDICTION_PERIOD:], dtype=tf.float32))
     predicted_prices = close_scaler.inverse_transform(predictions.numpy()).flatten()
     model.save(model_file_path)
 
@@ -124,13 +140,13 @@ for ticker in tickers[count-1:]:
     plt.figure(figsize=(26, 10))
     plt.plot(extended_dates[:len(data['Close'].values)], data['Close'].values, label='Actual Prices', color='blue')
     plt.plot(extended_dates[len(data['Close'].values)-1:], np.concatenate(([data['Close'].values[-1]], predicted_prices)), label='Predicted Prices', color='red', linestyle='--')
-    plt.title(f'{ticker} - Actual vs Predicted Prices {today} [ {last_price} ] (Expected Return: {future_return:.2f}%)')
+    plt.title(f'{ticker} - Actual vs Predicted Prices {today_us} [ {last_price} ] (Expected Return: {future_return:.2f}%)')
     plt.xlabel('Date')
     plt.ylabel('Price')
     plt.legend()
     plt.xticks(rotation=45)
 
     timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
-    file_path = os.path.join(output_dir, f'{today} [ {future_return:.2f}% ] {ticker} [ {last_price} ] {timestamp}.png')
+    file_path = os.path.join(output_dir, f'{today_us} [ {future_return:.2f}% ] {ticker} [ {last_price} ] {timestamp}.png')
     plt.savefig(file_path)
     plt.close()

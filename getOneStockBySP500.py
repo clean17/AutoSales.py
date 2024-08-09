@@ -1,4 +1,5 @@
 import os
+import pytz
 import pandas as pd
 import numpy as np
 import yfinance as yf
@@ -14,13 +15,25 @@ from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
 # Set random seed for reproducibility
 tf.random.set_seed(42)
 
+ticker = 'AAPL'
+
 # 예측 기간
 PREDICTION_PERIOD = 7
 # 데이터 수집 기간
 DATA_COLLECTION_PERIOD = 365
 
-today = datetime.today().strftime('%Y-%m-%d')
-start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y-%m-%d')
+# 미국 동부 시간대 설정
+us_timezone = pytz.timezone('America/New_York')
+now_us = datetime.now(us_timezone)
+# 현재 시간 출력
+today_us = now_us.strftime('%Y-%m-%d %H:%M:%S')
+print("미국 동부 시간 기준 현재 시각:", today_us)
+# 데이터 수집 시작일 계산
+start_date_us = (now_us - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y-%m-%d')
+print("미국 동부 시간 기준 데이터 수집 시작일:", start_date_us)
+
+# today = datetime.today().strftime('%Y-%m-%d')
+# start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y-%m-%d')
 
 output_dir = 'D:\\sp500'
 model_dir = 'sp_models'
@@ -62,10 +75,8 @@ def create_model(input_shape):
     model.compile(optimizer='adam', loss='mean_squared_error')
     return model
 
-ticker = 'ABNB'  # 예시로 Apple 주식 사용
-
 # 데이터 로드 및 스케일링
-data = fetch_stock_data(ticker, start_date, today)
+data = fetch_stock_data(ticker, start_date_us, today_us)
 scaler = MinMaxScaler(feature_range=(0, 1))
 scaled_data = scaler.fit_transform(data.values)
 
@@ -108,7 +119,7 @@ extended_dates = pd.date_range(start=data.index[0], periods=len(extended_prices)
 plt.figure(figsize=(26, 10))
 plt.plot(extended_dates[:len(data['Close'].values)], data['Close'].values, label='Actual Prices', color='blue')
 plt.plot(extended_dates[len(data['Close'].values)-1:], np.concatenate(([data['Close'].values[-1]], predicted_prices)), label='Predicted Prices', color='red', linestyle='--')
-plt.title(f'{ticker} - Actual vs Predicted Prices {today} [Last Price: {last_close}] (Expected Return: {future_return:.2f}%)')
+plt.title(f'{ticker} - Actual vs Predicted Prices {today_us} [Last Price: {last_close}] (Expected Return: {future_return:.2f}%)')
 plt.xlabel('Date')
 plt.ylabel('Price')
 plt.legend()
