@@ -102,7 +102,7 @@ for ticker in tickers[count:]:
     print(f"Processing {count+1}/{len(tickers)} : {stock_name} {ticker}")
     count += 1
 
-    print('# ============ debug ============ 1')
+    # print('# ============ debug ============ 1')
     data = fetch_stock_data(ticker, start_date, today)
     if data.empty or len(data) < 60: # 데이터가 충분하지 않으면 건너뜀
         print(f"Not enough data for {ticker} to proceed.")
@@ -114,7 +114,7 @@ for ticker in tickers[count:]:
 
     # Python 객체 대신 TensorFlow 텐서를 사용
     # Convert the scaled_data to a TensorFlow tensor
-    print('# ============ debug ============ 2')
+    # print('# ============ debug ============ 2')
     scaled_data_tensor = tf.convert_to_tensor(scaled_data, dtype=tf.float32)
     X, Y = create_dataset(scaled_data_tensor.numpy(), 60)  # numpy()로 변환하여 create_dataset 사용
 
@@ -123,7 +123,7 @@ for ticker in tickers[count:]:
         continue
 
     # 난수 데이터셋 분할
-    print('# ============ debug ============ 3')
+    # print('# ============ debug ============ 3')
     X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=0.2, random_state=42)
 
     model_file_path = os.path.join(model_dir, f'{ticker}_model_v1.Keras')

@@ -31,6 +31,7 @@ start_date_us = (now_us - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y-%
 print("미국 동부 시간 기준 데이터 수집 시작일:", start_date_us)
 
 today_us = datetime.today().strftime('%Y-%m-%d')
+today = datetime.today().strftime('%Y%m%d')
 # start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y-%m-%d')
 
 # S&P 500 종목 리스트 가져오기
@@ -146,6 +147,6 @@ for ticker in tickers[count:]:
     plt.xticks(rotation=45)
 
     timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
-    file_path = os.path.join(output_dir, f'{today_us} [ {future_return:.2f}% ] {ticker} [ {last_price} ] {timestamp}.png')
+    file_path = os.path.join(output_dir, f'{today} [ {future_return:.2f}% ] {ticker} [ {last_price} ] {timestamp}.png')
     plt.savefig(file_path)
     plt.close()

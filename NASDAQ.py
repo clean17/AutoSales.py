@@ -33,6 +33,7 @@ print("미국 동부 시간 기준 현재 시각:", today_us)
 start_date_us = (now_us - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y-%m-%d')
 print("미국 동부 시간 기준 데이터 수집 시작일:", start_date_us)
 today_us = datetime.today().strftime('%Y-%m-%d')
+today = datetime.today().strftime('%Y%m%d')
 
 # Load the Wikipedia page
 url = "https://en.wikipedia.org/wiki/Nasdaq-100"
@@ -167,6 +168,6 @@ for ticker in tickers[count:]:
     plt.xticks(rotation=45)
 
     timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
-    file_path = os.path.join(output_dir, f'{today_us} [ {future_return:.2f}% ] {ticker} [ {last_price} ] {timestamp}.png')
+    file_path = os.path.join(output_dir, f'{today} [ {future_return:.2f}% ] {ticker} [ {last_price} ] {timestamp}.png')
     plt.savefig(file_path)
     plt.close()
