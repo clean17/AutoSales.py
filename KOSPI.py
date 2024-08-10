@@ -29,7 +29,7 @@ tickers = stock.get_market_ticker_list(market="KOSPI")
 # 종목 코드와 이름 딕셔너리 생성
 ticker_to_name = {ticker: stock.get_market_ticker_name(ticker) for ticker in tickers}
 
-output_dir = 'D:\\stocks'
+output_dir = 'D:\\kospi_stocks'
 # model_dir = os.path.join(output_dir, 'models')
 model_dir = 'models'
 if not os.path.exists(output_dir):

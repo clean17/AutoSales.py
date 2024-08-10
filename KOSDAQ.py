@@ -29,7 +29,7 @@ tickers = stock.get_market_ticker_list(market="KOSDAQ")
 # 종목 코드와 이름 딕셔너리 생성
 ticker_to_name = {ticker: stock.get_market_ticker_name(ticker) for ticker in tickers}
 
-output_dir = 'D:\\stocks'
+output_dir = 'D:\\kosdaq_stocks'
 # model_dir = os.path.join(output_dir, 'models')
 model_dir = 'kosdaq_models'
 if not os.path.exists(output_dir):
@@ -90,7 +90,7 @@ def create_model(input_shape):
     model.compile(optimizer='adam', loss='mean_squared_error')
     return model
 
-count = 65
+count = 0
 # count = 931  # 마지막으로 종료된 시퀀스 -1 을 지정한다
 
 @tf.function(reduce_retracing=True)
