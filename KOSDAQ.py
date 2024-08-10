@@ -43,8 +43,8 @@ def fetch_stock_data(ticker, fromdate, todate):
     daily_fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker) # 기본 일별
     stock_name = ticker_to_name.get(ticker, 'Unknown Stock')
 
-    # 일별 PER 검사
-    if daily_fundamental['PER'].isnull().all() or 'PER' not in daily_fundamental.columns:
+    # 'PER' 컬럼이 존재하는지 먼저 확인
+    if 'PER' not in daily_fundamental.columns:
         # 일별 데이터에서 PER 정보가 없으면 월별 데이터 요청
         monthly_fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker, "m")
         if 'PER' in monthly_fundamental.columns:
@@ -54,8 +54,8 @@ def fetch_stock_data(ticker, fromdate, todate):
             # 월별 PER 정보도 없는 경우 0으로 처리
             daily_fundamental['PER'] = 0
     else:
-        # 일별 PER 데이터 사용
-        daily_fundamental['PER'].fillna(0, inplace=True)
+        # 일별 PER 데이터 사용, NaN 값 0으로 채우기
+        daily_fundamental['PER'] = daily_fundamental['PER'].fillna(0)
 
     # PER 데이터가 없으면 0으로 채우기
     if 'PER' not in daily_fundamental.columns or daily_fundamental['PER'].isnull().all():
@@ -69,6 +69,8 @@ def fetch_stock_data(ticker, fromdate, todate):
 
 def create_dataset(dataset, look_back=60):
     X, Y = [], []
+    if len(dataset) < look_back:
+        return np.array(X), np.array(Y)  # 빈 배열 반환
     for i in range(len(dataset) - look_back):
         X.append(dataset[i:i+look_back])
         Y.append(dataset[i+look_back, 3])  # 종가(Close) 예측
@@ -88,7 +90,7 @@ def create_model(input_shape):
     model.compile(optimizer='adam', loss='mean_squared_error')
     return model
 
-count = 60
+count = 65
 # count = 931  # 마지막으로 종료된 시퀀스 -1 을 지정한다
 
 @tf.function(reduce_retracing=True)
@@ -100,8 +102,10 @@ for ticker in tickers[count:]:
     print(f"Processing {count+1}/{len(tickers)} : {stock_name} {ticker}")
     count += 1
 
+    print('# ============ debug ============ 1')
     data = fetch_stock_data(ticker, start_date, today)
     if data.empty or len(data) < 60: # 데이터가 충분하지 않으면 건너뜀
+        print(f"Not enough data for {ticker} to proceed.")
         continue
 
     scaler = MinMaxScaler(feature_range=(0, 1))
@@ -110,10 +114,16 @@ for ticker in tickers[count:]:
 
     # Python 객체 대신 TensorFlow 텐서를 사용
     # Convert the scaled_data to a TensorFlow tensor
+    print('# ============ debug ============ 2')
     scaled_data_tensor = tf.convert_to_tensor(scaled_data, dtype=tf.float32)
     X, Y = create_dataset(scaled_data_tensor.numpy(), 60)  # numpy()로 변환하여 create_dataset 사용
 
+    if len(X) == 0 or len(Y) == 0:
+        print(f"Not enough samples for {ticker} to form a batch.")
+        continue
+
     # 난수 데이터셋 분할
+    print('# ============ debug ============ 3')
     X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=0.2, random_state=42)
 
     model_file_path = os.path.join(model_dir, f'{ticker}_model_v1.Keras')

@@ -38,22 +38,53 @@ if not os.path.exists(model_dir):
     os.makedirs(model_dir)
 
 # 주식 데이터와 기본적인 재무 데이터를 가져온다
+# def fetch_stock_data(ticker, fromdate, todate):
+#     ohlcv = stock.get_market_ohlcv_by_date(fromdate, todate, ticker)
+#     fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker)
+#     stock_name = ticker_to_name.get(ticker, 'Unknown Stock')
+#
+#     if 'PER' not in fundamental.columns:
+#         print(f"PER data not available for {ticker} ({stock_name}). Filling with 0.")
+#         fundamental['PER'] = 0  # PER 열이 없는 경우 0으로 채움
+#
+#     # PER 값이 NaN인 경우 0으로 채움
+#     fundamental['PER'] = fundamental['PER'].fillna(0)
+#     data = pd.concat([ohlcv, fundamental['PER']], axis=1).fillna(0)
+#     return data
+
 def fetch_stock_data(ticker, fromdate, todate):
     ohlcv = stock.get_market_ohlcv_by_date(fromdate, todate, ticker)
-    fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker)
+    daily_fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker) # 기본 일별
     stock_name = ticker_to_name.get(ticker, 'Unknown Stock')
 
-    if 'PER' not in fundamental.columns:
+    # 'PER' 컬럼이 존재하는지 먼저 확인
+    if 'PER' not in daily_fundamental.columns:
+        # 일별 데이터에서 PER 정보가 없으면 월별 데이터 요청
+        monthly_fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker, "m")
+        if 'PER' in monthly_fundamental.columns:
+            # 월별 PER 정보를 일별 데이터에 매핑
+            daily_fundamental['PER'] = monthly_fundamental['PER'].reindex(daily_fundamental.index, method='ffill')
+        else:
+            # 월별 PER 정보도 없는 경우 0으로 처리
+            daily_fundamental['PER'] = 0
+    else:
+        # 일별 PER 데이터 사용, NaN 값 0으로 채우기
+        daily_fundamental['PER'] = daily_fundamental['PER'].fillna(0)
+
+    # PER 데이터가 없으면 0으로 채우기
+    if 'PER' not in daily_fundamental.columns or daily_fundamental['PER'].isnull().all():
         print(f"PER data not available for {ticker} ({stock_name}). Filling with 0.")
-        fundamental['PER'] = 0  # PER 열이 없는 경우 0으로 채움
+        daily_fundamental['PER'] = 0
 
     # PER 값이 NaN인 경우 0으로 채움
-    fundamental['PER'] = fundamental['PER'].fillna(0)
-    data = pd.concat([ohlcv, fundamental['PER']], axis=1).fillna(0)
+    daily_fundamental['PER'] = daily_fundamental['PER'].fillna(0)
+    data = pd.concat([ohlcv, daily_fundamental[['PER']]], axis=1).fillna(0)
     return data
 
 def create_dataset(dataset, look_back=60):
     X, Y = [], []
+    if len(dataset) < look_back:
+        return np.array(X), np.array(Y)  # 빈 배열 반환
     for i in range(len(dataset) - look_back):
         X.append(dataset[i:i+look_back])
         Y.append(dataset[i+look_back, 3])  # 종가(Close) 예측
@@ -87,6 +118,7 @@ for ticker in tickers[count:]:
 
     data = fetch_stock_data(ticker, start_date, today)
     if data.empty or len(data) < 60: # 데이터가 충분하지 않으면 건너뜀
+        print(f"Not enough data for {ticker} to proceed.")
         continue
 
     scaler = MinMaxScaler(feature_range=(0, 1))
@@ -97,6 +129,10 @@ for ticker in tickers[count:]:
     # Convert the scaled_data to a TensorFlow tensor
     scaled_data_tensor = tf.convert_to_tensor(scaled_data, dtype=tf.float32)
     X, Y = create_dataset(scaled_data_tensor.numpy(), 60)  # numpy()로 변환하여 create_dataset 사용
+
+    if len(X) == 0 or len(Y) == 0:
+        print(f"Not enough samples for {ticker} to form a batch.")
+        continue
 
     # 난수 데이터셋 분할
     X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=0.2, random_state=42)
