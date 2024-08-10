@@ -40,15 +40,31 @@ if not os.path.exists(model_dir):
 # 주식 데이터와 기본적인 재무 데이터를 가져온다
 def fetch_stock_data(ticker, fromdate, todate):
     ohlcv = stock.get_market_ohlcv_by_date(fromdate, todate, ticker)
-    fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker, "m") # m: 월별 재무지표, d: 일별 재무지표
+    daily_fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker) # 기본 일별
     stock_name = ticker_to_name.get(ticker, 'Unknown Stock')
 
-    # PER 데이터가 없으면 0으로 채우기
-    if 'PER' not in fundamental.columns or fundamental['PER'].isnull().all():
-        print(f"PER data not available for {ticker} ({stock_name}). Filling with 0.")
-        fundamental['PER'] = 0
+    # 일별 PER 검사
+    if daily_fundamental['PER'].isnull().all() or 'PER' not in daily_fundamental.columns:
+        # 일별 데이터에서 PER 정보가 없으면 월별 데이터 요청
+        monthly_fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker, "m")
+        if 'PER' in monthly_fundamental.columns:
+            # 월별 PER 정보를 일별 데이터에 매핑
+            daily_fundamental['PER'] = monthly_fundamental['PER'].reindex(daily_fundamental.index, method='ffill')
+        else:
+            # 월별 PER 정보도 없는 경우 0으로 처리
+            daily_fundamental['PER'] = 0
+    else:
+        # 일별 PER 데이터 사용
+        daily_fundamental['PER'].fillna(0, inplace=True)
 
-    data = pd.concat([ohlcv, fundamental[['PER']]], axis=1).fillna(0)
+    # PER 데이터가 없으면 0으로 채우기
+    if 'PER' not in daily_fundamental.columns or daily_fundamental['PER'].isnull().all():
+        print(f"PER data not available for {ticker} ({stock_name}). Filling with 0.")
+        daily_fundamental['PER'] = 0
+
+    # PER 값이 NaN인 경우 0으로 채움
+    daily_fundamental['PER'] = daily_fundamental['PER'].fillna(0)
+    data = pd.concat([ohlcv, daily_fundamental[['PER']]], axis=1).fillna(0)
     return data
 
 def create_dataset(dataset, look_back=60):
