@@ -14,12 +14,16 @@ import tensorflow as tf
 # Set random seed for reproducibility
 tf.random.set_seed(42)
 
+# 시작 종목 인덱스 ( 중단된 경우 다시 시작용 )
+count = 0
 # 예측 기간
 PREDICTION_PERIOD = 7
 # 예측 성장률
 EXPECTED_GROWTH_RATE = 5
 # 데이터 수집 기간
 DATA_COLLECTION_PERIOD = 365
+# 과적합 방지
+EARLYSTOPPING_PATIENCE = 10
 
 today = datetime.today().strftime('%Y%m%d')
 start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y%m%d')
@@ -28,6 +32,7 @@ start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftim
 tickers = stock.get_market_ticker_list(market="KOSDAQ")
 # 종목 코드와 이름 딕셔너리 생성
 ticker_to_name = {ticker: stock.get_market_ticker_name(ticker) for ticker in tickers}
+# tickers = ['005930', '035420', '068270']  # 삼성전자, 카카오, 셀트리온
 
 output_dir = 'D:\\kosdaq_stocks'
 # model_dir = os.path.join(output_dir, 'models')
@@ -90,12 +95,14 @@ def create_model(input_shape):
     model.compile(optimizer='adam', loss='mean_squared_error')
     return model
 
-count = 0
-# count = 931  # 마지막으로 종료된 시퀀스 -1 을 지정한다
+
 
 @tf.function(reduce_retracing=True)
 def predict_model(model, data):
     return model(data)
+
+# 결과를 저장할 배열
+saved_tickers = []
 
 for ticker in tickers[count:]:
     stock_name = ticker_to_name.get(ticker, 'Unknown Stock')
@@ -134,7 +141,7 @@ for ticker in tickers[count:]:
 
     early_stopping = EarlyStopping(
         monitor='val_loss',
-        patience=10,  # 10 에포크 동안 개선 없으면 종료
+        patience=EARLYSTOPPING_PATIENCE,  # 10 에포크 동안 개선 없으면 종료
         verbose=1,
         mode='min',
         restore_best_weights=True  # 최적의 가중치를 복원
@@ -178,3 +185,8 @@ for ticker in tickers[count:]:
     file_path = os.path.join(output_dir, f'{today} [ {future_return:.2f}% ] {stock_name} {ticker} [ {last_price} ] {timestamp}.png')
     plt.savefig(file_path)
     plt.close()
+
+    saved_tickers.append(ticker)
+
+print("Files were saved for the following tickers:")
+print(saved_tickers)

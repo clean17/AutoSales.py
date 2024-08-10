@@ -128,6 +128,9 @@ def create_model(input_shape):
 def predict_model(model, data):
     return model(data)
 
+# 결과를 저장할 배열
+saved_tickers = []
+
 # for ticker in tickers:
 for ticker in tickers[count:]:
     print(f"Processing {count+1}/{len(tickers)} : {ticker}")
@@ -196,3 +199,8 @@ for ticker in tickers[count:]:
     file_path = os.path.join(output_dir, f'{today} [ {future_return:.2f}% ] {ticker} [ {last_price} ] {timestamp}.png')
     plt.savefig(file_path)
     plt.close()
+
+    saved_tickers.append(ticker)
+
+print("Files were saved for the following tickers:")
+print(saved_tickers)

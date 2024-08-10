@@ -14,6 +14,8 @@ import tensorflow as tf
 # Set random seed for reproducibility
 tf.random.set_seed(42)
 
+# 시작 종목 인덱스 ( 중단된 경우 다시 시작용 )
+count = 0
 # 예측 기간
 PREDICTION_PERIOD = 7
 # 예측 성장률
@@ -106,12 +108,14 @@ def create_model(input_shape):
     model.compile(optimizer='adam', loss='mean_squared_error')
     return model
 
-count = 0
-# count = 931  # 마지막으로 종료된 시퀀스 -1 을 지정한다
+
 
 @tf.function(reduce_retracing=True)
 def predict_model(model, data):
     return model(data)
+
+# 결과를 저장할 배열
+saved_tickers = []
 
 for ticker in tickers[count:]:
     stock_name = ticker_to_name.get(ticker, 'Unknown Stock')
@@ -210,3 +214,8 @@ for ticker in tickers[count:]:
     file_path = os.path.join(output_dir, f'{today} [ {future_return:.2f}% ] {stock_name} {ticker} [ {last_price} ] {timestamp}.png')
     plt.savefig(file_path)
     plt.close()
+
+    saved_tickers.append(ticker)
+
+print("Files were saved for the following tickers:")
+print(saved_tickers)
