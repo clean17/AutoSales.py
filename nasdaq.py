@@ -3,6 +3,7 @@ import pytz
 import pandas as pd
 import numpy as np
 import yfinance as yf
+import FinanceDataReader as fdr
 from datetime import datetime, timedelta
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
@@ -68,7 +69,8 @@ if not os.path.exists(model_dir):
 #     return stock_data
 
 def fetch_stock_data(ticker, fromdate, todate):
-    stock_data = yf.download(ticker, start=fromdate, end=todate)
+    # stock_data = yf.download(ticker, start=fromdate, end=todate)
+    stock_data = fdr.DataReader(ticker, start=fromdate, end=todate)
     if stock_data.empty:
         return pd.DataFrame()
     # 선택적인 컬럼만 추출하고 NaN 값을 0으로 채움

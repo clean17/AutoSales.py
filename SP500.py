@@ -3,6 +3,7 @@ import pytz
 import pandas as pd
 import numpy as np
 import yfinance as yf
+import FinanceDataReader as fdr
 from datetime import datetime, timedelta
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
@@ -15,11 +16,8 @@ import tensorflow as tf
 # Set random seed for reproducibility
 tf.random.set_seed(42)
 
-# 예측 기간
 PREDICTION_PERIOD = 7
-# 예측 성장률
 EXPECTED_GROWTH_RATE = 5
-# 데이터 수집 기간
 DATA_COLLECTION_PERIOD = 365
 
 # 미국 동부 시간대 설정
@@ -49,7 +47,8 @@ if not os.path.exists(model_dir):
 
 # 주식 데이터를 가져오는 함수
 def fetch_stock_data(ticker, fromdate, todate):
-    stock_data = yf.download(ticker, start=fromdate, end=todate)
+    # stock_data = yf.download(ticker, start=fromdate, end=todate)
+    stock_data = fdr.DataReader(ticker, start=fromdate, end=todate)
     if stock_data.empty:
         return pd.DataFrame()
     # 선택적인 컬럼만 추출하고 NaN 값을 0으로 채움
@@ -79,7 +78,7 @@ def create_model(input_shape):
     model.compile(optimizer='adam', loss='mean_squared_error')
     return model
 
-count = 40
+count = 0
 
 @tf.function(reduce_retracing=True)
 def predict_model(model, data):
