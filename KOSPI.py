@@ -20,6 +20,8 @@ PREDICTION_PERIOD = 7
 EXPECTED_GROWTH_RATE = 5
 # 데이터 수집 기간
 DATA_COLLECTION_PERIOD = 365
+# EarlyStopping
+EARLYSTOPPING_PATIENCE = 8
 
 today = datetime.today().strftime('%Y%m%d')
 start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y%m%d')
@@ -148,7 +150,7 @@ for ticker in tickers[count:]:
 
     early_stopping = EarlyStopping(
         monitor='val_loss',
-        patience=10,  # 10 에포크 동안 개선 없으면 종료
+        patience=EARLYSTOPPING_PATIENCE,  # 지정한 에포크 동안 개선 없으면 종료
         verbose=1,
         mode='min',
         restore_best_weights=True  # 최적의 가중치를 복원
