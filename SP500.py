@@ -32,7 +32,7 @@ print("미국 동부 시간 기준 현재 시각:", today_us)
 start_date_us = (now_us - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y-%m-%d')
 print("미국 동부 시간 기준 데이터 수집 시작일:", start_date_us)
 
-# today = datetime.today().strftime('%Y-%m-%d')
+today_us = datetime.today().strftime('%Y-%m-%d')
 # start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y-%m-%d')
 
 # S&P 500 종목 리스트 가져오기
@@ -110,13 +110,13 @@ for ticker in tickers[count:]:
 
     early_stopping = EarlyStopping(
         monitor='val_loss',
-        patience=5,  # 10 에포크 동안 개선 없으면 종료
+        patience=15,  # 10 에포크 동안 개선 없으면 종료
         verbose=1,
         mode='min',
         restore_best_weights=True  # 최적의 가중치를 복원
     )
 
-    model.fit(X_train, Y_train, epochs=30, batch_size=32, verbose=0,
+    model.fit(X_train, Y_train, epochs=50, batch_size=32, verbose=1,
               validation_data=(X_val, Y_val), callbacks=[early_stopping])
 
     close_scaler = MinMaxScaler()

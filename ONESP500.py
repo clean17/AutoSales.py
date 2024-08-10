@@ -15,7 +15,8 @@ from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
 # Set random seed for reproducibility
 tf.random.set_seed(42)
 
-ticker = 'AAPL'
+# ticker = 'CRL'
+ticker = 'EPAM'
 
 # 예측 기간
 PREDICTION_PERIOD = 7
@@ -32,8 +33,11 @@ print("미국 동부 시간 기준 현재 시각:", today_us)
 start_date_us = (now_us - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y-%m-%d')
 print("미국 동부 시간 기준 데이터 수집 시작일:", start_date_us)
 
-# today = datetime.today().strftime('%Y-%m-%d')
-# start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y-%m-%d')
+today = datetime.today().strftime('%Y-%m-%d')
+start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y-%m-%d')
+
+today_us = today
+# start_date_us = start_date
 
 output_dir = 'D:\\sp500'
 model_dir = 'sp_models'
@@ -94,13 +98,13 @@ else:
 
 early_stopping = EarlyStopping(
     monitor='val_loss',
-    patience=10,  # 10 에포크 동안 개선 없으면 종료
+    patience=15,  # 10 에포크 동안 개선 없으면 종료
     verbose=1,
     mode='min',
     restore_best_weights=True  # 최적의 가중치를 복원
 )
 
-model.fit(X_train, Y_train, epochs=50, batch_size=32, verbose=1,
+model.fit(X_train, Y_train, epochs=100, batch_size=32, verbose=1,
           validation_data=(X_val, Y_val), callbacks=[early_stopping])
 
 close_scaler = MinMaxScaler()
