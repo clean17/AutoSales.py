@@ -61,7 +61,7 @@ $ pip install -r requirements.txt
 /src/graph (main)
 $ python getCorrelationCoefficient.py
 ```
-![alt text](image.png)
+![alt text](src/images/image.png)
 
 ### 비트코인 30일간 역사적 변동성 체크
 ```py
@@ -75,7 +75,7 @@ $ python getHistoricalVolatility.py
 => 하루 평균 3.7%가 변동되었다.
 '''
 ```
-![alt text](image-1.png)
+![alt text](src/images/image-1.png)
 
 ### 비트코인 일별 수익률, 역사적 변동성 계산 및 표준화 그래프
 비트코인의 종가와 변동성을 분석하여, 이 둘의 변화 패턴을 시각적으로 비교
@@ -83,7 +83,7 @@ $ python getHistoricalVolatility.py
 /src/graph (main)
 $ python getHistoricalVolatilityAndStandardization.py 
 ```
-![alt text](image-2.png)
+![alt text](src/images/image-2.png)
 ### LSTM으로 분석한 향후 7일간의 비트코인 가격 예측
 ```py
 /src/graph (main)
@@ -94,11 +94,11 @@ $ python getPredictedBTCbyLSTM.py
 예측된 종가 (빨간색 점선): LSTM 모델을 사용하여 예측한 다음 7일간의 비트코인 종가
 '''
 ```
-![alt text](image-3.png)
+![alt text](src/images/image-3.png)
 
 ### LSTM으로 분석한 향후 7일간의 삼성전자 가격 예측
 ```py
 /src/graph (main)
 $ python getPredictedStockByLSTM.py 
 ```
-![alt text](image-4.png)
+![alt text](src/images/image-4.png)

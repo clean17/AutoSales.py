@@ -59,13 +59,13 @@ model = Sequential([ # 첫번째 모델
 model.compile(optimizer='adam', loss='mean_squared_error')
 
 # 모델 체크포인트 설정
-checkpoint = ModelCheckpoint('checkpoint.h5', monitor='val_loss', save_best_only=True, mode='min', verbose=1)
+checkpoint = ModelCheckpoint('test/checkpoint.h5', monitor='val_loss', save_best_only=True, mode='min', verbose=1)
 
 # 모델 학습
 history = model.fit(X_train, y_train, epochs=50, batch_size=32, validation_data=(X_val, y_val), callbacks=[checkpoint])
 
 # 베스트 모델 로드
-model.load_weights('checkpoint.h5')
+model.load_weights('test/checkpoint.h5')
 
 # 예측 값 (predictions)과 실제 값 (y_val)
 predictions = model.predict(X_val)
