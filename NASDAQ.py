@@ -16,12 +16,16 @@ import tensorflow as tf
 # Set random seed for reproducibility
 tf.random.set_seed(42)
 
+# 시작
+count = 0
 # 예측 기간
 PREDICTION_PERIOD = 7
 # 예측 성장률
-EXPECTED_GROWTH_RATE = 5
+EXPECTED_GROWTH_RATE = 3
 # 데이터 수집 기간
 DATA_COLLECTION_PERIOD = 365
+# 과적합 방지
+EARLYSTOPPING_PATIENCE = 10
 
 # 미국 동부 시간대 설정
 us_timezone = pytz.timezone('America/New_York')
@@ -45,7 +49,7 @@ nasdaq_100_table_index = 4  # You need to replace '4' with the correct index aft
 nasdaq_100_df = tables[nasdaq_100_table_index]
 
 # Print the first few rows to verify it is the correct table
-print(nasdaq_100_df.head())
+# print(nasdaq_100_df.head())
 
 # If 'Symbol' or 'Ticker' is the correct column name
 tickers = nasdaq_100_df['Ticker'].tolist()  # Replace 'Symbol' with the correct column name if different
@@ -59,24 +63,22 @@ if not os.path.exists(model_dir):
     os.makedirs(model_dir)
 
 # 주식 데이터를 가져오는 함수
-# def fetch_stock_data(ticker, fromdate, todate):
-#     stock_data = yf.download(ticker, start=fromdate, end=todate)
-#     print(stock_data.head())
-#     if stock_data.empty:
-#         return pd.DataFrame()
-#     # 선택적인 컬럼만 추출하고 NaN 값을 0으로 채움
-#     stock_data = stock_data[['Open', 'High', 'Low', 'Close', 'Volume']].fillna(0)
-#     stock_data['PER'] = 0  # FinanceDataReader의 PER 필드 대체
-#     return stock_data
-
 def fetch_stock_data(ticker, fromdate, todate):
-    # stock_data = yf.download(ticker, start=fromdate, end=todate)
-    stock_data = fdr.DataReader(ticker, start=fromdate, end=todate)
+    stock_data = yf.download(ticker, start=fromdate, end=todate)
     if stock_data.empty:
         return pd.DataFrame()
-    # 선택적인 컬럼만 추출하고 NaN 값을 0으로 채움
-    stock_data = stock_data[['Open', 'High', 'Low', 'Close', 'Volume']].fillna(0)
-    stock_data['PER'] = 0  # FinanceDataReader의 PER 필드 대체
+
+    # yfinance를 통해 주식 정보 가져오기
+    stock_info = yf.Ticker(ticker).info
+
+    # PER 값을 info에서 추출, 없는 경우 0으로 처리
+    per_value = stock_info.get('trailingPE', 0)  # trailingPE를 사용하거나 없으면 0
+
+    # 주식 데이터에 PER 컬럼 추가
+    stock_data['PER'] = per_value
+
+    # 선택적인 컬럼 추출 및 NaN 값 처리
+    stock_data = stock_data[['Open', 'High', 'Low', 'Close', 'Volume', 'PER']].fillna(0)
     return stock_data
 
 def create_dataset(dataset, look_back=60):
@@ -105,7 +107,7 @@ def create_model(input_shape):
 def predict_model(model, data):
     return model(data)
 
-count = 0
+
 
 for ticker in tickers[count:]:
     print(f"Processing {count+1}/{len(tickers)} : {ticker}")
@@ -126,12 +128,15 @@ for ticker in tickers[count:]:
     model_file_path = os.path.join(model_dir, f'{ticker}_model_v1.Keras')
     if os.path.exists(model_file_path):
         model = tf.keras.models.load_model(model_file_path)
+        if model.input_shape != (None, X_train.shape[1], X_train.shape[2]):
+            print('Loaded model input shape does not match data input shape. Creating a new model.')
+            model = create_model((X_train.shape[1], X_train.shape[2]))
     else:
         model = create_model((X_train.shape[1], X_train.shape[2]))
 
     early_stopping = EarlyStopping(
         monitor='val_loss',
-        patience=15,  # 10 에포크 동안 개선 없으면 종료
+        patience=EARLYSTOPPING_PATIENCE,  # 10 에포크 동안 개선 없으면 종료
         verbose=1,
         mode='min',
         restore_best_weights=True  # 최적의 가중치를 복원

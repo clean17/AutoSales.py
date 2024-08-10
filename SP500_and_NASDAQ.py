@@ -16,9 +16,11 @@ import tensorflow as tf
 # Set random seed for reproducibility
 tf.random.set_seed(42)
 
+count = 0
 PREDICTION_PERIOD = 7
-EXPECTED_GROWTH_RATE = 5
+EXPECTED_GROWTH_RATE = 3
 DATA_COLLECTION_PERIOD = 365
+EARLYSTOPPING_PATIENCE = 10
 
 # 미국 동부 시간대 설정
 us_timezone = pytz.timezone('America/New_York')
@@ -35,9 +37,33 @@ today = datetime.today().strftime('%Y%m%d')
 # start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y-%m-%d')
 
 # S&P 500 종목 리스트 가져오기
-url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
-sp500_df = pd.read_html(url)[0]
-tickers = sp500_df['Symbol'].tolist()
+# url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+# sp500_df = pd.read_html(url)[0]
+# tickers = sp500_df['Symbol'].tolist()
+
+# S&P 500 종목을 가져오는 함수
+def get_sp500_tickers():
+    sp500_constituents = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")[0]  # Wikipedia에서 종목 가져오기
+    sp500_tickers = sp500_constituents['Symbol'].tolist()  # 티커 리스트 추출
+    return sp500_tickers
+
+# 나스닥 100 종목을 가져오는 함수
+def get_nasdaq100_tickers():
+    nasdaq100_constituents = pd.read_html("https://en.wikipedia.org/wiki/NASDAQ-100")[4]  # Wikipedia에서 종목 가져오기
+    nasdaq100_tickers = nasdaq100_constituents['Ticker'].tolist()  # 티커 리스트 추출
+    return nasdaq100_tickers
+
+# S&P 500 종목 가져오기
+sp500_tickers = get_sp500_tickers()
+
+# 나스닥 100 종목 가져오기
+nasdaq100_tickers = get_nasdaq100_tickers()
+
+# S&P 500에 속하지 않은 나스닥 100 종목 찾기
+nasdaq100_not_in_sp500 = [ticker for ticker in nasdaq100_tickers if ticker not in sp500_tickers]
+
+# S&P 500과 나스닥 100에 속하지 않은 나스닥 100 종목을 합친 새로운 배열 생성
+tickers = sp500_tickers + nasdaq100_not_in_sp500
 
 output_dir = 'D:\\sp500'
 model_dir = 'sp_models'
@@ -47,16 +73,33 @@ if not os.path.exists(model_dir):
     os.makedirs(model_dir)
 
 # 주식 데이터를 가져오는 함수
+# def fetch_stock_data(ticker, fromdate, todate):
+#     stock_data = yf.download(ticker, start=fromdate, end=todate)
+#     # stock_data = fdr.DataReader(ticker, start=fromdate, end=todate)
+#     if stock_data.empty:
+#         return pd.DataFrame()
+#     # 선택적인 컬럼만 추출하고 NaN 값을 0으로 채움
+#     stock_data = stock_data[['Open', 'High', 'Low', 'Close', 'Volume']].fillna(0)
+#     stock_data['PER'] = 0  # FinanceDataReader의 PER 필드 대체
+#     return stock_data
+
 def fetch_stock_data(ticker, fromdate, todate):
-    # stock_data = yf.download(ticker, start=fromdate, end=todate)
-    stock_data = fdr.DataReader(ticker, start=fromdate, end=todate)
+    stock_data = yf.download(ticker, start=fromdate, end=todate)
     if stock_data.empty:
         return pd.DataFrame()
-    # 선택적인 컬럼만 추출하고 NaN 값을 0으로 채움
-    stock_data = stock_data[['Open', 'High', 'Low', 'Close', 'Volume']].fillna(0)
-    stock_data['PER'] = 0  # FinanceDataReader의 PER 필드 대체
-    return stock_data
 
+    # yfinance를 통해 주식 정보 가져오기
+    stock_info = yf.Ticker(ticker).info
+
+    # PER 값을 info에서 추출, 없는 경우 0으로 처리
+    per_value = stock_info.get('trailingPE', 0)  # trailingPE를 사용하거나 없으면 0
+
+    # 주식 데이터에 PER 컬럼 추가
+    stock_data['PER'] = per_value
+
+    # 선택적인 컬럼 추출 및 NaN 값 처리
+    stock_data = stock_data[['Open', 'High', 'Low', 'Close', 'Volume', 'PER']].fillna(0)
+    return stock_data
 
 def create_dataset(dataset, look_back=60):
     X, Y = [], []
@@ -79,7 +122,7 @@ def create_model(input_shape):
     model.compile(optimizer='adam', loss='mean_squared_error')
     return model
 
-count = 0
+
 
 @tf.function(reduce_retracing=True)
 def predict_model(model, data):
@@ -105,12 +148,15 @@ for ticker in tickers[count:]:
     model_file_path = os.path.join(model_dir, f'{ticker}_model_v1.Keras')
     if os.path.exists(model_file_path):
         model = tf.keras.models.load_model(model_file_path)
+        if model.input_shape != (None, X_train.shape[1], X_train.shape[2]):
+            print('Loaded model input shape does not match data input shape. Creating a new model.')
+            model = create_model((X_train.shape[1], X_train.shape[2]))
     else:
         model = create_model((X_train.shape[1], X_train.shape[2]))
 
     early_stopping = EarlyStopping(
         monitor='val_loss',
-        patience=15,  # 10 에포크 동안 개선 없으면 종료
+        patience=EARLYSTOPPING_PATIENCE,  # 10 에포크 동안 개선 없으면 종료
         verbose=1,
         mode='min',
         restore_best_weights=True  # 최적의 가중치를 복원
