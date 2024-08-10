@@ -73,8 +73,8 @@ def create_model(input_shape):
     model.compile(optimizer='adam', loss='mean_squared_error')
     return model
 
-# count = 0
-count = 900  # count를 450부터 시작하도록 설정
+count = 0
+# count = 931  # 마지막으로 종료된 시퀀스 -1 을 지정한다
 
 @tf.function(reduce_retracing=True)
 def predict_model(model, data):
@@ -130,7 +130,7 @@ for ticker in tickers[count:]:
     # 입력 X에 대한 예측 Y 학습
     # model.fit(X, Y, epochs=50, batch_size=32, verbose=1, validation_split=0.1) # verbose=1 은 콘솔에 진척도
     # 모델 학습
-    model.fit(X_train, Y_train, epochs=20, batch_size=32, verbose=0, # 충분히 모델링 되었으므로 20번만
+    model.fit(X_train, Y_train, epochs=50, batch_size=32, verbose=1, # 충분히 모델링 되었으므로 20번만
               validation_data=(X_val, Y_val), callbacks=[early_stopping]) # 체크포인트 자동저장
 
     close_scaler = MinMaxScaler()

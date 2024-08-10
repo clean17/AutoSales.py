@@ -68,18 +68,13 @@ if not os.path.exists(model_dir):
 #     return stock_data
 
 def fetch_stock_data(ticker, fromdate, todate):
-    try:
-        stock_data = yf.download(ticker, start=fromdate, end=todate)
-        if stock_data.empty:
-            print(f"No data returned for {ticker}")
-            return pd.DataFrame()
-        # 선택적인 컬럼만 추출하고 NaN 값을 0으로 채움
-        stock_data = stock_data[['Open', 'High', 'Low', 'Close', 'Volume']].fillna(0)
-        stock_data['PER'] = 0  # FinanceDataReader의 PER 필드 대체
-        return stock_data
-    except Exception as e:
-        print(f"An error occurred while downloading data for {ticker}: {e}")
+    stock_data = yf.download(ticker, start=fromdate, end=todate)
+    if stock_data.empty:
         return pd.DataFrame()
+    # 선택적인 컬럼만 추출하고 NaN 값을 0으로 채움
+    stock_data = stock_data[['Open', 'High', 'Low', 'Close', 'Volume']].fillna(0)
+    stock_data['PER'] = 0  # FinanceDataReader의 PER 필드 대체
+    return stock_data
 
 def create_dataset(dataset, look_back=60):
     X, Y = [], []
@@ -109,8 +104,7 @@ def predict_model(model, data):
 
 count = 0
 
-# for ticker in tickers:
-for ticker in tickers:
+for ticker in tickers[count:]:
     print(f"Processing {count+1}/{len(tickers)} : {ticker}")
     count += 1
     data = fetch_stock_data(ticker, start_date_us, today_us)
