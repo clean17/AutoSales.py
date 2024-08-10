@@ -40,16 +40,15 @@ if not os.path.exists(model_dir):
 # 주식 데이터와 기본적인 재무 데이터를 가져온다
 def fetch_stock_data(ticker, fromdate, todate):
     ohlcv = stock.get_market_ohlcv_by_date(fromdate, todate, ticker)
-    fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker)
+    fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker, "m") # m: 월별 재무지표, d: 일별 재무지표
     stock_name = ticker_to_name.get(ticker, 'Unknown Stock')
 
-    if 'PER' not in fundamental.columns:
+    # PER 데이터가 없으면 0으로 채우기
+    if 'PER' not in fundamental.columns or fundamental['PER'].isnull().all():
         print(f"PER data not available for {ticker} ({stock_name}). Filling with 0.")
-        fundamental['PER'] = 0  # PER 열이 없는 경우 0으로 채움
+        fundamental['PER'] = 0
 
-    # PER 값이 NaN인 경우 0으로 채움
-    fundamental['PER'] = fundamental['PER'].fillna(0)
-    data = pd.concat([ohlcv, fundamental['PER']], axis=1).fillna(0)
+    data = pd.concat([ohlcv, fundamental[['PER']]], axis=1).fillna(0)
     return data
 
 def create_dataset(dataset, look_back=60):
