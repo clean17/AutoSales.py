@@ -30,6 +30,8 @@ start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftim
 
 
 tickers = stock.get_market_ticker_list(market="KOSPI")
+# 지정한 배열만 예측
+# tickers = []
 # 종목 코드와 이름 딕셔너리 생성
 ticker_to_name = {ticker: stock.get_market_ticker_name(ticker) for ticker in tickers}
 

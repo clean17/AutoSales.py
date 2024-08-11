@@ -116,7 +116,7 @@ else:
 # 조기 종료 설정
 early_stopping = EarlyStopping(
     monitor='val_loss',
-    patience=10,  # 10 에포크 동안 개선 없으면 종료
+    patience=8,  # 10 에포크 동안 개선 없으면 종료
     verbose=1,
     mode='min',
     restore_best_weights=True  # 최적의 가중치를 복원
