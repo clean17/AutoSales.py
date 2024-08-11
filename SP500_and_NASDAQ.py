@@ -64,6 +64,7 @@ nasdaq100_not_in_sp500 = [ticker for ticker in nasdaq100_tickers if ticker not i
 
 # S&P 500과 나스닥 100에 속하지 않은 나스닥 100 종목을 합친 새로운 배열 생성
 tickers = sp500_tickers + nasdaq100_not_in_sp500
+# tickers=['DXCM', 'DG', 'EL', 'ETSY', 'MLM', 'MTCH', 'MCK', 'MNST', 'NUE', 'RL', 'RJF', 'ROK', 'SBAC', 'SMCI', 'TGT', 'VMC', 'WAB', 'DIS', 'WFC', 'XYL']
 
 output_dir = 'D:\\sp500'
 model_dir = 'sp_models'

@@ -14,8 +14,8 @@ def extract_numbers_from_filenames(directory):
 
     return numbers
 
-directory = 'D:\kospi_stocks'
 # directory = 'D:\kosdaq_stocks'
+directory = 'D:\kospi_stocks'
 
 extracted_numbers = extract_numbers_from_filenames(directory)
 print("Extracted numbers:", extracted_numbers)

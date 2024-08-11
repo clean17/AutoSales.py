@@ -19,7 +19,7 @@ count = 0
 # 예측 기간
 PREDICTION_PERIOD = 7
 # 예측 성장률
-EXPECTED_GROWTH_RATE = 5
+EXPECTED_GROWTH_RATE = 10
 # 데이터 수집 기간
 DATA_COLLECTION_PERIOD = 365
 # 과적합 방지
@@ -29,10 +29,11 @@ today = datetime.today().strftime('%Y%m%d')
 start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y%m%d')
 
 
+# tickers =  ['460930', '203450', '251970', '420570', '058450', '373200', '219550', '445090']
 tickers = stock.get_market_ticker_list(market="KOSDAQ")
+
 # 종목 코드와 이름 딕셔너리 생성
 ticker_to_name = {ticker: stock.get_market_ticker_name(ticker) for ticker in tickers}
-# tickers = ['005930', '035420', '068270']  # 삼성전자, 카카오, 셀트리온
 
 output_dir = 'D:\\kosdaq_stocks'
 # model_dir = os.path.join(output_dir, 'models')
