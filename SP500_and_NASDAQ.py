@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
 from tensorflow.keras.models import Sequential, load_model
-from tensorflow.keras.layers import LSTM, Dense
+from tensorflow.keras.layers import LSTM, Dense, Dropout
 from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
 import matplotlib.pyplot as plt
 import tensorflow as tf
@@ -20,7 +20,7 @@ count = 0
 PREDICTION_PERIOD = 7
 EXPECTED_GROWTH_RATE = 3
 DATA_COLLECTION_PERIOD = 365
-EARLYSTOPPING_PATIENCE = 10
+EARLYSTOPPING_PATIENCE = 30
 
 # 미국 동부 시간대 설정
 us_timezone = pytz.timezone('America/New_York')
@@ -67,7 +67,7 @@ tickers = sp500_tickers + nasdaq100_not_in_sp500
 # tickers=['DXCM', 'DG', 'EL', 'ETSY', 'MLM', 'MTCH', 'MCK', 'MNST', 'NUE', 'RL', 'RJF', 'ROK', 'SBAC', 'SMCI', 'TGT', 'VMC', 'WAB', 'DIS', 'WFC', 'XYL']
 
 output_dir = 'D:\\sp500'
-model_dir = 'sp_models'
+model_dir = 'sp_30_models'
 if not os.path.exists(output_dir):
     os.makedirs(output_dir)
 if not os.path.exists(model_dir):
@@ -111,15 +111,14 @@ def create_dataset(dataset, look_back=60):
 
 # LSTM 모델 학습 및 예측 함수 정의
 def create_model(input_shape):
-    model = tf.keras.Sequential([
-        LSTM(256, return_sequences=True, input_shape=input_shape),
-        LSTM(128, return_sequences=True),
-        LSTM(64, return_sequences=False),
-        Dense(128),
-        Dense(64),
-        Dense(32),
-        Dense(1)
-    ])
+    model = tf.keras.Sequential()
+    model.add(LSTM(128, return_sequences=True, input_shape=input_shape))
+    model.add(Dropout(0.2))
+    model.add(LSTM(64, return_sequences=False))
+    model.add(Dropout(0.2))
+    model.add(Dense(32, activation='relu'))
+    model.add(Dense(16, activation='relu'))
+    model.add(Dense(1))
     model.compile(optimizer='adam', loss='mean_squared_error')
     return model
 
@@ -137,7 +136,7 @@ for ticker in tickers[count:]:
     print(f"Processing {count+1}/{len(tickers)} : {ticker}")
     count += 1
     data = fetch_stock_data(ticker, start_date_us, today_us)
-    if data.empty or len(data) < 60:  # 데이터가 충분하지 않으면 건너뜀
+    if data.empty or len(data) < 30:  # 데이터가 충분하지 않으면 건너뜀
         continue
 
     scaler = MinMaxScaler(feature_range=(0, 1))
@@ -146,7 +145,7 @@ for ticker in tickers[count:]:
     # Convert the scaled_data to a TensorFlow tensor
     scaled_data_tensor = tf.convert_to_tensor(scaled_data, dtype=tf.float32)
 
-    X, Y = create_dataset(scaled_data_tensor.numpy(), 60)  # numpy()로 변환하여 create_dataset 사용
+    X, Y = create_dataset(scaled_data_tensor.numpy(), 30)  # numpy()로 변환하여 create_dataset 사용
     X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=0.2, random_state=42)
 
     model_file_path = os.path.join(model_dir, f'{ticker}_model_v1.Keras')
@@ -161,12 +160,12 @@ for ticker in tickers[count:]:
     early_stopping = EarlyStopping(
         monitor='val_loss',
         patience=EARLYSTOPPING_PATIENCE,  # 10 에포크 동안 개선 없으면 종료
-        verbose=1,
+        verbose=0,
         mode='min',
         restore_best_weights=True  # 최적의 가중치를 복원
     )
 
-    model.fit(X_train, Y_train, epochs=50, batch_size=32, verbose=1,
+    model.fit(X_train, Y_train, epochs=150, batch_size=32, verbose=1,
               validation_data=(X_val, Y_val), callbacks=[early_stopping])
 
     close_scaler = MinMaxScaler()

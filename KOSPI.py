@@ -164,16 +164,16 @@ for ticker in tickers[count:]:
         print(f"Not enough data for {ticker} to proceed.")
         continue
 
-    # 일일 평균 거래량 1000주 이상
+    # 일일 평균 거래량
     average_volume = data['거래량'].mean() # volume
-    if average_volume <= 1000:
+    if average_volume <= 2000:
         print('##### average_volume ', average_volume)
         continue
 
-    # 일일 평균 거래대금 1억 이상
+    # 일일 평균 거래대금
     trading_value = data['거래량'] * data['종가']
     average_trading_value = trading_value.mean()
-    if average_trading_value <= 100000000:
+    if average_trading_value <= 200000000:
         print('##### average_trading_value ', average_trading_value)
         continue
 
