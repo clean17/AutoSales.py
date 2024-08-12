@@ -23,7 +23,7 @@ EXPECTED_GROWTH_RATE = 10
 # 데이터 수집 기간
 DATA_COLLECTION_PERIOD = 365
 # 과적합 방지
-EARLYSTOPPING_PATIENCE = 10
+EARLYSTOPPING_PATIENCE = 5
 
 today = datetime.today().strftime('%Y%m%d')
 start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y%m%d')
@@ -114,6 +114,13 @@ for ticker in tickers[count:]:
     data = fetch_stock_data(ticker, start_date, today)
     if data.empty or len(data) < 60: # 데이터가 충분하지 않으면 건너뜀
         print(f"Not enough data for {ticker} to proceed.")
+        continue
+
+    # 평균 거래량 계산 (예: 거래량이 'volume' 컬럼에 있다고 가정)
+    average_volume = data['거래량'].mean()
+    print('average_volume', average_volume)
+
+    if average_volume <= 1000: # 4~5천 ?
         continue
 
     scaler = MinMaxScaler(feature_range=(0, 1))
