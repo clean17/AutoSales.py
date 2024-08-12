@@ -5,8 +5,8 @@ import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense, Dropout
-from tensorflow.keras.callbacks import ModelCheckpoint
+from tensorflow.keras.layers import LSTM, Dense, Dropout, BatchNormalization
+from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
 import matplotlib.pyplot as plt
 
 # 데이터 수집
@@ -21,7 +21,7 @@ scaler = MinMaxScaler()
 scaled_data = scaler.fit_transform(data)
 
 # 시계열 데이터를 윈도우로 나누기
-sequence_length = 60  # 예: 최근 60일 데이터를 기반으로 예측
+sequence_length = 30  # 예: 최근 60일 데이터를 기반으로 예측
 X = []
 y = []
 for i in range(len(scaled_data) - sequence_length):
@@ -35,37 +35,57 @@ y = np.array(y)
 X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
 
 # 모델 정의 및 학습
-model = Sequential([ # 첫번째 모델
-    LSTM(256, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])),
-    LSTM(128, return_sequences=True),
-    LSTM(64, return_sequences=False),
-    Dense(128),
-    Dense(64),
-    Dense(32),
-    Dense(1)
-])
+# model = Sequential([ # 첫번째 모델
+#     LSTM(256, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])),
+#     LSTM(128, return_sequences=True),
+#     LSTM(64, return_sequences=False),
+#     Dense(128),
+#     Dense(64),
+#     Dense(32),
+#     Dense(1)
+# ])
+
 # model = Sequential([ # 두번째 모델
 #     LSTM(256, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])),
 #     Dropout(0.2),  # 드롭아웃 추가
 #     LSTM(128, return_sequences=True),
 #     Dropout(0.2),  # 드롭아웃 추가
 #     LSTM(64, return_sequences=False),
-#     Dense(128),
+#     Dense(128, activation='relu'),
 #     Dropout(0.2),  # 드롭아웃 추가
-#     Dense(64),
-#     Dense(32),
+#     Dense(64, activation='relu'),
+#     Dense(32, activation='relu'),
 #     Dense(1)
 # ])
+
+model = Sequential()
+model.add(LSTM(128, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])))
+model.add(Dropout(0.2))
+model.add(LSTM(64, return_sequences=False))
+model.add(Dropout(0.2))
+model.add(Dense(32, activation='relu'))
+model.add(Dense(16, activation='relu'))
+model.add(Dense(1))
+
+# model = Sequential()
+# model.add(LSTM(128, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])))
+# model.add(LSTM(64, return_sequences=False))
+# model.add(Dense(32))
+# model.add(Dense(16))
+# model.add(Dense(1))
+
 model.compile(optimizer='adam', loss='mean_squared_error')
 
 # 모델 체크포인트 설정
-checkpoint = ModelCheckpoint('test/checkpoint.h5', monitor='val_loss', save_best_only=True, mode='min', verbose=1)
+# checkpoint = ModelCheckpoint('test/checkpoint.h5', monitor='val_loss', save_best_only=True, mode='min', verbose=1)
+early_stopping = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
 
 # 모델 학습
-history = model.fit(X_train, y_train, epochs=50, batch_size=32, validation_data=(X_val, y_val), callbacks=[checkpoint])
+model.fit(X_train, y_train, epochs=150, batch_size=32, validation_data=(X_val, y_val), callbacks=[early_stopping])
+# model.fit(X_train, y_train, epochs=50, batch_size=32, validation_data=(X_val, y_val), callbacks=[checkpoint])
 
 # 베스트 모델 로드
-model.load_weights('test/checkpoint.h5')
+# model.load_weights('test/checkpoint.h5')
 
 # 예측 값 (predictions)과 실제 값 (y_val)
 predictions = model.predict(X_val)
@@ -115,7 +135,13 @@ Mean Absolute Error: 0.02666502293425685
 Root Mean Squared Error: 0.03841327095140578
 R-squared: 0.9641373486807768
 
-결론 : 드롭아웃을 추가하면 성능이 떨어진다
+# 2레이어 128
+Mean Squared Error: 0.0011847279113061883
+Mean Absolute Error: 0.023152705614646822
+Root Mean Squared Error: 0.03441987668929376
+R-squared: 0.9735369339305066
+
+과적합 방지를 제거하면 실제 데이터 예측이 잘 안될 수 도 있다. 성능 벤치마크에 목숨걸지 마라
 '''
 
 # 스케일러 객체 다시 생성
