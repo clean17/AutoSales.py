@@ -21,7 +21,7 @@ scaler = MinMaxScaler()
 scaled_data = scaler.fit_transform(data)
 
 # 시계열 데이터를 윈도우로 나누기
-sequence_length = 60  # 예: 최근 60일 데이터를 기반으로 예측
+sequence_length = 30  # 예: 최근 60일 데이터를 기반으로 예측
 X = []
 y = []
 for i in range(len(scaled_data) - sequence_length):
@@ -44,18 +44,26 @@ X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=0.2, random_st
 #     Dense(32),
 #     Dense(1)
 # ])
-model = Sequential([
-    LSTM(256, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])),
-    Dropout(0.2),  # 드롭아웃 추가
-    LSTM(128, return_sequences=True),
-    Dropout(0.2),  # 드롭아웃 추가
-    LSTM(64, return_sequences=False),
-    Dense(128),
-    Dropout(0.2),  # 드롭아웃 추가
-    Dense(64),
-    Dense(32),
-    Dense(1)
-])
+# model = Sequential([
+#     LSTM(256, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])),
+#     Dropout(0.2),  # 드롭아웃 추가
+#     LSTM(128, return_sequences=True),
+#     Dropout(0.2),  # 드롭아웃 추가
+#     LSTM(64, return_sequences=False),
+#     Dense(128),
+#     Dropout(0.2),  # 드롭아웃 추가
+#     Dense(64),
+#     Dense(32),
+#     Dense(1)
+# ])
+model = Sequential()
+model.add(LSTM(128, return_sequences=True, input_shape=sequence_length))
+model.add(Dropout(0.2))  # 과적합 방지를 위한 드롭아웃 레이어
+model.add(LSTM(64, return_sequences=False))
+model.add(Dropout(0.2))  # 과적합 방지를 위한 드롭아웃 레이어
+model.add(Dense(32, activation='relu'))
+model.add(Dense(16, activation='relu'))
+model.add(Dense(1))
 model.compile(optimizer='adam', loss='mean_squared_error')
 
 model_file_path = 'my_model.h5'
@@ -67,8 +75,9 @@ checkpoint = ModelCheckpoint(
     verbose=1
 )
 
-model.fit(X_train, Y_train, epochs=50, batch_size=32, verbose=1,
-          validation_data=(X_val, Y_val), callbacks=[checkpoint])
+model.fit(X_train, Y_train, epochs=80, batch_size=32, verbose=1,
+          validation_data=(X_val, Y_val))
+          # validation_data=(X_val, Y_val), callbacks=[checkpoint])
 
 # 모델 저장
 # model.save('my_model.h5')

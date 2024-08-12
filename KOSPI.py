@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
 from tensorflow.keras.models import Sequential, load_model
-from tensorflow.keras.layers import LSTM, Dense
+from tensorflow.keras.layers import LSTM, Dense, Dropout
 from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
 import matplotlib.pyplot as plt
 import tensorflow as tf
@@ -22,8 +22,20 @@ PREDICTION_PERIOD = 7
 EXPECTED_GROWTH_RATE = 5
 # 데이터 수집 기간
 DATA_COLLECTION_PERIOD = 365
+
 # EarlyStopping
-EARLYSTOPPING_PATIENCE = 5
+EARLYSTOPPING_PATIENCE = 10
+# 데이터셋 크기 ( 타겟 3일: 10~20, 7일: 20~30, 15일: 30~60)
+LOOK_BACK = 30
+# 반복 횟수
+EPOCHS_SIZE = 150
+BATCH_SIZE = 32
+
+# 그래프 저장 경로
+output_dir = 'D:\\kospi_stocks'
+# 모델 저장 경로
+# 기존 models는 LOOK_BACK = 60인 KOSPI 학습 모델이다
+model_dir = 'kospi_30_models'
 
 today = datetime.today().strftime('%Y%m%d')
 start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y%m%d')
@@ -37,9 +49,9 @@ tickers = stock.get_market_ticker_list(market="KOSPI")
 # 종목 코드와 이름 딕셔너리 생성
 ticker_to_name = {ticker: stock.get_market_ticker_name(ticker) for ticker in tickers}
 
-output_dir = 'D:\\kospi_stocks'
+
 # model_dir = os.path.join(output_dir, 'models')
-model_dir = 'models'
+
 if not os.path.exists(output_dir):
     os.makedirs(output_dir)
 if not os.path.exists(model_dir):
@@ -100,15 +112,35 @@ def create_dataset(dataset, look_back=60):
 
 # LSTM 모델 학습 및 예측 함수 정의
 def create_model(input_shape):
-    model = tf.keras.Sequential([
-        LSTM(256, return_sequences=True, input_shape=input_shape),
-        LSTM(128, return_sequences=True),
-        LSTM(64, return_sequences=False),
-        Dense(128),
-        Dense(64),
-        Dense(32),
-        Dense(1)
-    ])
+    # model = tf.keras.Sequential([
+    #     LSTM(256, return_sequences=True, input_shape=input_shape),
+    #     LSTM(128, return_sequences=True),
+    #     LSTM(64, return_sequences=False),
+    #     Dense(128),
+    #     Dense(64),
+    #     Dense(32),
+    #     Dense(1)
+    # ])
+
+    model = tf.keras.Sequential()
+    # model.add(LSTM(128, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])))
+    model.add(LSTM(128, return_sequences=True, input_shape=input_shape))
+    model.add(Dropout(0.2))
+    model.add(LSTM(64, return_sequences=False))
+    model.add(Dropout(0.2))
+    model.add(Dense(32, activation='relu'))
+    model.add(Dense(16, activation='relu'))
+    model.add(Dense(1))
+
+    # 다음에 LOOK_BACK = 60 으로 훈련한다면 아래 모델을 사용할 것
+    # model.add(LSTM(256, return_sequences=True, input_shape=input_shape))
+    # model.add(Dropout(0.2))  # 과적합 방지를 위한 드롭아웃 레이어
+    # model.add(LSTM(128, return_sequences=False))
+    # model.add(Dropout(0.2))  # 과적합 방지를 위한 드롭아웃 레이어
+    # model.add(Dense(64, activation='relu'))
+    # model.add(Dense(32, activation='relu'))
+    # model.add(Dense(1))
+
     model.compile(optimizer='adam', loss='mean_squared_error')
     return model
 
@@ -126,26 +158,34 @@ for ticker in tickers[count:]:
     print(f"Processing {count+1}/{len(tickers)} : {stock_name} {ticker}")
     count += 1
 
+    # 데이터가 충분하지 않으면 건너뜀
     data = fetch_stock_data(ticker, start_date, today)
-    if data.empty or len(data) < 40: # 데이터가 충분하지 않으면 건너뜀
+    if data.empty or len(data) < LOOK_BACK:
         print(f"Not enough data for {ticker} to proceed.")
         continue
 
-    # 평균 거래량 계산 (예: 거래량이 'volume' 컬럼에 있다고 가정)
-    average_volume = data['거래량'].mean()
-    print('average_volume', average_volume)
+    # 일일 평균 거래량 1000주 이상
+    average_volume = data['거래량'].mean() # volume
+    if average_volume <= 1000:
+        print('##### average_volume ', average_volume)
+        continue
 
-    if average_volume <= 1000: # 4~5천 ?
+    # 일일 평균 거래대금 1억 이상
+    trading_value = data['거래량'] * data['종가']
+    average_trading_value = trading_value.mean()
+    if average_trading_value <= 100000000:
+        print('##### average_trading_value ', average_trading_value)
         continue
 
     scaler = MinMaxScaler(feature_range=(0, 1))
     scaled_data = scaler.fit_transform(data.values)
-    # X, Y = create_dataset(tf.convert_to_tensor(scaled_data), 60)
+    # X, Y = create_dataset(tf.convert_to_tensor(scaled_data), LOOK_BACK)
 
     # Python 객체 대신 TensorFlow 텐서를 사용
     # Convert the scaled_data to a TensorFlow tensor
     scaled_data_tensor = tf.convert_to_tensor(scaled_data, dtype=tf.float32)
-    X, Y = create_dataset(scaled_data_tensor.numpy(), 60)  # numpy()로 변환하여 create_dataset 사용
+    # 30일 구간의 데이터셋, (365 - 30 + 1)-> 336개의 데이터셋
+    X, Y = create_dataset(scaled_data_tensor.numpy(), LOOK_BACK)  # numpy()로 변환하여 create_dataset 사용
 
     if len(X) == 0 or len(Y) == 0:
         print(f"Not enough samples for {ticker} to form a batch.")
@@ -166,7 +206,7 @@ for ticker in tickers[count:]:
     early_stopping = EarlyStopping(
         monitor='val_loss',
         patience=EARLYSTOPPING_PATIENCE,  # 지정한 에포크 동안 개선 없으면 종료
-        verbose=1,
+        verbose=0,
         mode='min',
         restore_best_weights=True  # 최적의 가중치를 복원
     )
@@ -183,7 +223,7 @@ for ticker in tickers[count:]:
     # 입력 X에 대한 예측 Y 학습
     # model.fit(X, Y, epochs=50, batch_size=32, verbose=1, validation_split=0.1) # verbose=1 은 콘솔에 진척도
     # 모델 학습
-    model.fit(X_train, Y_train, epochs=50, batch_size=32, verbose=1, # 충분히 모델링 되었으므로 20번만
+    model.fit(X_train, Y_train, epochs=EPOCHS_SIZE, batch_size=BATCH_SIZE, verbose=1, # 충분히 모델링 되었으므로 20번만
               validation_data=(X_val, Y_val), callbacks=[early_stopping]) # 체크포인트 자동저장
 
     close_scaler = MinMaxScaler()
