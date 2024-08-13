@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
 from tensorflow.keras.models import Sequential, load_model
-from tensorflow.keras.layers import LSTM, Dense
+from tensorflow.keras.layers import LSTM, Dense, Dropout
 from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
 import matplotlib.pyplot as plt
 import tensorflow as tf
@@ -23,7 +23,18 @@ EXPECTED_GROWTH_RATE = 10
 # 데이터 수집 기간
 DATA_COLLECTION_PERIOD = 365
 # 과적합 방지
-EARLYSTOPPING_PATIENCE = 5
+EARLYSTOPPING_PATIENCE = 20
+
+LOOK_BACK = 30
+# 반복 횟수
+EPOCHS_SIZE = 150
+BATCH_SIZE = 32
+
+# 그래프 저장 경로
+output_dir = 'D:\\kosdaq_stocks'
+# 모델 저장 경로
+# model_dir = os.path.join(output_dir, 'models')
+model_dir = 'kosdaq_30_models'
 
 today = datetime.today().strftime('%Y%m%d')
 start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y%m%d')
@@ -35,9 +46,8 @@ tickers = stock.get_market_ticker_list(market="KOSDAQ")
 # 종목 코드와 이름 딕셔너리 생성
 ticker_to_name = {ticker: stock.get_market_ticker_name(ticker) for ticker in tickers}
 
-output_dir = 'D:\\kosdaq_stocks'
-# model_dir = os.path.join(output_dir, 'models')
-model_dir = 'kosdaq_models'
+
+
 if not os.path.exists(output_dir):
     os.makedirs(output_dir)
 if not os.path.exists(model_dir):
@@ -84,15 +94,14 @@ def create_dataset(dataset, look_back=60):
 
 # LSTM 모델 학습 및 예측 함수 정의
 def create_model(input_shape):
-    model = tf.keras.Sequential([
-        LSTM(256, return_sequences=True, input_shape=input_shape),
-        LSTM(128, return_sequences=True),
-        LSTM(64, return_sequences=False),
-        Dense(128),
-        Dense(64),
-        Dense(32),
-        Dense(1)
-    ])
+    model = tf.keras.Sequential()
+    model.add(LSTM(128, return_sequences=True, input_shape=input_shape))
+    model.add(Dropout(0.2))
+    model.add(LSTM(64, return_sequences=False))
+    model.add(Dropout(0.2))
+    model.add(Dense(32, activation='relu'))
+    model.add(Dense(16, activation='relu'))
+    model.add(Dense(1))
     model.compile(optimizer='adam', loss='mean_squared_error')
     return model
 
@@ -111,30 +120,34 @@ for ticker in tickers[count:]:
     count += 1
 
     # print('# ============ debug ============ 1')
+    # 데이터가 충분하지 않으면 건너뜀
     data = fetch_stock_data(ticker, start_date, today)
-    if data.empty or len(data) < 60: # 데이터가 충분하지 않으면 건너뜀
+    if data.empty or len(data) < LOOK_BACK:
         print(f"Not enough data for {ticker} to proceed.")
         continue
 
-    # 평균 거래량 계산 (예: 거래량이 'volume' 컬럼에 있다고 가정)
-    average_volume = data['거래량'].mean()
-    print('average_volume', average_volume)
+    average_volume = data['거래량'].mean() # volume
+    if average_volume <= 2000:
+        print('average_volume', average_volume)
+        continue
 
-    if average_volume <= 1000: # 4~5천 ?
+    trading_value = data['거래량'] * data['종가']
+    average_trading_value = trading_value.mean()
+    if average_trading_value <= 300000000:
+        print('average_trading_value', average_trading_value)
         continue
 
     scaler = MinMaxScaler(feature_range=(0, 1))
     scaled_data = scaler.fit_transform(data.values)
-    # X, Y = create_dataset(tf.convert_to_tensor(scaled_data), 60)
 
     # Python 객체 대신 TensorFlow 텐서를 사용
     # Convert the scaled_data to a TensorFlow tensor
     # print('# ============ debug ============ 2')
     scaled_data_tensor = tf.convert_to_tensor(scaled_data, dtype=tf.float32)
-    X, Y = create_dataset(scaled_data_tensor.numpy(), 60)  # numpy()로 변환하여 create_dataset 사용
+    X, Y = create_dataset(scaled_data_tensor.numpy(), LOOK_BACK)  # numpy()로 변환하여 create_dataset 사용
 
-    if len(X) == 0 or len(Y) == 0:
-        print(f"Not enough samples for {ticker} to form a batch.")
+    if len(X) < 2 or len(Y) < 2:
+        print(f"Not enough samples for {ticker} to split into train and test sets.")
         continue
 
     # 난수 데이터셋 분할
@@ -150,13 +163,13 @@ for ticker in tickers[count:]:
     early_stopping = EarlyStopping(
         monitor='val_loss',
         patience=EARLYSTOPPING_PATIENCE,  # 10 에포크 동안 개선 없으면 종료
-        verbose=1,
+        verbose=0,
         mode='min',
         restore_best_weights=True  # 최적의 가중치를 복원
     )
 
     # 모델 학습
-    model.fit(X_train, Y_train, epochs=50, batch_size=32, verbose=1, # 충분히 모델링 되었으므로 20번만
+    model.fit(X_train, Y_train, epochs=EPOCHS_SIZE, batch_size=BATCH_SIZE, verbose=1, # 충분히 모델링 되었으므로 20번만
               validation_data=(X_val, Y_val), callbacks=[early_stopping]) # 체크포인트 자동저장
 
     close_scaler = MinMaxScaler()

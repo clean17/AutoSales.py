@@ -24,7 +24,7 @@ EXPECTED_GROWTH_RATE = 5
 DATA_COLLECTION_PERIOD = 365
 
 # EarlyStopping
-EARLYSTOPPING_PATIENCE = 10
+EARLYSTOPPING_PATIENCE = 15
 # 데이터셋 크기 ( 타겟 3일: 10~20, 7일: 20~30, 15일: 30~60)
 LOOK_BACK = 30
 # 반복 횟수
@@ -173,7 +173,7 @@ for ticker in tickers[count:]:
     # 일일 평균 거래대금
     trading_value = data['거래량'] * data['종가']
     average_trading_value = trading_value.mean()
-    if average_trading_value <= 200000000:
+    if average_trading_value <= 300000000:
         print('##### average_trading_value ', average_trading_value)
         continue
 
@@ -187,8 +187,8 @@ for ticker in tickers[count:]:
     # 30일 구간의 데이터셋, (365 - 30 + 1)-> 336개의 데이터셋
     X, Y = create_dataset(scaled_data_tensor.numpy(), LOOK_BACK)  # numpy()로 변환하여 create_dataset 사용
 
-    if len(X) == 0 or len(Y) == 0:
-        print(f"Not enough samples for {ticker} to form a batch.")
+    if len(X) < 2 or len(Y) < 2:
+        print(f"Not enough samples for {ticker} to split into train and test sets.")
         continue
 
     # 난수 데이터셋 분할
