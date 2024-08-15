@@ -120,7 +120,7 @@ future_return = (predicted_prices[-1] / last_close - 1) * 100
 extended_prices = np.concatenate((data['Close'].values, predicted_prices))
 extended_dates = pd.date_range(start=data.index[0], periods=len(extended_prices))
 
-plt.figure(figsize=(26, 10))
+plt.figure(figsize=(16, 8))
 plt.plot(extended_dates[:len(data['Close'].values)], data['Close'].values, label='Actual Prices', color='blue')
 plt.plot(extended_dates[len(data['Close'].values)-1:], np.concatenate(([data['Close'].values[-1]], predicted_prices)), label='Predicted Prices', color='red', linestyle='--')
 plt.title(f'{ticker} - Actual vs Predicted Prices {today_us} [Last Price: {last_close}] (Expected Return: {future_return:.2f}%)')

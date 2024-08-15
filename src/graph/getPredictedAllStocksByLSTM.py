@@ -142,7 +142,7 @@ for ticker in tickers:
     extended_dates = pd.date_range(start=data.index[0], periods=len(extended_prices))
     last_price = data['종가'].iloc[-1]
 
-    plt.figure(figsize=(26, 10))
+    plt.figure(figsize=(16, 8))
     plt.plot(extended_dates[:len(data['종가'].values)], data['종가'].values, label='Actual Prices', color='blue')
     plt.plot(extended_dates[len(data['종가'].values)-1:], np.concatenate(([data['종가'].values[-1]], predicted_prices)), label='Predicted Prices', color='red', linestyle='--')
     plt.title(f'{ticker} - Actual vs Predicted Prices {today} {stock_name} [ {last_price} ] (Expected Return: {future_return:.2f}%)')

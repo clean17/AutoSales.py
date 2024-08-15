@@ -236,7 +236,7 @@ for ticker, (future_return, actual_prices, predicted_prices, stock_name) in pred
     today = datetime.today().strftime('%Y%m%d')
     last_price = actual_prices.iloc[-1]
 
-    plt.figure(figsize=(26, 10))
+    plt.figure(figsize=(16, 8))
     plt.plot(actual_prices.index, actual_prices, label=f'Actual Prices ({stock_name}  {ticker})', color='blue')
     predicted_prices_with_continuity = np.insert(predicted_prices, 0, actual_prices.iloc[-1])
     plt.plot(prediction_dates, predicted_prices_with_continuity, label=f'Predicted Prices ({stock_name}  {ticker})', color='red', linestyle='--')

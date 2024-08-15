@@ -163,7 +163,7 @@ for ticker in tickers[count:]:
     extended_dates = pd.date_range(start=data.index[0], periods=len(extended_prices))
     last_price = data['Close'].iloc[-1]
 
-    plt.figure(figsize=(26, 10))
+    plt.figure(figsize=(16, 8))
     plt.plot(extended_dates[:len(data['Close'].values)], data['Close'].values, label='Actual Prices', color='blue')
     plt.plot(extended_dates[len(data['Close'].values)-1:], np.concatenate(([data['Close'].values[-1]], predicted_prices)), label='Predicted Prices', color='red', linestyle='--')
     plt.title(f'{ticker} - Actual vs Predicted Prices {today_us} [ {last_price} ] (Expected Return: {future_return:.2f}%)')
