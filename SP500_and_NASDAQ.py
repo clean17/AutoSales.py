@@ -18,9 +18,12 @@ tf.random.set_seed(42)
 
 count = 0
 PREDICTION_PERIOD = 7
-EXPECTED_GROWTH_RATE = 3
+EXPECTED_GROWTH_RATE = 2
 DATA_COLLECTION_PERIOD = 365
 EARLYSTOPPING_PATIENCE = 30
+LOOK_BACK = 30
+EPOCHS_SIZE = 150
+BATCH_SIZE = 32
 
 # 미국 동부 시간대 설정
 us_timezone = pytz.timezone('America/New_York')
@@ -64,7 +67,7 @@ nasdaq100_not_in_sp500 = [ticker for ticker in nasdaq100_tickers if ticker not i
 
 # S&P 500과 나스닥 100에 속하지 않은 나스닥 100 종목을 합친 새로운 배열 생성
 tickers = sp500_tickers + nasdaq100_not_in_sp500
-# tickers=['DXCM', 'DG', 'EL', 'ETSY', 'MLM', 'MTCH', 'MCK', 'MNST', 'NUE', 'RL', 'RJF', 'ROK', 'SBAC', 'SMCI', 'TGT', 'VMC', 'WAB', 'DIS', 'WFC', 'XYL']
+# tickers= ['ABT', 'ALB', 'CHTR', 'DAY', 'DG', 'EL', 'INTC', 'MTCH', 'NSC', 'STLD', 'SMCI', 'UAL', 'WBA', 'WBD', 'WFC', 'TEAM']
 
 output_dir = 'D:\\sp500'
 model_dir = 'sp_30_models'
@@ -145,7 +148,7 @@ for ticker in tickers[count:]:
     # Convert the scaled_data to a TensorFlow tensor
     scaled_data_tensor = tf.convert_to_tensor(scaled_data, dtype=tf.float32)
 
-    X, Y = create_dataset(scaled_data_tensor.numpy(), 30)  # numpy()로 변환하여 create_dataset 사용
+    X, Y = create_dataset(scaled_data_tensor.numpy(), LOOK_BACK)  # numpy()로 변환하여 create_dataset 사용
     X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=0.2, random_state=42)
 
     model_file_path = os.path.join(model_dir, f'{ticker}_model_v1.Keras')
@@ -165,7 +168,7 @@ for ticker in tickers[count:]:
         restore_best_weights=True  # 최적의 가중치를 복원
     )
 
-    model.fit(X_train, Y_train, epochs=150, batch_size=32, verbose=1,
+    model.fit(X_train, Y_train, epochs=EPOCHS_SIZE, batch_size=BATCH_SIZE, verbose=1,
               validation_data=(X_val, Y_val), callbacks=[early_stopping])
 
     close_scaler = MinMaxScaler()
@@ -182,11 +185,23 @@ for ticker in tickers[count:]:
     if future_return < EXPECTED_GROWTH_RATE:
         continue
 
+    average_volume = data['Volume'].mean() # volume
+    if average_volume <= 5000:
+        print('##### average_volume ', average_volume)
+        continue
+
+    # 일일 평균 거래대금
+    trading_value = data['Volume'] * data['Close']
+    average_trading_value = trading_value.mean()
+    if average_trading_value <= 1000000000:
+        print('##### average_trading_value ', average_trading_value)
+        continue
+
     extended_prices = np.concatenate((data['Close'].values, predicted_prices))
     extended_dates = pd.date_range(start=data.index[0], periods=len(extended_prices))
     last_price = data['Close'].iloc[-1]
 
-    plt.figure(figsize=(26, 10))
+    plt.figure(figsize=(16, 8))
     plt.plot(extended_dates[:len(data['Close'].values)], data['Close'].values, label='Actual Prices', color='blue')
     plt.plot(extended_dates[len(data['Close'].values)-1:], np.concatenate(([data['Close'].values[-1]], predicted_prices)), label='Predicted Prices', color='red', linestyle='--')
     plt.title(f'{ticker} - Actual vs Predicted Prices {today_us} [ {last_price} ] (Expected Return: {future_return:.2f}%)')

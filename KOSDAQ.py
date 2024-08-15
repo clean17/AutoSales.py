@@ -120,8 +120,16 @@ for ticker in tickers[count:]:
     count += 1
 
     # print('# ============ debug ============ 1')
-    # 데이터가 충분하지 않으면 건너뜀
     data = fetch_stock_data(ticker, start_date, today)
+
+    # 마지막 행의 데이터를 가져옴
+    last_row = data.iloc[-1]
+    # 종가가 0.0인지 확인
+    if last_row['종가'] == 0.0:
+        print("종가가 0 이므로 작업을 건너뜁니다.")
+        continue
+
+    # 데이터가 충분하지 않으면 건너뜀
     if data.empty or len(data) < LOOK_BACK:
         print(f"Not enough data for {ticker} to proceed.")
         continue
@@ -133,7 +141,7 @@ for ticker in tickers[count:]:
 
     trading_value = data['거래량'] * data['종가']
     average_trading_value = trading_value.mean()
-    if average_trading_value <= 300000000:
+    if average_trading_value <= 500000000:
         print('average_trading_value', average_trading_value)
         continue
 
@@ -163,13 +171,13 @@ for ticker in tickers[count:]:
     early_stopping = EarlyStopping(
         monitor='val_loss',
         patience=EARLYSTOPPING_PATIENCE,  # 10 에포크 동안 개선 없으면 종료
-        verbose=0,
+        verbose=1,
         mode='min',
         restore_best_weights=True  # 최적의 가중치를 복원
     )
 
     # 모델 학습
-    model.fit(X_train, Y_train, epochs=EPOCHS_SIZE, batch_size=BATCH_SIZE, verbose=1, # 충분히 모델링 되었으므로 20번만
+    model.fit(X_train, Y_train, epochs=EPOCHS_SIZE, batch_size=BATCH_SIZE, verbose=0, # 충분히 모델링 되었으므로 20번만
               validation_data=(X_val, Y_val), callbacks=[early_stopping]) # 체크포인트 자동저장
 
     close_scaler = MinMaxScaler()
@@ -193,7 +201,7 @@ for ticker in tickers[count:]:
     extended_dates = pd.date_range(start=data.index[0], periods=len(extended_prices))
     last_price = data['종가'].iloc[-1]
 
-    plt.figure(figsize=(26, 10))
+    plt.figure(figsize=(16, 8))
     plt.plot(extended_dates[:len(data['종가'].values)], data['종가'].values, label='Actual Prices', color='blue')
     plt.plot(extended_dates[len(data['종가'].values)-1:], np.concatenate(([data['종가'].values[-1]], predicted_prices)), label='Predicted Prices', color='red', linestyle='--')
     plt.title(f'{ticker} - Actual vs Predicted Prices {today} {stock_name} [ {last_price} ] (Expected Return: {future_return:.2f}%)')
