@@ -17,18 +17,23 @@ tf.random.set_seed(42)
 # 종목
 # ticker = '036460' # 한국가스공사
 # ticker = '009470' # 삼화전기
-ticker = '000660'
+ticker = '003960' # 사조대림
+ticker = '007160' # 사조산업
 # 예측 기간
 PREDICTION_PERIOD = 4
 # 데이터 수집 기간
 DATA_COLLECTION_PERIOD = 365
 
+LOOK_BACK=60
+
 today = datetime.today().strftime('%Y%m%d')
 start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y%m%d')
 
 
-output_dir = 'D:\\stocks'
+# output_dir = 'D:\\stocks'
+output_dir = 'D:\\kospi_stocks'
 # model_dir = os.path.join(output_dir, 'models')
+# model_dir = 'kospi_30_models'
 model_dir = 'models'
 if not os.path.exists(output_dir):
     os.makedirs(output_dir)
@@ -89,7 +94,7 @@ scaler = MinMaxScaler(feature_range=(0, 1))
 scaled_data = scaler.fit_transform(data.values)
 
 # 데이터셋 생성
-X, Y = create_dataset(scaled_data, 60)
+X, Y = create_dataset(scaled_data, LOOK_BACK)
 
 # 데이터셋 분할
 # train_size = int(len(X) * 0.8)
@@ -116,7 +121,7 @@ else:
 # 조기 종료 설정
 early_stopping = EarlyStopping(
     monitor='val_loss',
-    patience=8,  # 10 에포크 동안 개선 없으면 종료
+    patience=10,  # 10 에포크 동안 개선 없으면 종료
     verbose=1,
     mode='min',
     restore_best_weights=True  # 최적의 가중치를 복원
@@ -125,7 +130,7 @@ early_stopping = EarlyStopping(
 # 입력 X에 대한 예측 Y 학습
 # model.fit(X, Y, epochs=50, batch_size=32, verbose=1, validation_split=0.1) # verbose=1 은 콘솔에 진척도
 # 모델 학습
-model.fit(X_train, Y_train, epochs=50, batch_size=32, verbose=1,
+model.fit(X_train, Y_train, epochs=150, batch_size=32, verbose=0,
           validation_data=(X_val, Y_val), callbacks=[early_stopping])
 
 # model.save(model_file_path) # 체크포인트가 자동으로 최적의 상태를 저장한다
@@ -145,7 +150,7 @@ extended_prices = np.concatenate((data['종가'].values, predicted_prices))
 extended_dates = pd.date_range(start=data.index[0], periods=len(extended_prices))
 last_price = data['종가'].iloc[-1]
 
-plt.figure(figsize=(26, 10))
+plt.figure(figsize=(16, 8))
 plt.plot(extended_dates[:len(data['종가'].values)], data['종가'].values, label='Actual Prices', color='blue')
 plt.plot(extended_dates[len(data['종가'].values)-1:], np.concatenate(([data['종가'].values[-1]], predicted_prices)), label='Predicted Prices', color='red', linestyle='--')
 plt.title(f'{ticker} - Actual vs Predicted Prices {today} {stock_name} [ {last_price} ] (Expected Return: {future_return:.2f}%)')
