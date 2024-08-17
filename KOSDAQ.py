@@ -17,18 +17,21 @@ tf.random.set_seed(42)
 # 시작 종목 인덱스 ( 중단된 경우 다시 시작용 )
 count = 0
 # 예측 기간
-PREDICTION_PERIOD = 7
+PREDICTION_PERIOD = 5
 # 예측 성장률
-EXPECTED_GROWTH_RATE = 10
+EXPECTED_GROWTH_RATE = 6
 # 데이터 수집 기간
 DATA_COLLECTION_PERIOD = 365
 # 과적합 방지
-EARLYSTOPPING_PATIENCE = 20
+EARLYSTOPPING_PATIENCE = 15
 
 LOOK_BACK = 30
 # 반복 횟수
 EPOCHS_SIZE = 150
 BATCH_SIZE = 32
+
+AVERAGE_VOLUME = 10000
+AVERAGE_TRADING_VALUE = 700000000
 
 # 그래프 저장 경로
 output_dir = 'D:\\kosdaq_stocks'
@@ -135,13 +138,13 @@ for ticker in tickers[count:]:
         continue
 
     average_volume = data['거래량'].mean() # volume
-    if average_volume <= 2000:
+    if average_volume <= AVERAGE_VOLUME:
         print('average_volume', average_volume)
         continue
 
     trading_value = data['거래량'] * data['종가']
     average_trading_value = trading_value.mean()
-    if average_trading_value <= 500000000:
+    if average_trading_value <= AVERAGE_TRADING_VALUE:
         print('average_trading_value', average_trading_value)
         continue
 
@@ -171,7 +174,7 @@ for ticker in tickers[count:]:
     early_stopping = EarlyStopping(
         monitor='val_loss',
         patience=EARLYSTOPPING_PATIENCE,  # 10 에포크 동안 개선 없으면 종료
-        verbose=1,
+        verbose=0,
         mode='min',
         restore_best_weights=True  # 최적의 가중치를 복원
     )
