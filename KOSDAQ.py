@@ -17,7 +17,7 @@ tf.random.set_seed(42)
 # 시작 종목 인덱스 ( 중단된 경우 다시 시작용 )
 count = 0
 # 예측 기간
-PREDICTION_PERIOD = 5
+PREDICTION_PERIOD = 7
 # 예측 성장률
 EXPECTED_GROWTH_RATE = 6
 # 데이터 수집 기간
@@ -30,8 +30,8 @@ LOOK_BACK = 30
 EPOCHS_SIZE = 150
 BATCH_SIZE = 32
 
-AVERAGE_VOLUME = 10000
-AVERAGE_TRADING_VALUE = 700000000
+AVERAGE_VOLUME = 20000
+AVERAGE_TRADING_VALUE = 1000000000
 
 # 그래프 저장 경로
 output_dir = 'D:\\kosdaq_stocks'
@@ -163,7 +163,8 @@ for ticker in tickers[count:]:
 
     # 난수 데이터셋 분할
     # print('# ============ debug ============ 3')
-    X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=0.2, random_state=42)
+    # X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=0.2, random_state=42)
+    X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=0.2)
 
     model_file_path = os.path.join(model_dir, f'{ticker}_model_v1.Keras')
     if os.path.exists(model_file_path):

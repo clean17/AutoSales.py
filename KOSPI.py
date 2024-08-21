@@ -31,8 +31,8 @@ LOOK_BACK = 30
 EPOCHS_SIZE = 150
 BATCH_SIZE = 32
 
-AVERAGE_VOLUME = 10000
-AVERAGE_TRADING_VALUE = 700000000
+AVERAGE_VOLUME = 20000
+AVERAGE_TRADING_VALUE = 1000000000
 
 # 그래프 저장 경로
 output_dir = 'D:\\kospi_stocks'
@@ -203,7 +203,8 @@ for ticker in tickers[count:]:
         continue
 
     # 난수 데이터셋 분할
-    X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=0.2, random_state=42)
+    # X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=0.2, random_state=42)
+    X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=0.2)
 
     model_file_path = os.path.join(model_dir, f'{ticker}_model_v1.Keras')
     if os.path.exists(model_file_path):
