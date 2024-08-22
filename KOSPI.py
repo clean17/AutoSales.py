@@ -17,17 +17,16 @@ tf.random.set_seed(42)
 # 시작 종목 인덱스 ( 중단된 경우 다시 시작용 )
 count = 0
 # 예측 기간
-PREDICTION_PERIOD = 7
+PREDICTION_PERIOD = 5
 # 예측 성장률
 EXPECTED_GROWTH_RATE = 5
 # 데이터 수집 기간
 DATA_COLLECTION_PERIOD = 365
-
 # EarlyStopping
-EARLYSTOPPING_PATIENCE = 15
-# 데이터셋 크기 ( 타겟 3일: 10~20, 7일: 20~30, 15일: 30~60)
+EARLYSTOPPING_PATIENCE = 10
+# 데이터셋 크기 ( 타겟 3일: 20, 5-7일: 30~50, 10일: 40~60, 15일: 50~90)
 LOOK_BACK = 30
-# 반복 횟수
+# 반복 횟수 ( 5일: 100, 7일: 150, 10일: 200, 15일: 300)
 EPOCHS_SIZE = 150
 BATCH_SIZE = 32
 
