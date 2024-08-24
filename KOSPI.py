@@ -10,6 +10,7 @@ from tensorflow.keras.layers import LSTM, Dense, Dropout, BatchNormalization
 from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
 import matplotlib.pyplot as plt
 import tensorflow as tf
+from send2trash import send2trash
 
 # Set random seed for reproducibility
 # tf.random.set_seed(42)
@@ -239,7 +240,11 @@ def create_model(input_shape):
     # model.compile(optimizer='rmsprop', loss='mse')
     return model
 
-
+# 디렉토리 내 파일 검색 및 휴지통으로 보내기
+for file_name in os.listdir(output_dir):
+    if file_name.startswith(today):
+        print(f"Sending to trash: {file_name}")
+        send2trash(os.path.join(output_dir, file_name))
 
 # @tf.function(reduce_retracing=True)
 # def predict_model(model, data):
@@ -290,8 +295,8 @@ for ticker in tickers[count:]:
 
     if len(data_before_three_months) > 0:
         closing_price_three_months_ago = data_before_three_months.iloc[-1]['종가']
-        if closing_price_three_months_ago > 0 and (last_row['종가'] < closing_price_three_months_ago * 0.7):
-            print(f"                                                        최근 종가가 3달 전의 종가보다 30% 이상 하락했으므로 작업을 건너뜁니다.")
+        if closing_price_three_months_ago > 0 and (last_row['종가'] < closing_price_three_months_ago * 0.65):
+            print(f"                                                        최근 종가가 3달 전의 종가보다 35% 이상 하락했으므로 작업을 건너뜁니다.")
             continue
 
     # 1년 전의 종가와 비교
@@ -391,11 +396,18 @@ for ticker in tickers[count:]:
     plt.legend()
     plt.xticks(rotation=45)
 
-    timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+    # 디렉토리 내 파일 검색 및 삭제
+    for file_name in os.listdir(output_dir):
+        if file_name.startswith(f"{today}") and stock_name in file_name and ticker in file_name:
+            print(f"Deleting existing file: {file_name}")
+            os.remove(os.path.join(output_dir, file_name))
+
+    # timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
     # file_path = os.path.join(output_dir, f'{today} [ {future_return:.2f}% ] {stock_name} {ticker} [ {last_price} ] {timestamp}.png')
-    file_path = os.path.join(output_dir, f'{today} [ {future_return:.2f}% ] {stock_name} {ticker} [ {last_price} ].png')
-    print(f'{today} [ {future_return:.2f}% ] {stock_name} {ticker} [ {last_price} ]')
-    plt.savefig(file_path)
+    final_file_name = f'{today} [ {future_return:.2f}% ] {stock_name} {ticker} [ {last_price} ].png'
+    final_file_path = os.path.join(output_dir, final_file_name)
+    print(final_file_name)
+    plt.savefig(final_file_path)
     plt.close()
 
     saved_tickers.append(ticker)
