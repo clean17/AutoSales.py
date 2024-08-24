@@ -295,13 +295,22 @@ for ticker in tickers[count:]:
 
     if len(data_before_three_months) > 0:
         closing_price_three_months_ago = data_before_three_months.iloc[-1]['종가']
-        if closing_price_three_months_ago > 0 and (last_row['종가'] < closing_price_three_months_ago * 0.65):
-            print(f"                                                        최근 종가가 3달 전의 종가보다 35% 이상 하락했으므로 작업을 건너뜁니다.")
+        if closing_price_three_months_ago > 0 and (last_row['종가'] < closing_price_three_months_ago * 0.7):
+            print(f"                                                        최근 종가가 3달 전의 종가보다 30% 이상 하락했으므로 작업을 건너뜁니다.")
             continue
 
     # 1년 전의 종가와 비교
-    one_year_ago_date = todayTime - pd.DateOffset(days=365)
-    data_before_one_year = data.loc[:one_year_ago_date]
+    # 데이터를 기준으로 반복해서 날짜를 줄여가며 찾음
+    data_before_one_year = pd.DataFrame()  # 초기 빈 데이터프레임
+    days_offset = 365
+
+    while days_offset >= 360:
+        one_year_ago_date = todayTime - pd.DateOffset(days=days_offset)
+        data_before_one_year = data.loc[:one_year_ago_date]
+
+        if not data_before_one_year.empty:  # 빈 배열이 아닌 경우
+            break  # 조건을 만족하면 반복 종료
+        days_offset -= 1  # 다음 날짜 시도
 
     # 1년 전과 비교
     if len(data_before_one_year) > 0:
