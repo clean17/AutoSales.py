@@ -22,7 +22,7 @@ ticker = '036460' # 한국가스공사
 # ticker = '003960' # 사조대림
 # ticker = '007160' # 사조산업
 # ticker = '249420' # 일동제약
-ticker = '373200'
+ticker = '009620'
 # 예측 기간
 PREDICTION_PERIOD = 10
 # 데이터 수집 기간
@@ -152,10 +152,20 @@ if len(data_before_three_months) > 0:
     print(f' 3달전 종가의 30% 하락: {closing_price_three_months_ago * 0.7}')
     if closing_price_three_months_ago > 0 and (last_row['종가'] < closing_price_three_months_ago * 0.7):
         print(f" 최근 종가가 3달 전의 종가보다 30% 이상 하락했으므로 작업을 건너뜁니다.")
+        exit()
 
 # 1년 전의 종가와 비교
-one_year_ago_date = todayTime - pd.DateOffset(days=365)
-data_before_one_year = data.loc[:one_year_ago_date]
+# 데이터를 기준으로 반복해서 날짜를 줄여가며 찾음
+data_before_one_year = pd.DataFrame()  # 초기 빈 데이터프레임
+days_offset = 365
+
+while days_offset >= 360:
+    one_year_ago_date = todayTime - pd.DateOffset(days=days_offset)
+    data_before_one_year = data.loc[:one_year_ago_date]
+
+    if not data_before_one_year.empty:  # 빈 배열이 아닌 경우
+        break  # 조건을 만족하면 반복 종료
+    days_offset -= 1  # 다음 날짜 시도
 
 # 1년 전과 비교
 if len(data_before_one_year) > 0:
@@ -163,6 +173,7 @@ if len(data_before_one_year) > 0:
     print(f' 1년전 종가의 50% 하락 : {closing_price_one_year_ago * 0.5}')
     if closing_price_one_year_ago > 0 and (last_row['종가'] < closing_price_one_year_ago * 0.5):
         print(f" 최근 종가가 1년 전의 종가보다 50% 이상 하락했으므로 작업을 건너뜁니다.")
+        exit()
 
 scaler = MinMaxScaler(feature_range=(0, 1))
 scaled_data = scaler.fit_transform(data.values)
