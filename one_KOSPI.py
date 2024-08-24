@@ -1,6 +1,8 @@
 import os
 import pandas as pd
 import numpy as np
+import glob
+import re
 from pykrx import stock
 from datetime import datetime, timedelta
 from sklearn.preprocessing import MinMaxScaler
@@ -20,7 +22,7 @@ ticker = '036460' # 한국가스공사
 # ticker = '003960' # 사조대림
 # ticker = '007160' # 사조산업
 # ticker = '249420' # 일동제약
-ticker = '119650'
+ticker = '373200'
 # 예측 기간
 PREDICTION_PERIOD = 10
 # 데이터 수집 기간
@@ -43,6 +45,7 @@ output_dir = 'D:\\kospi_stocks'
 # model_dir = os.path.join(output_dir, 'models')
 # model_dir = 'kospi_30_models'
 model_dir = 'models'
+model_dir = 'kospi_kosdaq_60(10)_models'
 if not os.path.exists(output_dir):
     os.makedirs(output_dir)
 if not os.path.exists(model_dir):
@@ -174,19 +177,20 @@ X, Y = create_dataset(scaled_data, LOOK_BACK)
 X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=0.2)
 
 
-# model_file_path = os.path.join(model_dir, f'{ticker}_model_v1.Keras')
-# if os.path.exists(model_file_path):
-#     model = tf.keras.models.load_model(model_file_path)
-# else:
-#     # 단순히 모델만 생성
-#     model = create_model((X_train.shape[1], X_train.shape[2]))
-#     # 지금은 매번 학습할 예정이다
-#     # model.fit(X, Y, epochs=3, batch_size=32, verbose=1, validation_split=0.1)
-#     # model.save(model_file_path)
+model_file_path = os.path.join(model_dir, f'{ticker}_model_v2.Keras')
+if os.path.exists(model_file_path):
+    print('get_save_models ...')
+    model = tf.keras.models.load_model(model_file_path)
+else:
+    # 단순히 모델만 생성
+    model = create_model((X_train.shape[1], X_train.shape[2]))
+    # 지금은 매번 학습할 예정이다
+    # model.fit(X, Y, epochs=3, batch_size=32, verbose=1, validation_split=0.1)
+    # model.save(model_file_path)
 
 
 # 모델 생성
-model = create_model((X_train.shape[1], X_train.shape[2]))
+# model = create_model((X_train.shape[1], X_train.shape[2]))
 
 # 조기 종료 설정
 early_stopping = EarlyStopping(
@@ -203,7 +207,7 @@ early_stopping = EarlyStopping(
 model.fit(X_train, Y_train, epochs=EPOCHS_SIZE, batch_size=BATCH_SIZE, verbose=1,
           validation_data=(X_val, Y_val), callbacks=[early_stopping])
 
-# model.save(model_file_path) # 체크포인트가 자동으로 최적의 상태를 저장한다
+model.save(model_file_path) # 체크포인트가 자동으로 최적의 상태를 저장한다
 
 close_scaler = MinMaxScaler()
 close_prices_scaled = close_scaler.fit_transform(data[['종가']].values)
@@ -228,9 +232,16 @@ plt.xlabel('Date')
 plt.ylabel('Price')
 plt.legend()
 plt.xticks(rotation=45)
-plt.show()
+# plt.show()
 
-# timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
-# file_path = os.path.join(output_dir, f'{today} [ {future_return:.2f}% ] {stock_name} {ticker} [ {last_price} ] {timestamp}.png')
-# plt.savefig(file_path)
-# plt.close()
+# 디렉토리 내 파일 검색 및 삭제
+for file_name in os.listdir(output_dir):
+    if file_name.startswith(f"{today}") and stock_name in file_name and ticker in file_name:
+        print(f"Deleting existing file: {file_name}")
+        os.remove(os.path.join(output_dir, file_name))
+
+final_file_name = f'{today} [ {future_return:.2f}% ] {stock_name} {ticker} [ {last_price} ].png'
+final_file_path = os.path.join(output_dir, final_file_name)
+
+plt.savefig(final_file_path)
+plt.close()
