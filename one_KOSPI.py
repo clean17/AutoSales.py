@@ -20,7 +20,7 @@ ticker = '036460' # 한국가스공사
 # ticker = '003960' # 사조대림
 # ticker = '007160' # 사조산업
 # ticker = '249420' # 일동제약
-ticker = '011150'
+ticker = '119650'
 # 예측 기간
 PREDICTION_PERIOD = 10
 # 데이터 수집 기간
@@ -134,6 +134,32 @@ last_row = data.iloc[-1]
 # 종가가 0.0인지 확인
 if last_row['종가'] == 0.0:
     print("종가가 0 이므로 작업을 건너뜁니다.")
+
+print(last_row['종가'])
+
+todayTime = datetime.today()  # `today`를 datetime 객체로 유지
+
+# 3달 전의 종가와 비교
+three_months_ago_date = todayTime - pd.DateOffset(months=3)
+data_before_three_months = data.loc[:three_months_ago_date]
+
+
+if len(data_before_three_months) > 0:
+    closing_price_three_months_ago = data_before_three_months.iloc[-1]['종가']
+    print(f' 3달전 종가의 30% 하락: {closing_price_three_months_ago * 0.7}')
+    if closing_price_three_months_ago > 0 and (last_row['종가'] < closing_price_three_months_ago * 0.7):
+        print(f" 최근 종가가 3달 전의 종가보다 30% 이상 하락했으므로 작업을 건너뜁니다.")
+
+# 1년 전의 종가와 비교
+one_year_ago_date = todayTime - pd.DateOffset(days=365)
+data_before_one_year = data.loc[:one_year_ago_date]
+
+# 1년 전과 비교
+if len(data_before_one_year) > 0:
+    closing_price_one_year_ago = data_before_one_year.iloc[-1]['종가']
+    print(f' 1년전 종가의 50% 하락 : {closing_price_one_year_ago * 0.5}')
+    if closing_price_one_year_ago > 0 and (last_row['종가'] < closing_price_one_year_ago * 0.5):
+        print(f" 최근 종가가 1년 전의 종가보다 50% 이상 하락했으므로 작업을 건너뜁니다.")
 
 scaler = MinMaxScaler(feature_range=(0, 1))
 scaled_data = scaler.fit_transform(data.values)
