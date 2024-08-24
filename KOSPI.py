@@ -293,11 +293,11 @@ for ticker in tickers[count:]:
     three_months_ago_date = todayTime - pd.DateOffset(months=3)
     data_before_three_months = data.loc[:three_months_ago_date]
 
-    if len(data_before_three_months) > 0:
-        closing_price_three_months_ago = data_before_three_months.iloc[-1]['종가']
-        if closing_price_three_months_ago > 0 and (last_row['종가'] < closing_price_three_months_ago * 0.7):
-            print(f"                                                        최근 종가가 3달 전의 종가보다 30% 이상 하락했으므로 작업을 건너뜁니다.")
-            continue
+    # if len(data_before_three_months) > 0:
+    #     closing_price_three_months_ago = data_before_three_months.iloc[-1]['종가']
+    #     if closing_price_three_months_ago > 0 and (last_row['종가'] < closing_price_three_months_ago * 0.7):
+    #         print(f"                                                        최근 종가가 3달 전의 종가보다 30% 이상 하락했으므로 작업을 건너뜁니다.")
+    #         continue
 
     # 1년 전의 종가와 비교
     # 데이터를 기준으로 반복해서 날짜를 줄여가며 찾음
@@ -313,11 +313,26 @@ for ticker in tickers[count:]:
         days_offset -= 1  # 다음 날짜 시도
 
     # 1년 전과 비교
-    if len(data_before_one_year) > 0:
+    # if len(data_before_one_year) > 0:
+    #     closing_price_one_year_ago = data_before_one_year.iloc[-1]['종가']
+    #     if closing_price_one_year_ago > 0 and (last_row['종가'] < closing_price_one_year_ago * 0.5):
+    #         print(f"                                                        최근 종가가 1년 전의 종가보다 50% 이상 하락했으므로 작업을 건너뜁니다.")
+    #         continue
+
+    # 두 조건을 모두 만족하는지 확인
+    should_skip = False
+
+    if len(data_before_three_months) > 0 and len(data_before_one_year) > 0:
+        closing_price_three_months_ago = data_before_three_months.iloc[-1]['종가']
         closing_price_one_year_ago = data_before_one_year.iloc[-1]['종가']
-        if closing_price_one_year_ago > 0 and (last_row['종가'] < closing_price_one_year_ago * 0.5):
-            print(f"                                                        최근 종가가 1년 전의 종가보다 50% 이상 하락했으므로 작업을 건너뜁니다.")
-            continue
+
+        if (closing_price_three_months_ago > 0 and last_row['종가'] < closing_price_three_months_ago * 0.7) and \
+                (closing_price_one_year_ago > 0 and last_row['종가'] < closing_price_one_year_ago * 0.5):
+            should_skip = True
+
+    if should_skip:
+        print(f"                                                        최근 종가가 3달 전의 종가보다 30% 이상 하락하고 1년 전의 종가보다 50% 이상 하락했으므로 작업을 건너뜁니다.")
+        continue
 
     scaler = MinMaxScaler(feature_range=(0, 1))
     scaled_data = scaler.fit_transform(data.values)
