@@ -6,13 +6,14 @@ from datetime import datetime, timedelta
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
 from tensorflow.keras.models import Sequential, load_model
-from tensorflow.keras.layers import LSTM, Dense, Dropout
+from tensorflow.keras.layers import LSTM, Dense, Dropout, BatchNormalization
 from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
 import matplotlib.pyplot as plt
 import tensorflow as tf
 
 # Set random seed for reproducibility
-tf.random.set_seed(42)
+# tf.random.set_seed(42)
+DROPOUT = 0.3
 
 # 시작 종목 인덱스 ( 중단된 경우 다시 시작용 )
 count = 0
@@ -23,7 +24,7 @@ EXPECTED_GROWTH_RATE = 5
 # 데이터 수집 기간
 DATA_COLLECTION_PERIOD = 365
 # EarlyStopping
-EARLYSTOPPING_PATIENCE = 10
+EARLYSTOPPING_PATIENCE = 20
 # 데이터셋 크기 ( 타겟 3일: 20, 5-7일: 30~50, 10일: 40~60, 15일: 50~90)
 LOOK_BACK = 60
 # 반복 횟수 ( 5일: 100, 7일: 150, 10일: 200, 15일: 300)
@@ -49,8 +50,6 @@ start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftim
 tickers_kospi = stock.get_market_ticker_list(market="KOSPI")
 tickers_kosdaq = stock.get_market_ticker_list(market="KOSDAQ")
 tickers = tickers_kospi + tickers_kosdaq
-
-
 
 # 지정한 배열만 예측
 # tickers = ['009470', '002710', '002900', '036460', '011170', '071320', '005430', '281820', '018880', '008500', '251270', '130660', '011810', '139990']
@@ -111,97 +110,146 @@ if not os.path.exists(model_dir):
 #     data = pd.concat([ohlcv, daily_fundamental[['PER']]], axis=1).fillna(0)
 #     return data
 
+# def fetch_stock_data(ticker, fromdate, todate):
+#     ohlcv = stock.get_market_ohlcv_by_date(fromdate, todate, ticker)
+#     daily_fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker) # 기본 일별
+#     stock_name = ticker_to_name.get(ticker, 'Unknown Stock')
+#
+#     # 'PER' 컬럼이 존재하는지 먼저 확인
+#     if 'PER' not in daily_fundamental.columns:
+#         # 일별 데이터에서 PER 정보가 없으면 월별 데이터 요청
+#         monthly_fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker, "m")
+#         if 'PER' in monthly_fundamental.columns:
+#             # 월별 PER 정보를 일별 데이터에 매핑
+#             daily_fundamental['PER'] = monthly_fundamental['PER'].reindex(daily_fundamental.index, method='ffill')
+#         else:
+#             daily_fundamental['PER'] = 0
+#     else:
+#         daily_fundamental['PER'] = daily_fundamental['PER'].fillna(0)
+#
+#     # 'PBR' 컬럼이 존재하는지 먼저 확인
+#     if 'PBR' not in daily_fundamental.columns:
+#         monthly_fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker, "m")
+#         if 'PBR' in monthly_fundamental.columns:
+#             daily_fundamental['PBR'] = monthly_fundamental['PBR'].reindex(daily_fundamental.index, method='ffill')
+#         else:
+#             daily_fundamental['PBR'] = 0
+#     else:
+#         daily_fundamental['PBR'] = daily_fundamental['PBR'].fillna(0)
+#
+#     # PER 값이 NaN인 경우 0으로 채움
+#     daily_fundamental['PER'] = daily_fundamental['PER'].fillna(0)
+#     # PBR 값이 NaN인 경우 0으로 채움
+#     daily_fundamental['PBR'] = daily_fundamental['PBR'].fillna(0)
+#
+#     # 필요한 데이터만 선택하여 결합
+#     data = pd.concat([ohlcv[['종가', '거래량']], daily_fundamental[['PER', 'PBR']]], axis=1).fillna(0)
+#
+#     return data
+
 def fetch_stock_data(ticker, fromdate, todate):
     ohlcv = stock.get_market_ohlcv_by_date(fromdate, todate, ticker)
-    daily_fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker) # 기본 일별
-    stock_name = ticker_to_name.get(ticker, 'Unknown Stock')
-
-    # 'PER' 컬럼이 존재하는지 먼저 확인
-    if 'PER' not in daily_fundamental.columns:
-        # 일별 데이터에서 PER 정보가 없으면 월별 데이터 요청
-        monthly_fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker, "m")
-        if 'PER' in monthly_fundamental.columns:
-            # 월별 PER 정보를 일별 데이터에 매핑
-            daily_fundamental['PER'] = monthly_fundamental['PER'].reindex(daily_fundamental.index, method='ffill')
-        else:
-            daily_fundamental['PER'] = 0
-    else:
-        daily_fundamental['PER'] = daily_fundamental['PER'].fillna(0)
-
-    # 'PBR' 컬럼이 존재하는지 먼저 확인
-    if 'PBR' not in daily_fundamental.columns:
-        monthly_fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker, "m")
-        if 'PBR' in monthly_fundamental.columns:
-            daily_fundamental['PBR'] = monthly_fundamental['PBR'].reindex(daily_fundamental.index, method='ffill')
-        else:
-            daily_fundamental['PBR'] = 0
-    else:
-        daily_fundamental['PBR'] = daily_fundamental['PBR'].fillna(0)
-
-    # PER 값이 NaN인 경우 0으로 채움
-    daily_fundamental['PER'] = daily_fundamental['PER'].fillna(0)
-    # PBR 값이 NaN인 경우 0으로 채움
-    daily_fundamental['PBR'] = daily_fundamental['PBR'].fillna(0)
-
-    # 필요한 데이터만 선택하여 결합
-    data = pd.concat([ohlcv[['종가', '거래량']], daily_fundamental[['PER', 'PBR']]], axis=1).fillna(0)
-
+    data = ohlcv[['종가', '저가', '고가', '거래량']]
     return data
-
 
 def create_dataset(dataset, look_back=60):
     X, Y = [], []
     if len(dataset) < look_back:
         return np.array(X), np.array(Y)  # 빈 배열 반환
     for i in range(len(dataset) - look_back):
-        X.append(dataset[i:i+look_back])
-        Y.append(dataset[i+look_back, 3])  # 종가(Close) 예측
+        X.append(dataset[i:i+look_back, :])
+        Y.append(dataset[i+look_back, 0])  # 종가(Close) 예측
     return np.array(X), np.array(Y)
 
 # LSTM 모델 학습 및 예측 함수 정의
 def create_model(input_shape):
-    # model = tf.keras.Sequential([
-    #     LSTM(256, return_sequences=True, input_shape=input_shape),
-    #     LSTM(128, return_sequences=True),
-    #     LSTM(64, return_sequences=False),
-    #     Dense(128),
-    #     Dense(64),
-    #     Dense(32),
-    #     Dense(1)
-    # ])
-
     model = tf.keras.Sequential()
-    # model.add(LSTM(128, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])))
-    model.add(LSTM(128, return_sequences=True, input_shape=input_shape))
-    model.add(Dropout(0.2))
-    model.add(LSTM(64, return_sequences=False))
-    model.add(Dropout(0.2))
-    model.add(Dense(32, activation='relu'))
-    model.add(Dense(16, activation='relu'))
-    model.add(Dense(1))
 
-    # 다음에 LOOK_BACK = 60 으로 훈련한다면 아래 모델을 사용할 것
-    # model.add(LSTM(256, return_sequences=True, input_shape=input_shape))
-    # model.add(Dropout(0.2))  # 과적합 방지를 위한 드롭아웃 레이어
-    # model.add(LSTM(128, return_sequences=False))
-    # model.add(Dropout(0.2))  # 과적합 방지를 위한 드롭아웃 레이어
-    # model.add(Dense(64, activation='relu'))
+    # 30일 훈련.. 예측이 안맞는걸까 장이 안좋을걸까
+    # # model.add(LSTM(128, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])))
+    # model.add(LSTM(128, return_sequences=True, input_shape=input_shape))
+    # model.add(Dropout(0.2))
+    # model.add(LSTM(64, return_sequences=False))
+    # model.add(Dropout(0.2))
     # model.add(Dense(32, activation='relu'))
+    # model.add(Dense(16, activation='relu'))
     # model.add(Dense(1))
 
-    model.compile(optimizer='adam', loss='mean_squared_error')
+    model.add((LSTM(256, return_sequences=True, input_shape=input_shape)))
+    model.add(Dropout(DROPOUT))
+
+    # 두 번째 LSTM 층
+    model.add(LSTM(128, return_sequences=True))
+    model.add(Dropout(DROPOUT))
+
+    # 세 번째 LSTM 층
+    model.add(LSTM(64, return_sequences=False))
+    model.add(Dropout(DROPOUT))
+
+    # Dense 레이어
+    model.add(Dense(64, activation='relu'))
+    model.add(Dropout(DROPOUT))
+    model.add(Dense(32, activation='relu'))
+    model.add(Dropout(DROPOUT))
+    model.add(Dense(16, activation='relu'))
+
+    # 출력 레이어
+    model.add(Dense(1))
+
+    # # 첫 번째 LSTM 층 (더 많은 유닛과 BatchNormalization)
+    # model.add(LSTM(512, return_sequences=True, input_shape=input_shape))
+    # model.add(Dropout(0.4))
+    # model.add(BatchNormalization())
+    #
+    # # 두 번째 LSTM 층
+    # model.add(LSTM(256, return_sequences=True))
+    # model.add(Dropout(0.4))
+    # model.add(BatchNormalization())
+    #
+    # # 세 번째 LSTM 층
+    # model.add(LSTM(128, return_sequences=True))
+    # model.add(Dropout(0.4))
+    # model.add(BatchNormalization())
+    #
+    # # 네 번째 LSTM 층
+    # model.add(LSTM(64, return_sequences=False))
+    # model.add(Dropout(0.4))
+    # model.add(BatchNormalization())
+    #
+    # # Dense 레이어
+    # model.add(Dense(128, activation='relu'))
+    # model.add(Dropout(0.4))
+    # model.add(Dense(64, activation='relu'))
+    # model.add(Dropout(0.4))
+    # model.add(Dense(32, activation='relu'))
+    #
+    # # 출력 레이어
+    # model.add(Dense(1))
+
+    model.compile(optimizer='adam', loss='mean_squared_error') # mes
+
+    '''
+    학습률을 각 파라미터에 맞게 조정하는 방식에서, 평균 제곱을 기반으로 학습률을 조정합니다. 
+    특히, 시계열 데이터와 같이 그라디언트가 빠르게 변하는 경우에 잘 작동합니다.
+    
+    초기 실험 단계에서는 Adam을 사용하는 것을 추천드립니다. 
+    Adam은 많은 경우에서 좋은 성능을 보이며, 하이퍼파라미터 튜닝 없이도 비교적 안정적인 학습을 제공합니다. 
+    그 후, 모델의 성능을 RMSprop과 비교하여 어떤 옵티마이저가 주어진 데이터셋과 모델 구조에서 더 나은 결과를 제공하는지 평가해보는 것이 좋습니다.
+    '''
+    # model.compile(optimizer='rmsprop', loss='mse')
     return model
 
 
 
-@tf.function(reduce_retracing=True)
-def predict_model(model, data):
-    return model(data)
+# @tf.function(reduce_retracing=True)
+# def predict_model(model, data):
+#     return model(data)
 
 # 결과를 저장할 배열
 saved_tickers = []
 
 for ticker in tickers[count:]:
+# for ticker in tickers[count:count+1]:
     stock_name = ticker_to_name.get(ticker, 'Unknown Stock')
     print(f"Processing {count+1}/{len(tickers)} : {stock_name} {ticker}")
     count += 1
@@ -212,46 +260,70 @@ for ticker in tickers[count:]:
     last_row = data.iloc[-1]
     # 종가가 0.0인지 확인
     if last_row['종가'] == 0.0:
-        print("종가가 0 이므로 작업을 건너뜁니다.")
+        print("                                                        종가가 0 이므로 작업을 건너뜁니다.")
         continue
 
     # 데이터가 충분하지 않으면 건너뜀
     if data.empty or len(data) < LOOK_BACK:
-        print(f"Not enough data for {ticker} to proceed.")
+        print(f"                                                        데이터가 부족하여 작업을 건너뜁니다")
         continue
 
     # 일일 평균 거래량
     average_volume = data['거래량'].mean() # volume
     if average_volume <= AVERAGE_VOLUME:
-        print('##### average_volume ', average_volume)
+        print(f"                                                        평균 거래량({average_volume:.0f}주)이 부족하여 작업을 건너뜁니다.")
         continue
 
     # 일일 평균 거래대금
     trading_value = data['거래량'] * data['종가']
     average_trading_value = trading_value.mean()
     if average_trading_value <= AVERAGE_TRADING_VALUE:
-        print('##### average_trading_value ', average_trading_value)
+        formatted_value = f"{average_trading_value / 100000000:.0f}억"
+        print(f"                                                        평균 거래액({formatted_value})이 부족하여 작업을 건너뜁니다.")
         continue
+
+    todayTime = datetime.today()  # `today`를 datetime 객체로 유지
+
+    # 3달 전의 종가와 비교
+    three_months_ago_date = todayTime - pd.DateOffset(months=3)
+    data_before_three_months = data.loc[:three_months_ago_date]
+
+    if len(data_before_three_months) > 0:
+        closing_price_three_months_ago = data_before_three_months.iloc[-1]['종가']
+        if closing_price_three_months_ago > 0 and (last_row['종가'] < closing_price_three_months_ago * 0.7):
+            print(f"                                                        최근 종가가 3달 전의 종가보다 30% 이상 하락했으므로 작업을 건너뜁니다.")
+            continue
+
+    # 1년 전의 종가와 비교
+    one_year_ago_date = todayTime - pd.DateOffset(days=365)
+    data_before_one_year = data.loc[:one_year_ago_date]
+
+    # 1년 전과 비교
+    if len(data_before_one_year) > 0:
+        closing_price_one_year_ago = data_before_one_year.iloc[-1]['종가']
+        if closing_price_one_year_ago > 0 and (last_row['종가'] < closing_price_one_year_ago * 0.5):
+            print(f"                                                        최근 종가가 1년 전의 종가보다 50% 이상 하락했으므로 작업을 건너뜁니다.")
+            continue
 
     scaler = MinMaxScaler(feature_range=(0, 1))
     scaled_data = scaler.fit_transform(data.values)
-    # X, Y = create_dataset(tf.convert_to_tensor(scaled_data), LOOK_BACK)
+    X, Y = create_dataset(scaled_data, LOOK_BACK)
 
     # Python 객체 대신 TensorFlow 텐서를 사용
     # Convert the scaled_data to a TensorFlow tensor
-    scaled_data_tensor = tf.convert_to_tensor(scaled_data, dtype=tf.float32)
+    # scaled_data_tensor = tf.convert_to_tensor(scaled_data, dtype=tf.float32)
     # 30일 구간의 데이터셋, (365 - 30 + 1)-> 336개의 데이터셋
-    X, Y = create_dataset(scaled_data_tensor.numpy(), LOOK_BACK)  # numpy()로 변환하여 create_dataset 사용
+    # X, Y = create_dataset(scaled_data_tensor.numpy(), LOOK_BACK)  # numpy()로 변환하여 create_dataset 사용
 
     if len(X) < 2 or len(Y) < 2:
-        print(f"Not enough samples for {ticker} to split into train and test sets.")
+        print(f"                                                        데이터셋이 부족하여 작업을 건너뜁니다.")
         continue
 
     # 난수 데이터셋 분할
     # X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=0.2, random_state=42)
     X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=0.2)
 
-    model_file_path = os.path.join(model_dir, f'{ticker}_model_v1.Keras')
+    model_file_path = os.path.join(model_dir, f'{ticker}_model_v2.Keras')
     if os.path.exists(model_file_path):
         model = tf.keras.models.load_model(model_file_path)
     else:
@@ -268,7 +340,7 @@ for ticker in tickers[count:]:
         restore_best_weights=True  # 최적의 가중치를 복원
     )
 
-    # 체크포인트 설정
+    # 체크포인트 설정 - 최적을 상태를 매번 저장하므로 심각하게 느리다
     # checkpoint = ModelCheckpoint(
     #     model_file_path,
     #     monitor='val_loss',
@@ -287,15 +359,16 @@ for ticker in tickers[count:]:
     close_prices_scaled = close_scaler.fit_transform(data[['종가']].values)
 
     # 예측, 입력 X만 필요하다
-    # predictions = model.predict(X[-PREDICTION_PERIOD:])
-    # predicted_prices = close_scaler.inverse_transform(predictions).flatten()
+    predictions = model.predict(X[-PREDICTION_PERIOD:])
+    predicted_prices = close_scaler.inverse_transform(predictions).flatten()
 
     # 텐서 입력 사용하여 예측 실행 (권고)
-    # predictions = predict_model(model, X[-PREDICTION_PERIOD:])
-    # Make predictions with the model
-    predictions = predict_model(model, tf.convert_to_tensor(X[-PREDICTION_PERIOD:], dtype=tf.float32))
+    # TensorFlow가 함수를 그래프 모드로 변환하여 성능을 최적화하지만,
+    # 이 과정에서 입력 데이터에 따라 미묘한 차이가 발생하거나 예상치 못한 동작을 할 수 있다
 
-    predicted_prices = close_scaler.inverse_transform(predictions.numpy()).flatten()
+    # predictions = predict_model(model, tf.convert_to_tensor(X[-PREDICTION_PERIOD:], dtype=tf.float32))
+    # predicted_prices = close_scaler.inverse_transform(predictions.numpy()).flatten()
+
     model.save(model_file_path)
 
     last_close = data['종가'].iloc[-1]
@@ -321,6 +394,7 @@ for ticker in tickers[count:]:
     timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
     # file_path = os.path.join(output_dir, f'{today} [ {future_return:.2f}% ] {stock_name} {ticker} [ {last_price} ] {timestamp}.png')
     file_path = os.path.join(output_dir, f'{today} [ {future_return:.2f}% ] {stock_name} {ticker} [ {last_price} ].png')
+    print(f'{today} [ {future_return:.2f}% ] {stock_name} {ticker} [ {last_price} ]')
     plt.savefig(file_path)
     plt.close()
 
