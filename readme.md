@@ -50,9 +50,47 @@ $ pip freeze > requirements.txt
 $ pip install -r requirements.txt
 ```
 
-## 해야할 일
+## CUDA 설치
+https://www.tensorflow.org/install/source?hl=ko#gpu <br>위 링크에서 확인하면 설치된 tensorflow 버전에 따른 사용가능한 cuda 버전을 확인할 수 있다<br>
 
-1. kiwoom.py 분석
+![img.png](img.png)
+cuda download <br> https://developer.nvidia.com/cuda-11-8-0-download-archive?target_os=Windows&target_arch=x86_64&target_version=11&target_type=exe_local <br>
+
+cuDNN 8.6 압축을 풀고 CUDA 설치 디렉토리 내의 `bin`, `include`, `lib` 폴더에 복사한다
+설치 후 `nvcc --version` 명령어로 설치 확인 <br>
+
+```
+$ nvcc --version
+
+nvcc: NVIDIA (R) Cuda compiler driver
+Copyright (c) 2005-2022 NVIDIA Corporation
+Built on Wed_Sep_21_10:41:10_Pacific_Daylight_Time_2022
+Cuda compilation tools, release 11.8, V11.8.89
+Build cuda_11.8.r11.8/compiler.31833905_0
+```
+
+아래 명령어로 텐서플로우가 gpu를 지원하는지 확인
+```
+$ python -c "import tensorflow as tf; print(tf.config.list_physical_devices('GPU'))"
+```
+빈 배열이 나온다면 텐서플로우 버전을 확인
+```
+$ pip show tensorflow
+
+Name: tensorflow
+Version: 2.13.0
+Summary: TensorFlow is an open source machine learning framework for everyone.
+Home-page: https://www.tensorflow.org/
+Author: Google Inc.
+Author-email: packages@tensorflow.org
+License: Apache 2.0
+Location: d:\project\autosales.py\venv\lib\site-packages
+Requires: tensorflow-intel
+Required-by:
+```
+`tensorflow-intel` 같은 경우 CPU를 기반으로 한 텐서플로우 이므로 다시 설치해야 한다.
+
+
 
 ## 실행 결과
 
