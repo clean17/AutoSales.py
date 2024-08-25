@@ -19,17 +19,17 @@ DROPOUT = 0.3
 # 시작 종목 인덱스 ( 중단된 경우 다시 시작용 )
 count = 0
 # 예측 기간
-PREDICTION_PERIOD = 10
+PREDICTION_PERIOD = 5
 # 예측 성장률
-EXPECTED_GROWTH_RATE = 5
+EXPECTED_GROWTH_RATE = 3
 # 데이터 수집 기간
-DATA_COLLECTION_PERIOD = 365
+DATA_COLLECTION_PERIOD = 180
 # EarlyStopping
 EARLYSTOPPING_PATIENCE = 20
 # 데이터셋 크기 ( 타겟 3일: 20, 5-7일: 30~50, 10일: 40~60, 15일: 50~90)
-LOOK_BACK = 60
+LOOK_BACK = 30
 # 반복 횟수 ( 5일: 100, 7일: 150, 10일: 200, 15일: 300)
-EPOCHS_SIZE = 200
+EPOCHS_SIZE = 100
 BATCH_SIZE = 32
 
 AVERAGE_VOLUME = 20000
@@ -40,7 +40,7 @@ output_dir = 'D:\\kospi_stocks'
 # 모델 저장 경로
 # 기존 models는 LOOK_BACK = 60인 KOSPI 학습 모델이다
 # model_dir = 'kospi_30_models'
-model_dir = 'kospi_kosdaq_60(10)_models' # 신규모델
+model_dir = 'kospi_kosdaq_30(5)180_models' # 신규모델
 
 today = datetime.today().strftime('%Y%m%d')
 start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y%m%d')
@@ -247,10 +247,11 @@ def create_model(input_shape):
 ticker_to_name = {ticker: stock.get_market_ticker_name(ticker) for ticker in tickers}
 
 # 초기 설정
-max_iterations = 3
+max_iterations = 6
 all_tickers = stock.get_market_ticker_list(market="KOSPI") + stock.get_market_ticker_list(market="KOSDAQ")
 specific_tickers = ['011150', '097950', '017860', '001060', '058850', '002720', '353200', '004835', '025560', '003960', '003230', '011230', '003060', '450080', '006740', '000230', '004720', '017810', '009830', '010660', '214270', '035900', '060370', '114190', '053950', '348150', '121600', '247660', '950220', '396270', '376930', '332290', '129920', '025900', '060570', '110990', '263720', '187220', '383930', '084650', '228670', '281740', '277070', '041920', '058110', '064550', '177350', '406820', '288330', '413640', '252990', '378800', '294630', '178320', '086710', '068760', '253840', '226330', '096530', '074430', '099190', '031310', '119830', '131370', '052020', '195990', '247540', '950130', '354200', '105550', '900300', '014940', '010470', '417860', '440320', '244460', '273060', '065950', '240600', '221800', '302430', '054210', '123570', '450520', '234920', '033100', '033320', '452160', '389030', '140430', '063080', '263700', '432470', '080530', '089890', '384470', '033290', '317690', '060280', '044490', '108230', '057680', '032800', '053160', '237820', '241820', '319660', '137400', '163730', '417180', '067310', '166090', '084990', '460930', '205470']
 specific_tickers = ['011150', '097950', '017860', '001060', '002720', '353200', '004835', '025560', '003230', '011230', '003060', '450080', '006740', '000230', '004720', '010660', '214270', '035900', '060370', '114190', '053950', '348150', '121600', '247660', '950220', '396270', '376930', '332290', '129920', '025900', '060570', '110990', '263720', '187220', '383930', '228670', '281740', '277070', '041920', '058110', '064550', '177350', '406820', '288330', '413640', '252990', '378800', '294630', '086710', '068760', '253840', '226330', '096530', '074430', '099190', '119830', '131370', '052020', '195990', '247540', '950130', '354200', '105550', '900300', '014940', '010470', '417860', '440320', '244460', '273060', '065950', '240600', '221800', '302430', '054210', '450520', '234920', '033100', '033320', '389030', '140430', '063080', '263700', '080530', '089890', '384470', '033290', '060280', '044490', '057680', '032800', '053160', '241820', '319660', '137400', '163730', '417180', '067310', '166090', '084990', '460930']
+specific_tickers = ['097950', '017860', '001060', '353200', '004835', '003060', '006740', '000230', '004720', '214270', '035900', '060370', '114190', '247660', '376930', '332290', '129920', '025900', '060570', '187220', '383930', '228670', '277070', '041920', '058110', '177350', '406820', '288330', '294630', '086710', '068760', '253840', '096530', '099190', '119830', '052020', '354200', '900300', '010470', '440320', '244460', '240600', '221800', '054210', '450520', '234920', '033320', '140430', '063080', '263700', '080530', '089890', '384470', '033290', '060280', '044490', '057680', '032800', '241820', '319660', '163730', '067310', '084990']
 
 for iteration in range(max_iterations):
     print(f"==== Iteration {iteration + 1}/{max_iterations} ====")
@@ -317,24 +318,24 @@ for iteration in range(max_iterations):
         three_months_ago_date = todayTime - pd.DateOffset(months=3)
         data_before_three_months = data.loc[:three_months_ago_date]
 
-        # if len(data_before_three_months) > 0:
-        #     closing_price_three_months_ago = data_before_three_months.iloc[-1]['종가']
-        #     if closing_price_three_months_ago > 0 and (last_row['종가'] < closing_price_three_months_ago * 0.7):
-        #         print(f"                                                        최근 종가가 3달 전의 종가보다 30% 이상 하락했으므로 작업을 건너뜁니다.")
-        #         continue
+        if len(data_before_three_months) > 0:
+            closing_price_three_months_ago = data_before_three_months.iloc[-1]['종가']
+            if closing_price_three_months_ago > 0 and (last_row['종가'] < closing_price_three_months_ago * 0.6):
+                print(f"                                                        최근 종가가 3달 전의 종가보다 40% 이상 하락했으므로 작업을 건너뜁니다.")
+                continue
 
         # 1년 전의 종가와 비교
         # 데이터를 기준으로 반복해서 날짜를 줄여가며 찾음
-        data_before_one_year = pd.DataFrame()  # 초기 빈 데이터프레임
-        days_offset = 365
-
-        while days_offset >= 360:
-            one_year_ago_date = todayTime - pd.DateOffset(days=days_offset)
-            data_before_one_year = data.loc[:one_year_ago_date]
-
-            if not data_before_one_year.empty:  # 빈 배열이 아닌 경우
-                break  # 조건을 만족하면 반복 종료
-            days_offset -= 1  # 다음 날짜 시도
+        # data_before_one_year = pd.DataFrame()  # 초기 빈 데이터프레임
+        # days_offset = 365
+        #
+        # while days_offset >= 360:
+        #     one_year_ago_date = todayTime - pd.DateOffset(days=days_offset)
+        #     data_before_one_year = data.loc[:one_year_ago_date]
+        #
+        #     if not data_before_one_year.empty:  # 빈 배열이 아닌 경우
+        #         break  # 조건을 만족하면 반복 종료
+        #     days_offset -= 1  # 다음 날짜 시도
 
         # 1년 전과 비교
         # if len(data_before_one_year) > 0:
@@ -344,19 +345,19 @@ for iteration in range(max_iterations):
         #         continue
 
         # 두 조건을 모두 만족하는지 확인
-        should_skip = False
-
-        if len(data_before_three_months) > 0 and len(data_before_one_year) > 0:
-            closing_price_three_months_ago = data_before_three_months.iloc[-1]['종가']
-            closing_price_one_year_ago = data_before_one_year.iloc[-1]['종가']
-
-            if (closing_price_three_months_ago > 0 and last_row['종가'] < closing_price_three_months_ago * 0.7) and \
-                    (closing_price_one_year_ago > 0 and last_row['종가'] < closing_price_one_year_ago * 0.5):
-                should_skip = True
-
-        if should_skip:
-            print(f"                                                        최근 종가가 3달 전의 종가보다 30% 이상 하락하고 1년 전의 종가보다 50% 이상 하락했으므로 작업을 건너뜁니다.")
-            continue
+        # should_skip = False
+        #
+        # if len(data_before_three_months) > 0 and len(data_before_one_year) > 0:
+        #     closing_price_three_months_ago = data_before_three_months.iloc[-1]['종가']
+        #     closing_price_one_year_ago = data_before_one_year.iloc[-1]['종가']
+        #
+        #     if (closing_price_three_months_ago > 0 and last_row['종가'] < closing_price_three_months_ago * 0.7) and \
+        #             (closing_price_one_year_ago > 0 and last_row['종가'] < closing_price_one_year_ago * 0.5):
+        #         should_skip = True
+        #
+        # if should_skip:
+        #     print(f"                                                        최근 종가가 3달 전의 종가보다 30% 이상 하락하고 1년 전의 종가보다 50% 이상 하락했으므로 작업을 건너뜁니다.")
+        #     continue
 
         scaler = MinMaxScaler(feature_range=(0, 1))
         scaled_data = scaler.fit_transform(data.values)
