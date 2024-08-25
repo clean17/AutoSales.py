@@ -48,16 +48,14 @@ start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftim
 
 # tickers = stock.get_market_ticker_list(market="KOSPI")
 
-tickers_kospi = stock.get_market_ticker_list(market="KOSPI")
-tickers_kosdaq = stock.get_market_ticker_list(market="KOSDAQ")
-tickers = tickers_kospi + tickers_kosdaq
+# tickers_kospi = stock.get_market_ticker_list(market="KOSPI")
+# tickers_kosdaq = stock.get_market_ticker_list(market="KOSDAQ")
+# tickers = tickers_kospi + tickers_kosdaq
 
 # 지정한 배열만 예측
-# tickers = ['009470', '002710', '002900', '036460', '011170', '071320', '005430', '281820', '018880', '008500', '251270', '130660', '011810', '139990']
+tickers = ['011150', '097950', '017860', '001060', '058850', '002720', '353200', '004835', '025560', '003960', '003230', '011230', '003060', '450080', '006740', '000230', '004720', '017810', '009830', '010660', '214270', '035900', '060370', '114190', '053950', '348150', '121600', '247660', '950220', '396270', '376930', '332290', '129920', '025900', '060570', '110990', '263720', '187220', '383930', '084650', '228670', '281740', '277070', '041920', '058110', '064550', '177350', '406820', '288330', '413640', '252990', '378800', '294630', '178320', '086710', '068760', '253840', '226330', '096530', '074430', '099190', '031310', '119830', '131370', '052020', '195990', '247540', '950130', '354200', '105550', '900300', '014940', '010470', '417860', '440320', '244460', '273060', '065950', '240600', '221800', '302430', '054210', '123570', '450520', '234920', '033100', '033320', '452160', '389030', '140430', '063080', '263700', '432470', '080530', '089890', '384470', '033290', '317690', '060280', '044490', '108230', '057680', '032800', '053160', '237820', '241820', '319660', '137400', '163730', '417180', '067310', '166090', '084990', '460930', '205470']
 
 
-# 종목 코드와 이름 딕셔너리 생성
-ticker_to_name = {ticker: stock.get_market_ticker_name(ticker) for ticker in tickers}
 
 
 # model_dir = os.path.join(output_dir, 'models')
@@ -240,201 +238,216 @@ def create_model(input_shape):
     # model.compile(optimizer='rmsprop', loss='mse')
     return model
 
-# 디렉토리 내 파일 검색 및 휴지통으로 보내기
-for file_name in os.listdir(output_dir):
-    if file_name.startswith(today):
-        print(f"Sending to trash: {file_name}")
-        send2trash(os.path.join(output_dir, file_name))
-
 # @tf.function(reduce_retracing=True)
 # def predict_model(model, data):
 #     return model(data)
 
-# 결과를 저장할 배열
-saved_tickers = []
 
-for ticker in tickers[count:]:
-# for ticker in tickers[count:count+1]:
-    stock_name = ticker_to_name.get(ticker, 'Unknown Stock')
-    print(f"Processing {count+1}/{len(tickers)} : {stock_name} {ticker}")
-    count += 1
+# 종목 코드와 이름 딕셔너리 생성
+ticker_to_name = {ticker: stock.get_market_ticker_name(ticker) for ticker in tickers}
 
-    data = fetch_stock_data(ticker, start_date, today)
+# 초기 설정
+max_iterations = 3
+all_tickers = stock.get_market_ticker_list(market="KOSPI") + stock.get_market_ticker_list(market="KOSDAQ")
+specific_tickers = ['011150', '097950', '017860', '001060', '058850', '002720', '353200', '004835', '025560', '003960', '003230', '011230', '003060', '450080', '006740', '000230', '004720', '017810', '009830', '010660', '214270', '035900', '060370', '114190', '053950', '348150', '121600', '247660', '950220', '396270', '376930', '332290', '129920', '025900', '060570', '110990', '263720', '187220', '383930', '084650', '228670', '281740', '277070', '041920', '058110', '064550', '177350', '406820', '288330', '413640', '252990', '378800', '294630', '178320', '086710', '068760', '253840', '226330', '096530', '074430', '099190', '031310', '119830', '131370', '052020', '195990', '247540', '950130', '354200', '105550', '900300', '014940', '010470', '417860', '440320', '244460', '273060', '065950', '240600', '221800', '302430', '054210', '123570', '450520', '234920', '033100', '033320', '452160', '389030', '140430', '063080', '263700', '432470', '080530', '089890', '384470', '033290', '317690', '060280', '044490', '108230', '057680', '032800', '053160', '237820', '241820', '319660', '137400', '163730', '417180', '067310', '166090', '084990', '460930', '205470']
+specific_tickers = ['011150', '097950', '017860', '001060', '002720', '353200', '004835', '025560', '003230', '011230', '003060', '450080', '006740', '000230', '004720', '010660', '214270', '035900', '060370', '114190', '053950', '348150', '121600', '247660', '950220', '396270', '376930', '332290', '129920', '025900', '060570', '110990', '263720', '187220', '383930', '228670', '281740', '277070', '041920', '058110', '064550', '177350', '406820', '288330', '413640', '252990', '378800', '294630', '086710', '068760', '253840', '226330', '096530', '074430', '099190', '119830', '131370', '052020', '195990', '247540', '950130', '354200', '105550', '900300', '014940', '010470', '417860', '440320', '244460', '273060', '065950', '240600', '221800', '302430', '054210', '450520', '234920', '033100', '033320', '389030', '140430', '063080', '263700', '080530', '089890', '384470', '033290', '060280', '044490', '057680', '032800', '053160', '241820', '319660', '137400', '163730', '417180', '067310', '166090', '084990', '460930']
 
-    # 마지막 행의 데이터를 가져옴
-    last_row = data.iloc[-1]
-    # 종가가 0.0인지 확인
-    if last_row['종가'] == 0.0:
-        print("                                                        종가가 0 이므로 작업을 건너뜁니다.")
-        continue
+for iteration in range(max_iterations):
+    print(f"==== Iteration {iteration + 1}/{max_iterations} ====")
 
-    # 데이터가 충분하지 않으면 건너뜀
-    if data.empty or len(data) < LOOK_BACK:
-        print(f"                                                        데이터가 부족하여 작업을 건너뜁니다")
-        continue
-
-    # 일일 평균 거래량
-    average_volume = data['거래량'].mean() # volume
-    if average_volume <= AVERAGE_VOLUME:
-        print(f"                                                        평균 거래량({average_volume:.0f}주)이 부족하여 작업을 건너뜁니다.")
-        continue
-
-    # 일일 평균 거래대금
-    trading_value = data['거래량'] * data['종가']
-    average_trading_value = trading_value.mean()
-    if average_trading_value <= AVERAGE_TRADING_VALUE:
-        formatted_value = f"{average_trading_value / 100000000:.0f}억"
-        print(f"                                                        평균 거래액({formatted_value})이 부족하여 작업을 건너뜁니다.")
-        continue
-
-    todayTime = datetime.today()  # `today`를 datetime 객체로 유지
-
-    # 3달 전의 종가와 비교
-    three_months_ago_date = todayTime - pd.DateOffset(months=3)
-    data_before_three_months = data.loc[:three_months_ago_date]
-
-    # if len(data_before_three_months) > 0:
-    #     closing_price_three_months_ago = data_before_three_months.iloc[-1]['종가']
-    #     if closing_price_three_months_ago > 0 and (last_row['종가'] < closing_price_three_months_ago * 0.7):
-    #         print(f"                                                        최근 종가가 3달 전의 종가보다 30% 이상 하락했으므로 작업을 건너뜁니다.")
-    #         continue
-
-    # 1년 전의 종가와 비교
-    # 데이터를 기준으로 반복해서 날짜를 줄여가며 찾음
-    data_before_one_year = pd.DataFrame()  # 초기 빈 데이터프레임
-    days_offset = 365
-
-    while days_offset >= 360:
-        one_year_ago_date = todayTime - pd.DateOffset(days=days_offset)
-        data_before_one_year = data.loc[:one_year_ago_date]
-
-        if not data_before_one_year.empty:  # 빈 배열이 아닌 경우
-            break  # 조건을 만족하면 반복 종료
-        days_offset -= 1  # 다음 날짜 시도
-
-    # 1년 전과 비교
-    # if len(data_before_one_year) > 0:
-    #     closing_price_one_year_ago = data_before_one_year.iloc[-1]['종가']
-    #     if closing_price_one_year_ago > 0 and (last_row['종가'] < closing_price_one_year_ago * 0.5):
-    #         print(f"                                                        최근 종가가 1년 전의 종가보다 50% 이상 하락했으므로 작업을 건너뜁니다.")
-    #         continue
-
-    # 두 조건을 모두 만족하는지 확인
-    should_skip = False
-
-    if len(data_before_three_months) > 0 and len(data_before_one_year) > 0:
-        closing_price_three_months_ago = data_before_three_months.iloc[-1]['종가']
-        closing_price_one_year_ago = data_before_one_year.iloc[-1]['종가']
-
-        if (closing_price_three_months_ago > 0 and last_row['종가'] < closing_price_three_months_ago * 0.7) and \
-                (closing_price_one_year_ago > 0 and last_row['종가'] < closing_price_one_year_ago * 0.5):
-            should_skip = True
-
-    if should_skip:
-        print(f"                                                        최근 종가가 3달 전의 종가보다 30% 이상 하락하고 1년 전의 종가보다 50% 이상 하락했으므로 작업을 건너뜁니다.")
-        continue
-
-    scaler = MinMaxScaler(feature_range=(0, 1))
-    scaled_data = scaler.fit_transform(data.values)
-    X, Y = create_dataset(scaled_data, LOOK_BACK)
-
-    # Python 객체 대신 TensorFlow 텐서를 사용
-    # Convert the scaled_data to a TensorFlow tensor
-    # scaled_data_tensor = tf.convert_to_tensor(scaled_data, dtype=tf.float32)
-    # 30일 구간의 데이터셋, (365 - 30 + 1)-> 336개의 데이터셋
-    # X, Y = create_dataset(scaled_data_tensor.numpy(), LOOK_BACK)  # numpy()로 변환하여 create_dataset 사용
-
-    if len(X) < 2 or len(Y) < 2:
-        print(f"                                                        데이터셋이 부족하여 작업을 건너뜁니다.")
-        continue
-
-    # 난수 데이터셋 분할
-    # X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=0.2, random_state=42)
-    X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=0.2)
-
-    model_file_path = os.path.join(model_dir, f'{ticker}_model_v2.Keras')
-    if os.path.exists(model_file_path):
-        model = tf.keras.models.load_model(model_file_path)
-    else:
-        model = create_model((X_train.shape[1], X_train.shape[2]))
-        # 지금은 매번 학습할 예정이다
-        # model.fit(X, Y, epochs=3, batch_size=32, verbose=1, validation_split=0.1)
-        # model.save(model_file_path)
-
-    early_stopping = EarlyStopping(
-        monitor='val_loss',
-        patience=EARLYSTOPPING_PATIENCE,  # 지정한 에포크 동안 개선 없으면 종료
-        verbose=0,
-        mode='min',
-        restore_best_weights=True  # 최적의 가중치를 복원
-    )
-
-    # 체크포인트 설정 - 최적을 상태를 매번 저장하므로 심각하게 느리다
-    # checkpoint = ModelCheckpoint(
-    #     model_file_path,
-    #     monitor='val_loss',
-    #     save_best_only=True,
-    #     mode='min',
-    #     verbose=0
-    # )
-
-    # 입력 X에 대한 예측 Y 학습
-    # model.fit(X, Y, epochs=50, batch_size=32, verbose=1, validation_split=0.1) # verbose=1 은 콘솔에 진척도
-    # 모델 학습
-    model.fit(X_train, Y_train, epochs=EPOCHS_SIZE, batch_size=BATCH_SIZE, verbose=0, # 충분히 모델링 되었으므로 20번만
-              validation_data=(X_val, Y_val), callbacks=[early_stopping]) # 체크포인트 자동저장
-
-    close_scaler = MinMaxScaler()
-    close_prices_scaled = close_scaler.fit_transform(data[['종가']].values)
-
-    # 예측, 입력 X만 필요하다
-    predictions = model.predict(X[-PREDICTION_PERIOD:])
-    predicted_prices = close_scaler.inverse_transform(predictions).flatten()
-
-    # 텐서 입력 사용하여 예측 실행 (권고)
-    # TensorFlow가 함수를 그래프 모드로 변환하여 성능을 최적화하지만,
-    # 이 과정에서 입력 데이터에 따라 미묘한 차이가 발생하거나 예상치 못한 동작을 할 수 있다
-
-    # predictions = predict_model(model, tf.convert_to_tensor(X[-PREDICTION_PERIOD:], dtype=tf.float32))
-    # predicted_prices = close_scaler.inverse_transform(predictions.numpy()).flatten()
-
-    model.save(model_file_path)
-
-    last_close = data['종가'].iloc[-1]
-    future_return = (predicted_prices[-1] / last_close - 1) * 100
-
-    # 성장률 이상만
-    if future_return < EXPECTED_GROWTH_RATE:
-        continue
-
-    extended_prices = np.concatenate((data['종가'].values, predicted_prices))
-    extended_dates = pd.date_range(start=data.index[0], periods=len(extended_prices))
-    last_price = data['종가'].iloc[-1]
-
-    plt.figure(figsize=(16, 8))
-    plt.plot(extended_dates[:len(data['종가'].values)], data['종가'].values, label='Actual Prices', color='blue')
-    plt.plot(extended_dates[len(data['종가'].values)-1:], np.concatenate(([data['종가'].values[-1]], predicted_prices)), label='Predicted Prices', color='red', linestyle='--')
-    plt.title(f'{ticker} - Actual vs Predicted Prices {today} {stock_name} [ {last_price} ] (Expected Return: {future_return:.2f}%)')
-    plt.xlabel('Date')
-    plt.ylabel('Price')
-    plt.legend()
-    plt.xticks(rotation=45)
-
-    # 디렉토리 내 파일 검색 및 삭제
+    # 디렉토리 내 파일 검색 및 휴지통으로 보내기
     for file_name in os.listdir(output_dir):
-        if file_name.startswith(f"{today}") and stock_name in file_name and ticker in file_name:
-            print(f"Deleting existing file: {file_name}")
-            os.remove(os.path.join(output_dir, file_name))
+        if file_name.startswith(today):
+            print(f"Sending to trash: {file_name}")
+            send2trash(os.path.join(output_dir, file_name))
 
-    # timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
-    # file_path = os.path.join(output_dir, f'{today} [ {future_return:.2f}% ] {stock_name} {ticker} [ {last_price} ] {timestamp}.png')
-    final_file_name = f'{today} [ {future_return:.2f}% ] {stock_name} {ticker} [ {last_price} ].png'
-    final_file_path = os.path.join(output_dir, final_file_name)
-    print(final_file_name)
-    plt.savefig(final_file_path)
-    plt.close()
+    # 특정 배열을 가져왔을때 / 예를 들어 60(10)으로 가져온 배열을 40(5)로 돌리는 경우
+    if iteration == 0:
+        tickers = specific_tickers  # 두 번째 반복은 특정 배열로 실행
+    else:
+        tickers = saved_tickers  # 그 이후는 이전 반복에서 저장된 종목들
 
-    saved_tickers.append(ticker)
+    # if iteration == 0:
+    #     tickers = all_tickers  # 첫 번째 반복은 모든 종목
+    # else:
+    #     tickers = saved_tickers  # 그 이후는 이전 반복에서 저장된 종목들
 
-print("Files were saved for the following tickers:")
-print(saved_tickers)
+    # 결과를 저장할 배열
+    saved_tickers = []
+
+
+    # for ticker in tickers[count:]:
+    for count, ticker in enumerate(tickers):
+    # for ticker in tickers[count:count+1]:
+        stock_name = ticker_to_name.get(ticker, 'Unknown Stock')
+        print(f"Processing {count+1}/{len(tickers)} : {stock_name} {ticker}")
+        # count += 1
+
+        data = fetch_stock_data(ticker, start_date, today)
+
+        # 마지막 행의 데이터를 가져옴
+        last_row = data.iloc[-1]
+        # 종가가 0.0인지 확인
+        if last_row['종가'] == 0.0:
+            print("                                                        종가가 0 이므로 작업을 건너뜁니다.")
+            continue
+
+        # 데이터가 충분하지 않으면 건너뜀
+        if data.empty or len(data) < LOOK_BACK:
+            print(f"                                                        데이터가 부족하여 작업을 건너뜁니다")
+            continue
+
+        # 일일 평균 거래량
+        average_volume = data['거래량'].mean() # volume
+        if average_volume <= AVERAGE_VOLUME:
+            print(f"                                                        평균 거래량({average_volume:.0f}주)이 부족하여 작업을 건너뜁니다.")
+            continue
+
+        # 일일 평균 거래대금
+        trading_value = data['거래량'] * data['종가']
+        average_trading_value = trading_value.mean()
+        if average_trading_value <= AVERAGE_TRADING_VALUE:
+            formatted_value = f"{average_trading_value / 100000000:.0f}억"
+            print(f"                                                        평균 거래액({formatted_value})이 부족하여 작업을 건너뜁니다.")
+            continue
+
+        todayTime = datetime.today()  # `today`를 datetime 객체로 유지
+
+        # 3달 전의 종가와 비교
+        three_months_ago_date = todayTime - pd.DateOffset(months=3)
+        data_before_three_months = data.loc[:three_months_ago_date]
+
+        # if len(data_before_three_months) > 0:
+        #     closing_price_three_months_ago = data_before_three_months.iloc[-1]['종가']
+        #     if closing_price_three_months_ago > 0 and (last_row['종가'] < closing_price_three_months_ago * 0.7):
+        #         print(f"                                                        최근 종가가 3달 전의 종가보다 30% 이상 하락했으므로 작업을 건너뜁니다.")
+        #         continue
+
+        # 1년 전의 종가와 비교
+        # 데이터를 기준으로 반복해서 날짜를 줄여가며 찾음
+        data_before_one_year = pd.DataFrame()  # 초기 빈 데이터프레임
+        days_offset = 365
+
+        while days_offset >= 360:
+            one_year_ago_date = todayTime - pd.DateOffset(days=days_offset)
+            data_before_one_year = data.loc[:one_year_ago_date]
+
+            if not data_before_one_year.empty:  # 빈 배열이 아닌 경우
+                break  # 조건을 만족하면 반복 종료
+            days_offset -= 1  # 다음 날짜 시도
+
+        # 1년 전과 비교
+        # if len(data_before_one_year) > 0:
+        #     closing_price_one_year_ago = data_before_one_year.iloc[-1]['종가']
+        #     if closing_price_one_year_ago > 0 and (last_row['종가'] < closing_price_one_year_ago * 0.5):
+        #         print(f"                                                        최근 종가가 1년 전의 종가보다 50% 이상 하락했으므로 작업을 건너뜁니다.")
+        #         continue
+
+        # 두 조건을 모두 만족하는지 확인
+        should_skip = False
+
+        if len(data_before_three_months) > 0 and len(data_before_one_year) > 0:
+            closing_price_three_months_ago = data_before_three_months.iloc[-1]['종가']
+            closing_price_one_year_ago = data_before_one_year.iloc[-1]['종가']
+
+            if (closing_price_three_months_ago > 0 and last_row['종가'] < closing_price_three_months_ago * 0.7) and \
+                    (closing_price_one_year_ago > 0 and last_row['종가'] < closing_price_one_year_ago * 0.5):
+                should_skip = True
+
+        if should_skip:
+            print(f"                                                        최근 종가가 3달 전의 종가보다 30% 이상 하락하고 1년 전의 종가보다 50% 이상 하락했으므로 작업을 건너뜁니다.")
+            continue
+
+        scaler = MinMaxScaler(feature_range=(0, 1))
+        scaled_data = scaler.fit_transform(data.values)
+        X, Y = create_dataset(scaled_data, LOOK_BACK)
+
+        # Python 객체 대신 TensorFlow 텐서를 사용
+        # Convert the scaled_data to a TensorFlow tensor
+        # scaled_data_tensor = tf.convert_to_tensor(scaled_data, dtype=tf.float32)
+        # 30일 구간의 데이터셋, (365 - 30 + 1)-> 336개의 데이터셋
+        # X, Y = create_dataset(scaled_data_tensor.numpy(), LOOK_BACK)  # numpy()로 변환하여 create_dataset 사용
+
+        if len(X) < 2 or len(Y) < 2:
+            print(f"                                                        데이터셋이 부족하여 작업을 건너뜁니다.")
+            continue
+
+        # 난수 데이터셋 분할
+        # X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=0.2, random_state=42)
+        X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=0.2)
+
+        model_file_path = os.path.join(model_dir, f'{ticker}_model_v2.Keras')
+        if os.path.exists(model_file_path):
+            model = tf.keras.models.load_model(model_file_path)
+        else:
+            model = create_model((X_train.shape[1], X_train.shape[2]))
+            # 지금은 매번 학습할 예정이다
+            # model.fit(X, Y, epochs=3, batch_size=32, verbose=1, validation_split=0.1)
+            # model.save(model_file_path)
+
+        early_stopping = EarlyStopping(
+            monitor='val_loss',
+            patience=EARLYSTOPPING_PATIENCE,  # 지정한 에포크 동안 개선 없으면 종료
+            verbose=0,
+            mode='min',
+            restore_best_weights=True  # 최적의 가중치를 복원
+        )
+
+        # 모델 학습
+        model.fit(X_train, Y_train, epochs=EPOCHS_SIZE, batch_size=BATCH_SIZE, verbose=0, # 충분히 모델링 되었으므로 20번만
+                  validation_data=(X_val, Y_val), callbacks=[early_stopping]) # 체크포인트 자동저장
+
+        close_scaler = MinMaxScaler()
+        close_prices_scaled = close_scaler.fit_transform(data[['종가']].values)
+
+        # 예측, 입력 X만 필요하다
+        predictions = model.predict(X[-PREDICTION_PERIOD:])
+        predicted_prices = close_scaler.inverse_transform(predictions).flatten()
+
+        # 텐서 입력 사용하여 예측 실행 (권고)
+        # TensorFlow가 함수를 그래프 모드로 변환하여 성능을 최적화하지만,
+        # 이 과정에서 입력 데이터에 따라 미묘한 차이가 발생하거나 예상치 못한 동작을 할 수 있다
+
+        # predictions = predict_model(model, tf.convert_to_tensor(X[-PREDICTION_PERIOD:], dtype=tf.float32))
+        # predicted_prices = close_scaler.inverse_transform(predictions.numpy()).flatten()
+
+        model.save(model_file_path)
+
+        last_close = data['종가'].iloc[-1]
+        future_return = (predicted_prices[-1] / last_close - 1) * 100
+
+        # 성장률 이상만
+        if future_return < EXPECTED_GROWTH_RATE:
+            continue
+
+        extended_prices = np.concatenate((data['종가'].values, predicted_prices))
+        extended_dates = pd.date_range(start=data.index[0], periods=len(extended_prices))
+        last_price = data['종가'].iloc[-1]
+
+        plt.figure(figsize=(16, 8))
+        plt.plot(extended_dates[:len(data['종가'].values)], data['종가'].values, label='Actual Prices', color='blue')
+        plt.plot(extended_dates[len(data['종가'].values)-1:], np.concatenate(([data['종가'].values[-1]], predicted_prices)), label='Predicted Prices', color='red', linestyle='--')
+        plt.title(f'{ticker} - Actual vs Predicted Prices {today} {stock_name} [ {last_price} ] (Expected Return: {future_return:.2f}%)')
+        plt.xlabel('Date')
+        plt.ylabel('Price')
+        plt.legend()
+        plt.xticks(rotation=45)
+
+        # 디렉토리 내 파일 검색 및 삭제
+        for file_name in os.listdir(output_dir):
+            if file_name.startswith(f"{today}") and stock_name in file_name and ticker in file_name:
+                print(f"Deleting existing file: {file_name}")
+                os.remove(os.path.join(output_dir, file_name))
+
+        # timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+        # file_path = os.path.join(output_dir, f'{today} [ {future_return:.2f}% ] {stock_name} {ticker} [ {last_price} ] {timestamp}.png')
+        final_file_name = f'{today} [ {future_return:.2f}% ] {stock_name} {ticker} [ {last_price} ].png'
+        final_file_path = os.path.join(output_dir, final_file_name)
+        print(final_file_name)
+        plt.savefig(final_file_path)
+        plt.close()
+
+        saved_tickers.append(ticker)
+
+    print("Files were saved for the following tickers:")
+    print(saved_tickers)
