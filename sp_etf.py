@@ -17,7 +17,7 @@ from send2trash import send2trash
 
 
 count = 0
-PREDICTION_PERIOD = 1
+PREDICTION_PERIOD = 2
 EXPECTED_GROWTH_RATE = 0
 DATA_COLLECTION_PERIOD = 365
 EARLYSTOPPING_PATIENCE = 30
@@ -50,7 +50,7 @@ def get_etf_tickers():
 # tickers = get_etf_tickers()
 
 output_dir = 'D:\\sp500'
-model_dir = 'sp_30(1)etf_models'
+model_dir = 'sp_30(2)etf_models'
 if not os.path.exists(output_dir):
     os.makedirs(output_dir)
 if not os.path.exists(model_dir):
@@ -111,7 +111,7 @@ def create_model(input_shape):
 
 for file_name in os.listdir(output_dir):
     if file_name.startswith(today):
-        print(f"Sending to trash: {file_name}")
+        # print(f"Sending to trash: {file_name}")
         send2trash(os.path.join(output_dir, file_name))
 
 # @tf.function(reduce_retracing=True)
@@ -122,9 +122,8 @@ for file_name in os.listdir(output_dir):
 saved_tickers = []
 
 # for ticker in tickers:
-for ticker in tickers[count:]:
+for count, ticker in enumerate(tickers):
     print(f"Processing {count+1}/{len(tickers)} : {ticker}")
-    count += 1
     data = fetch_stock_data(ticker, start_date_us, today_us)
 
     if data.empty or len(data) < LOOK_BACK:  # 데이터가 충분하지 않으면 건너뜀
@@ -138,12 +137,13 @@ for ticker in tickers[count:]:
     scaled_data = scaler.fit_transform(data.values)
 
     X, Y = create_dataset(scaled_data, LOOK_BACK)
+    X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=0.2)
 
     # Convert the scaled_data to a TensorFlow tensor
     # scaled_data_tensor = tf.convert_to_tensor(scaled_data, dtype=tf.float32)
     # X, Y = create_dataset(scaled_data_tensor.numpy(), LOOK_BACK)  # numpy()로 변환하여 create_dataset 사용
     # X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=0.2, random_state=42)
-    X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=0.2)
+
 
     model_file_path = os.path.join(model_dir, f'{ticker}_model_v2.Keras')
     if os.path.exists(model_file_path):
@@ -190,13 +190,13 @@ for ticker in tickers[count:]:
     plt.figure(figsize=(16, 8))
     plt.plot(extended_dates[:len(data['Close'].values)], data['Close'].values, label='Actual Prices', color='blue')
     plt.plot(extended_dates[len(data['Close'].values)-1:], np.concatenate(([data['Close'].values[-1]], predicted_prices)), label='Predicted Prices', color='red', linestyle='--')
-    plt.title(f'{ticker} - Actual vs Predicted Prices {today_us} [ {last_price} ] (Expected Return: {future_return:.2f}%)')
+    plt.title(f'{today_us} {ticker} [ {last_price:.2f} ] (Expected Return: {future_return:+.2f}%)')
     plt.xlabel('Date')
     plt.ylabel('Price')
     plt.legend()
     plt.xticks(rotation=45)
 
-    final_file_name = f'{today} [ {future_return:.2f}% ] {ticker} [ {last_price:.2f} ].png'
+    final_file_name = f'{today} [ {future_return:+.2f}% ] {ticker} [ {last_price:.2f} ].png'
     final_file_path = os.path.join(output_dir, final_file_name)
     print(final_file_name)
     plt.savefig(final_file_path)
@@ -206,3 +206,7 @@ for ticker in tickers[count:]:
 
 print("Files were saved for the following tickers:")
 print(saved_tickers)
+
+for file_name in os.listdir(output_dir):
+    if file_name.startswith(today):
+        print(f"{file_name}")
