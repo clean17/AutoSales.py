@@ -1,3 +1,5 @@
+import matplotlib
+matplotlib.use('Agg')  # Agg 백엔드를 사용하여 tkinter 관련 문제를 회피
 import os
 import pytz
 import pandas as pd
@@ -15,10 +17,10 @@ from send2trash import send2trash
 
 
 count = 0
-PREDICTION_PERIOD = 3
+PREDICTION_PERIOD = 1
 EXPECTED_GROWTH_RATE = 0
 DATA_COLLECTION_PERIOD = 365
-EARLYSTOPPING_PATIENCE = 50
+EARLYSTOPPING_PATIENCE = 30
 LOOK_BACK = 30
 EPOCHS_SIZE = 150
 BATCH_SIZE = 32
@@ -48,7 +50,7 @@ def get_etf_tickers():
 # tickers = get_etf_tickers()
 
 output_dir = 'D:\\sp500'
-model_dir = 'sp_30(3)etf_models'
+model_dir = 'sp_30(1)etf_models'
 if not os.path.exists(output_dir):
     os.makedirs(output_dir)
 if not os.path.exists(model_dir):
@@ -194,7 +196,7 @@ for ticker in tickers[count:]:
     plt.legend()
     plt.xticks(rotation=45)
 
-    final_file_name = f'{today} [ {future_return:.2f}% ] {ticker} [ {last_price} ].png'
+    final_file_name = f'{today} [ {future_return:.2f}% ] {ticker} [ {last_price:.2f} ].png'
     final_file_path = os.path.join(output_dir, final_file_name)
     print(final_file_name)
     plt.savefig(final_file_path)
