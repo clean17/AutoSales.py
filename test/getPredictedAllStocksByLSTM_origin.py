@@ -241,7 +241,7 @@ for ticker, (future_return, actual_prices, predicted_prices, stock_name) in pred
     predicted_prices_with_continuity = np.insert(predicted_prices, 0, actual_prices.iloc[-1])
     plt.plot(prediction_dates, predicted_prices_with_continuity, label=f'Predicted Prices ({stock_name}  {ticker})', color='red', linestyle='--')
 
-    plt.title(f'Actual Prices vs Predicted Prices for {today}  {stock_name}  {ticker}  {last_price}(Expected Return: {future_return:.2f}%)')
+    plt.title(f'Actual Prices vs Predicted Prices for {today}  {stock_name}  {ticker}  {last_price:.2f}(Expected Return: {future_return:.2f}%)')
     plt.xlabel('Date')
     plt.ylabel('Price')
     plt.legend()
@@ -249,6 +249,6 @@ for ticker, (future_return, actual_prices, predicted_prices, stock_name) in pred
     plt.show()
 
     # 이미지 파일로 저장
-    # file_path = os.path.join(output_dir, f'{today}_{future_return:.2f}_{ticker}_{stock_name}_{last_price}.png')
+    # file_path = os.path.join(output_dir, f'{today}_{future_return:.2f}_{ticker}_{stock_name}_{last_price:.2f}.png')
     # plt.savefig(file_path)
     # plt.close()

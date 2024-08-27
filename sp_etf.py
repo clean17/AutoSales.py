@@ -72,14 +72,14 @@ def fetch_stock_data(ticker, fromdate, todate):
 
     # 선택적인 컬럼 추출 및 NaN 값 처리
     # stock_data = stock_data[['Open', 'High', 'Low', 'Close', 'Volume', 'PER']].fillna(0)
-    stock_data = stock_data[['Open', 'High', 'Low', 'Close', 'Volume']].fillna(0)
+    stock_data = stock_data[['High', 'Low', 'Close', 'Volume']].fillna(0)
     return stock_data
 
 def create_dataset(dataset, look_back=60):
     X, Y = [], []
     for i in range(len(dataset) - look_back):
         X.append(dataset[i:i+look_back])
-        Y.append(dataset[i+look_back, 3])  # 종가(Close) 예측
+        Y.append(dataset[i+look_back, 2])  # 종가(Close) 예측
     return np.array(X), np.array(Y)
 
 # LSTM 모델 학습 및 예측 함수 정의

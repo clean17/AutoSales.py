@@ -1,3 +1,5 @@
+import matplotlib
+matplotlib.use('Agg')
 import os
 import pandas as pd
 import numpy as np
@@ -18,7 +20,7 @@ count = 0
 # 예측 기간
 PREDICTION_PERIOD = 10
 # 예측 성장률
-EXPECTED_GROWTH_RATE = 4
+EXPECTED_GROWTH_RATE = 3
 # 데이터 수집 기간
 DATA_COLLECTION_PERIOD = 365
 # EarlyStopping
@@ -108,7 +110,7 @@ for iteration in range(max_iterations):
     # 디렉토리 내 파일 검색 및 휴지통으로 보내기
     for file_name in os.listdir(output_dir):
         if file_name.startswith(today):
-            print(f"Sending to trash: {file_name}")
+            # print(f"Sending to trash: {file_name}")
             send2trash(os.path.join(output_dir, file_name))
 
     if iteration == 0:
@@ -237,7 +239,7 @@ for iteration in range(max_iterations):
         plt.figure(figsize=(16, 8))
         plt.plot(extended_dates[:len(data['종가'].values)], data['종가'].values, label='Actual Prices', color='blue')
         plt.plot(extended_dates[len(data['종가'].values)-1:], np.concatenate(([data['종가'].values[-1]], predicted_prices)), label='Predicted Prices', color='red', linestyle='--')
-        plt.title(f'{ticker} - Actual vs Predicted Prices {today} {stock_name} [ {last_price} ] (Expected Return: {future_return:.2f}%)')
+        plt.title(f'{today_us} {ticker} {stock_name} [ {last_price:.2f} ] (Expected Return: {future_return:.2f}%)')
         plt.xlabel('Date')
         plt.ylabel('Price')
         plt.legend()
@@ -249,7 +251,7 @@ for iteration in range(max_iterations):
                 print(f"Deleting existing file: {file_name}")
                 os.remove(os.path.join(output_dir, file_name))
 
-        final_file_name = f'{today} [ {future_return:.2f}% ] {stock_name} {ticker} [ {last_price} ].png'
+        final_file_name = f'{today} [ {future_return:.2f}% ] {stock_name} {ticker} [ {last_price:.2f} ].png'
         final_file_path = os.path.join(output_dir, final_file_name)
         print(final_file_name)
         plt.savefig(final_file_path)
@@ -259,3 +261,7 @@ for iteration in range(max_iterations):
 
     print("Files were saved for the following tickers:")
     print(saved_tickers)
+
+    for file_name in os.listdir(output_dir):
+        if file_name.startswith(today):
+            print(f"{file_name}")
