@@ -40,6 +40,7 @@ output_dir = 'D:\\kospi_stocks'
 model_dir = 'kospi_kosdaq_60(10)_models' # 신규모델
 
 today = datetime.today().strftime('%Y%m%d')
+today_us = datetime.today().strftime('%Y-%m-%d')
 start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y%m%d')
 
 if not os.path.exists(output_dir):
@@ -239,7 +240,7 @@ for iteration in range(max_iterations):
         plt.figure(figsize=(16, 8))
         plt.plot(extended_dates[:len(data['종가'].values)], data['종가'].values, label='Actual Prices', color='blue')
         plt.plot(extended_dates[len(data['종가'].values)-1:], np.concatenate(([data['종가'].values[-1]], predicted_prices)), label='Predicted Prices', color='red', linestyle='--')
-        plt.title(f'{today_us} {ticker} {stock_name} [ {last_price:.2f} ] (Expected Return: {future_return:.2f}%)')
+        plt.title(f'{today_us} {ticker} {stock_name} [ {last_price} ] (Expected Return: {future_return:.2f}%)')
         plt.xlabel('Date')
         plt.ylabel('Price')
         plt.legend()
@@ -251,7 +252,7 @@ for iteration in range(max_iterations):
                 print(f"Deleting existing file: {file_name}")
                 os.remove(os.path.join(output_dir, file_name))
 
-        final_file_name = f'{today} [ {future_return:.2f}% ] {stock_name} {ticker} [ {last_price:.2f} ].png'
+        final_file_name = f'{today} [ {future_return:.2f}% ] {stock_name} {ticker} [ {last_price} ].png'
         final_file_path = os.path.join(output_dir, final_file_name)
         print(final_file_name)
         plt.savefig(final_file_path)
