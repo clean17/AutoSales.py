@@ -1,3 +1,5 @@
+import matplotlib
+matplotlib.use('Agg')
 import os
 import pandas as pd
 import numpy as np
@@ -22,21 +24,22 @@ ticker = '036460' # 한국가스공사
 # ticker = '003960' # 사조대림
 # ticker = '007160' # 사조산업
 # ticker = '249420' # 일동제약
-ticker = '009620'
+ticker = '452190'
 # 예측 기간
-PREDICTION_PERIOD = 10
+PREDICTION_PERIOD = 2
 # 데이터 수집 기간
-DATA_COLLECTION_PERIOD = 365
+DATA_COLLECTION_PERIOD = 180
 
 # EarlyStopping
 EARLYSTOPPING_PATIENCE = 20
 # 데이터셋 크기 ( 타겟 3일: 20, 5-7일: 30~50, 10일: 40~60, 15일: 50~90)
-LOOK_BACK = 60
+LOOK_BACK = 30
 # 반복 횟수 ( 5일: 100, 7일: 150, 10일: 200, 15일: 300)
-EPOCHS_SIZE = 200
+EPOCHS_SIZE = 150
 BATCH_SIZE = 32
 
 today = datetime.today().strftime('%Y%m%d')
+today_us = datetime.today().strftime('%Y-%m-%d')
 start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y%m%d')
 
 
@@ -45,7 +48,8 @@ output_dir = 'D:\\kospi_stocks'
 # model_dir = os.path.join(output_dir, 'models')
 # model_dir = 'kospi_30_models'
 model_dir = 'models'
-model_dir = 'kospi_kosdaq_60(10)_models'
+# model_dir = 'kospi_kosdaq_60(10)_models'
+model_dir = 'kospi_kosdaq_30(2)180_models'
 if not os.path.exists(output_dir):
     os.makedirs(output_dir)
 if not os.path.exists(model_dir):
@@ -139,7 +143,7 @@ if last_row['종가'] == 0.0:
     print("종가가 0 이므로 작업을 건너뜁니다.")
 
 print(last_row['종가'])
-
+'''
 todayTime = datetime.today()  # `today`를 datetime 객체로 유지
 
 # 3달 전의 종가와 비교
@@ -174,7 +178,7 @@ if len(data_before_one_year) > 0:
     if closing_price_one_year_ago > 0 and (last_row['종가'] < closing_price_one_year_ago * 0.5):
         print(f" 최근 종가가 1년 전의 종가보다 50% 이상 하락했으므로 작업을 건너뜁니다.")
         exit()
-
+'''
 scaler = MinMaxScaler(feature_range=(0, 1))
 scaled_data = scaler.fit_transform(data.values)
 
@@ -238,7 +242,7 @@ last_price = data['종가'].iloc[-1]
 plt.figure(figsize=(16, 8))
 plt.plot(extended_dates[:len(data['종가'].values)], data['종가'].values, label='Actual Prices', color='blue')
 plt.plot(extended_dates[len(data['종가'].values)-1:], np.concatenate(([data['종가'].values[-1]], predicted_prices)), label='Predicted Prices', color='red', linestyle='--')
-plt.title(f'{ticker} - Actual vs Predicted Prices {today} {stock_name} [ {last_price} ] (Expected Return: {future_return:.2f}%)')
+plt.title(f'{today_us} {ticker} {stock_name} [ {last_price} ] (Expected Return: {future_return:.2f}%)')
 plt.xlabel('Date')
 plt.ylabel('Price')
 plt.legend()
@@ -246,13 +250,11 @@ plt.xticks(rotation=45)
 # plt.show()
 
 # 디렉토리 내 파일 검색 및 삭제
-for file_name in os.listdir(output_dir):
-    if file_name.startswith(f"{today}") and stock_name in file_name and ticker in file_name:
-        print(f"Deleting existing file: {file_name}")
-        os.remove(os.path.join(output_dir, file_name))
+
 
 final_file_name = f'{today} [ {future_return:.2f}% ] {stock_name} {ticker} [ {last_price} ].png'
 final_file_path = os.path.join(output_dir, final_file_name)
 
 plt.savefig(final_file_path)
+print(final_file_path)
 plt.close()
