@@ -250,7 +250,7 @@ def create_model(input_shape):
 # 초기 설정
 max_iterations = 5
 # all_tickers = stock.get_market_ticker_list(market="KOSPI") + stock.get_market_ticker_list(market="KOSDAQ")
-specific_tickers = ['001040', '010120', '006345', '145720', '082640', '001340', '003230', '006740', '103590', '060370', '053290', '099220', '307750', '204620', '225570', '443250', '042500', '195500', '058110', '178320', '290690', '025320', '226330', '257720', '099320', '102120', '260970', '247540', '354200', '170920', '046940', '900340', '009730', '418620', '091120', '452160', '102370', '045970', '448710', '060280', '026150', '331380', '053160', '319660', '043370', '192410']
+specific_tickers = ['001040', '010120', '006345', '145720', '082640', '001340', '003230', '006740', '007660', '103590', '214270', '060370', '053290', '099220', '307750', '186230', '204620', '247660', '225570', '376930', '129920', '025950', '110990', '443250', '042500', '195500', '058110', '294630', '178320', '188260', '290690', '025320', '226330', '257720', '099320', '060590', '030960', '102120', '260970', '109610', '086520', '247540', '354200', '170920', '046940', '036090', '900340', '221800', '179900', '009730', '418620', '091120', '417500', '452160', '102370', '045970', '448710', '060280', '089030', '026150', '033540', '331380', '053160', '237750', '319660', '043370', '067310', '030520', '192410', '037440']
 
 if tickers is None:
     tickers = specific_tickers
@@ -261,6 +261,7 @@ ticker_to_name = {ticker: stock.get_market_ticker_name(ticker) for ticker in tic
 ticker_returns = {}
 
 for iteration in range(max_iterations):
+    print("\n")
     print(f"==== Iteration {iteration + 1}/{max_iterations} ====")
 
     # 디렉토리 내 파일 검색 및 휴지통으로 보내기
@@ -458,17 +459,15 @@ for iteration in range(max_iterations):
         # file_path = os.path.join(output_dir, f'{today} [ {future_return:.2f}% ] {stock_name} {ticker} [ {last_price} ] {timestamp}.png')
         final_file_name = f'{today} [ {future_return:.2f}% ] {stock_name} {ticker} [ {last_price} ].png'
         final_file_path = os.path.join(output_dir, final_file_name)
-        print(final_file_name)
+        # print(final_file_name)
         plt.savefig(final_file_path)
         plt.close()
 
-        if len(ticker_returns[ticker]) == 5:
-            avg_future_return = sum(ticker_returns[ticker]) / 5
-            print(f"==== [ {future_return:.2f}% ] {stock_name} ====")
 
-    print("Files were saved for the following tickers:")
-    print(saved_tickers)
+    # for file_name in os.listdir(output_dir):
+    #     if file_name.startswith(today):
+    #         print(f"{file_name}")
 
-    for file_name in os.listdir(output_dir):
-        if file_name.startswith(today):
-            print(f"{file_name}")
+    if len(ticker_returns.get(ticker, [])) == 5:
+        avg_future_return = sum(ticker_returns[ticker]) / 5
+        print(f"==== [ {avg_future_return:.2f}% ] {stock_name} ====")
