@@ -259,6 +259,7 @@ else:
 
 ticker_to_name = {ticker: stock.get_market_ticker_name(ticker) for ticker in tickers}
 ticker_returns = {}
+saved_tickers = []
 
 for iteration in range(max_iterations):
     print("\n")
@@ -468,6 +469,16 @@ for iteration in range(max_iterations):
     #     if file_name.startswith(today):
     #         print(f"{file_name}")
 
+results = []
+
+for ticker in saved_tickers:
     if len(ticker_returns.get(ticker, [])) == 5:
+        stock_name = ticker_to_name.get(ticker, 'Unknown Stock')
         avg_future_return = sum(ticker_returns[ticker]) / 5
-        print(f"==== [ {avg_future_return:.2f}% ] {stock_name} ====")
+        results.append((avg_future_return, stock_name)) # 튜플
+
+# avg_future_return을 기준으로 내림차순 정렬
+results.sort(reverse=True, key=lambda x: x[0])
+
+for avg_future_return, stock_name in results:
+    print(f"==== [ {avg_future_return:.2f}% ] {stock_name} ====")
