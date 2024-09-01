@@ -25,13 +25,13 @@ PREDICTION_PERIOD = 5
 # 예측 성장률
 EXPECTED_GROWTH_RATE = 5
 # 데이터 수집 기간
-DATA_COLLECTION_PERIOD = 365
+DATA_COLLECTION_PERIOD = 180
 # EarlyStopping
 EARLYSTOPPING_PATIENCE = 20
 # 데이터셋 크기 ( 타겟 3일: 20, 5-7일: 30~50, 10일: 40~60, 15일: 50~90)
 LOOK_BACK = 30
 # 반복 횟수 ( 5일: 100, 7일: 150, 10일: 200, 15일: 300)
-EPOCHS_SIZE = 120
+EPOCHS_SIZE = 100
 BATCH_SIZE = 32
 
 AVERAGE_VOLUME = 20000
@@ -42,7 +42,7 @@ output_dir = 'D:\\kospi_stocks'
 # 모델 저장 경로
 # 기존 models는 LOOK_BACK = 60인 KOSPI 학습 모델이다
 # model_dir = 'kospi_30_models'
-model_dir = 'kospi_kosdaq_30(5)365_rmsprop_models' # 신규모델
+model_dir = 'kospi_kosdaq_30(5)180_rmsprop_models' # 신규모델
 
 today = datetime.today().strftime('%Y%m%d')
 today_us = datetime.today().strftime('%Y-%m-%d')
@@ -55,7 +55,7 @@ tickers_kospi = stock.get_market_ticker_list(market="KOSPI")
 tickers_kosdaq = stock.get_market_ticker_list(market="KOSDAQ")
 
 tickers = None
-tickers = tickers_kospi + tickers_kosdaq
+#tickers = tickers_kospi + tickers_kosdaq
 
 
 
@@ -250,8 +250,7 @@ def create_model(input_shape):
 # 초기 설정
 max_iterations = 5
 # all_tickers = stock.get_market_ticker_list(market="KOSPI") + stock.get_market_ticker_list(market="KOSDAQ")
-specific_tickers = ['000210', '443060', '042670', '009070', '058850', '010120', '000680', '002360', '210980', '465770', '002240', '009290', '017040', '004370', '001680', '084690', '000430', '006340', '005880', '145720', '082640', '049770', '003160', '092200', '000400', '280360', '001340', '005180', '001820', '336370', '33637K', '026890', '006880', '002310', '018250', '078520', '014830', '000910', '047400', '084680', '103590', '462520', '007810', '450140', '024720', '264900', '055490', '010820', '022100', '017810', '005430', '010100', '123690', '003680', '105630', '014680', '372910', '101530', '003010', '010690', '298050', '003280', '060310', '078150', '151860', '309960', '327260', '019550', '067160', '040300', '198440', '043650', '307750', '204620', '137080', '092730', '348210', '064260', '290670', '045390', '108380', '078600', '213420', '194480', '006620', '005160', '214680', '376300', '171010', '228670', '199550', '042500', '195500', '038290', '235980', '140410', '059210', '142760', '118990', '095500', '218150', '049950', '413640', '086670', '335890', '042370', '307870', '009300', '054540', '091580', '294630', '100660', '018680', '290690', '032680', '357780', '036830', '328380', '025320', '065350', '416180', '138070', '226330', '257720', '099320', '050890', '060590', '125210', '083930', '040910', '078860', '031310', '175250', '027360', '260660', '041510', '109610', '101360', '086520', '247540', '383310', '070300', '053980', '036220', '273640', '041190', '046940', '396470', '030530', '336570', '101730', '206650', '089850', '054930', '372170', '056090', '073490', '088390', '091120', '064090', '101930', '225220', '204270', '452160', '053050', '036890', '362320', '214370', '073010', '272110', '083550', '102370', '237880', '124560', '026150', '064760', '084730', '440110', '177830', '037070', '047310', '263750', '251970', '087010', '009520', '445180', '053160', '237820', '032580', '237750', '043370', '376180', '126700', '114810', '024740', '005860', '192410', '189980', '037440']
-# specific_tickers = ['097950', '001060', '353200', '025560', '003230', '003060', '006740', '348150', '121600', '247660', '950220', '396270', '025900', '110990', '228670', '406820', '413640', '294630', '086710', '226330', '074430', '119830', '247540', '354200', '450520', '234920', '033100', '063080', '060280', '053160', '319660', '067310', '166090', '460930']
+specific_tickers = ['001040', '010120', '006345', '145720', '082640', '001340', '003230', '006740', '103590', '060370', '053290', '099220', '307750', '204620', '225570', '443250', '042500', '195500', '058110', '178320', '290690', '025320', '226330', '257720', '099320', '102120', '260970', '247540', '354200', '170920', '046940', '900340', '009730', '418620', '091120', '452160', '102370', '045970', '448710', '060280', '026150', '331380', '053160', '319660', '043370', '192410']
 
 if tickers is None:
     tickers = specific_tickers
@@ -259,6 +258,7 @@ else:
     specific_tickers = tickers
 
 ticker_to_name = {ticker: stock.get_market_ticker_name(ticker) for ticker in tickers}
+ticker_returns = {}
 
 for iteration in range(max_iterations):
     print(f"==== Iteration {iteration + 1}/{max_iterations} ====")
@@ -428,6 +428,13 @@ for iteration in range(max_iterations):
         if future_return < EXPECTED_GROWTH_RATE:
             continue
 
+        if ticker in ticker_returns:
+            ticker_returns[ticker].append(future_return)
+        else:
+            ticker_returns[ticker] = [future_return]
+
+        saved_tickers.append(ticker)
+
         extended_prices = np.concatenate((data['종가'].values, predicted_prices))
         extended_dates = pd.date_range(start=data.index[0], periods=len(extended_prices))
         last_price = data['종가'].iloc[-1]
@@ -455,7 +462,9 @@ for iteration in range(max_iterations):
         plt.savefig(final_file_path)
         plt.close()
 
-        saved_tickers.append(ticker)
+        if len(ticker_returns[ticker]) == 5:
+            avg_future_return = sum(ticker_returns[ticker]) / 5
+            print(f"==== [ {future_return:.2f}% ] {stock_name} ====")
 
     print("Files were saved for the following tickers:")
     print(saved_tickers)
