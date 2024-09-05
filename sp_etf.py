@@ -17,15 +17,15 @@ from send2trash import send2trash
 
 
 count = 0
-PREDICTION_PERIOD = 2
+PREDICTION_PERIOD = 5
 EXPECTED_GROWTH_RATE = 0
 DATA_COLLECTION_PERIOD = 365
-EARLYSTOPPING_PATIENCE = 30
+EARLYSTOPPING_PATIENCE = 20
 LOOK_BACK = 30
 EPOCHS_SIZE = 150
 BATCH_SIZE = 32
 DROPOUT = 0.3
-tickers = ['SOXL', 'SOXS', 'TSLL', 'NVDL', 'NEON', 'CONL', 'LABU', 'TQQQ', 'SQQQ', 'FFIE', 'ASTS']
+tickers = ['SOXL', 'SOXS', 'TSLL', 'NVDL', 'NEON', 'CONL', 'LABU', 'TQQQ', 'SQQQ', 'FFIE', 'ASTS', 'TSLA', 'GME', 'AMD', 'AVGO', 'INTC', 'NVDA']
 
 # 미국 동부 시간대 설정
 us_timezone = pytz.timezone('America/New_York')
@@ -50,7 +50,7 @@ def get_etf_tickers():
 # tickers = get_etf_tickers()
 
 output_dir = 'D:\\sp500'
-model_dir = 'sp_30(2)etf_models'
+model_dir = 'sp_30(5)etf_models'
 if not os.path.exists(output_dir):
     os.makedirs(output_dir)
 if not os.path.exists(model_dir):
@@ -105,7 +105,8 @@ def create_model(input_shape):
 
     # 출력 레이어
     model.add(Dense(1))
-    model.compile(optimizer='adam', loss='mean_squared_error')
+    # model.compile(optimizer='adam', loss='mean_squared_error')
+    model.compile(optimizer='rmsprop', loss='mse')
     return model
 
 
