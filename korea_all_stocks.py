@@ -32,7 +32,8 @@ EPOCHS_SIZE = 100
 BATCH_SIZE = 32
 
 AVERAGE_VOLUME = 20000
-AVERAGE_TRADING_VALUE = 1000000000
+AVERAGE_TRADING_VALUE = 1200000000
+AVERAGE_TRADING_VALUE = 1200000000
 
 # 그래프 저장 경로
 output_dir = 'D:\\kospi_stocks'
@@ -181,7 +182,7 @@ for iteration in range(max_iterations):
             closing_price_three_months_ago = data_before_three_months.iloc[-1]['종가']
             closing_price_one_year_ago = data_before_one_year.iloc[-1]['종가']
 
-            if (closing_price_three_months_ago > 0 and last_row['종가'] < closing_price_three_months_ago * 0.7) and \
+            if (closing_price_three_months_ago > 0 and last_row['종가'] < closing_price_three_months_ago * 0.65) and \
                     (closing_price_one_year_ago > 0 and last_row['종가'] < closing_price_one_year_ago * 0.5):
                 should_skip = True
 
