@@ -14,18 +14,31 @@ import matplotlib.pyplot as plt
 import tensorflow as tf
 from send2trash import send2trash
 
+'''
+1: 365 5 1차 필터링
+2: 180 5 2차 필터링
+'''
+CONDITION = 2
+
 # Set random seed for reproducibility
 # tf.random.set_seed(42)
 DROPOUT = 0.3
 
 # 시작 종목 인덱스 ( 중단된 경우 다시 시작용 )
-count = 0
+# count = 0
 # 예측 기간
 PREDICTION_PERIOD = 5
-# 예측 성장률
-EXPECTED_GROWTH_RATE = 10
+# 예측 성장률 (기본값 : 5)
+EXPECTED_GROWTH_RATE = 5
+
 # 데이터 수집 기간
-DATA_COLLECTION_PERIOD = 180
+if CONDITION == 1:
+    DATA_COLLECTION_PERIOD = 365
+elif CONDITION == 2:
+    DATA_COLLECTION_PERIOD = 180
+else:
+    DATA_COLLECTION_PERIOD = 180
+
 # EarlyStopping
 EARLYSTOPPING_PATIENCE = 10 #숏 10, 롱 20
 # 데이터셋 크기 ( 타겟 3일: 20, 5-7일: 30~50, 10일: 40~60, 15일: 50~90)
@@ -35,14 +48,20 @@ EPOCHS_SIZE = 100
 BATCH_SIZE = 32
 
 AVERAGE_VOLUME = 20000
-AVERAGE_TRADING_VALUE = 1200000000
+AVERAGE_TRADING_VALUE = 1400000000
 
 # 그래프 저장 경로
 output_dir = 'D:\\kospi_stocks'
 # 모델 저장 경로
 # 기존 models는 LOOK_BACK = 60인 KOSPI 학습 모델이다
 # model_dir = 'kospi_30_models'
-model_dir = 'kospi_kosdaq_30(5)180_rmsprop_models' # 신규모델
+
+if CONDITION == 1:
+    model_dir = 'kospi_kosdaq_30(5)365_rmsprop_models' # 신규모델
+elif CONDITION == 2:
+    model_dir = 'kospi_kosdaq_30(5)180_rmsprop_models' # 신규모델
+else:
+    model_dir = 'kospi_kosdaq_30(5)180_rmsprop_models_128'
 
 today = datetime.today().strftime('%Y%m%d')
 today_us = datetime.today().strftime('%Y-%m-%d')
@@ -54,8 +73,11 @@ start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftim
 tickers_kospi = stock.get_market_ticker_list(market="KOSPI")
 tickers_kosdaq = stock.get_market_ticker_list(market="KOSDAQ")
 
-tickers = None
-# tickers = tickers_kospi + tickers_kosdaq
+
+if CONDITION == 1:
+    tickers = tickers_kospi + tickers_kosdaq # 전체
+elif CONDITION == 2:
+    tickers = None # 선택한 배열
 
 
 
@@ -195,37 +217,6 @@ def create_model(input_shape):
 
     # 출력 레이어
     model.add(Dense(1))
-
-    # # 첫 번째 LSTM 층 (더 많은 유닛과 BatchNormalization)
-    # model.add(LSTM(512, return_sequences=True, input_shape=input_shape))
-    # model.add(Dropout(0.4))
-    # model.add(BatchNormalization())
-    #
-    # # 두 번째 LSTM 층
-    # model.add(LSTM(256, return_sequences=True))
-    # model.add(Dropout(0.4))
-    # model.add(BatchNormalization())
-    #
-    # # 세 번째 LSTM 층
-    # model.add(LSTM(128, return_sequences=True))
-    # model.add(Dropout(0.4))
-    # model.add(BatchNormalization())
-    #
-    # # 네 번째 LSTM 층
-    # model.add(LSTM(64, return_sequences=False))
-    # model.add(Dropout(0.4))
-    # model.add(BatchNormalization())
-    #
-    # # Dense 레이어
-    # model.add(Dense(128, activation='relu'))
-    # model.add(Dropout(0.4))
-    # model.add(Dense(64, activation='relu'))
-    # model.add(Dropout(0.4))
-    # model.add(Dense(32, activation='relu'))
-    #
-    # # 출력 레이어
-    # model.add(Dense(1))
-
     # model.compile(optimizer='adam', loss='mean_squared_error') # mes
 
     '''
@@ -332,7 +323,7 @@ for iteration in range(max_iterations):
 
         if len(data_before_three_months) > 0:
             closing_price_three_months_ago = data_before_three_months.iloc[-1]['종가']
-            if closing_price_three_months_ago > 0 and (last_row['종가'] < closing_price_three_months_ago * 0.68): # 30~40
+            if closing_price_three_months_ago > 0 and (last_row['종가'] < closing_price_three_months_ago * 0.72): # 30~40
                 print(f"                                                        최근 종가가 3달 전의 종가보다 28% 이상 하락했으므로 작업을 건너뜁니다.")
                 continue
 
