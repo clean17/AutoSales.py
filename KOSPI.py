@@ -59,7 +59,7 @@ else:
 LOOK_BACK = 30
 BATCH_SIZE = 32
 
-AVERAGE_VOLUME = 30000
+AVERAGE_VOLUME = 22000
 AVERAGE_TRADING_VALUE = 1600000000
 
 today = datetime.today().strftime('%Y%m%d')
@@ -424,6 +424,7 @@ for iteration in range(max_iterations):
         plt.close()
 
 
+    print(saved_tickers)
     # for file_name in os.listdir(output_dir):
     #     if file_name.startswith(today):
     #         print(f"{file_name}")
@@ -441,5 +442,3 @@ results.sort(reverse=True, key=lambda x: x[0])
 
 for avg_future_return, stock_name in results:
     print(f"==== [ {avg_future_return:.2f}% ] {stock_name} ====")
-
-print(saved_tickers)
