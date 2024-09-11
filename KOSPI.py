@@ -14,73 +14,62 @@ import matplotlib.pyplot as plt
 import tensorflow as tf
 from send2trash import send2trash
 
+
+# tickers = stock.get_market_ticker_list(market="KOSPI")
+tickers_kospi = stock.get_market_ticker_list(market="KOSPI")
+tickers_kosdaq = stock.get_market_ticker_list(market="KOSDAQ")
+
 '''
 1: 365 5 1차 필터링
 2: 180 5 2차 필터링
 '''
-CONDITION = 2
+CONDITION = int(input("CONDITION에 넣을 값을 입력하세요 (1: 전체 스캔, 2: 집중 스캔) : "))
 
 # Set random seed for reproducibility
 # tf.random.set_seed(42)
-DROPOUT = 0.3
 
-# 시작 종목 인덱스 ( 중단된 경우 다시 시작용 )
-# count = 0
+DROPOUT = 0.3
 # 예측 기간
 PREDICTION_PERIOD = 5
-# 예측 성장률 (기본값 : 5)
-EXPECTED_GROWTH_RATE = 5
 
-# 데이터 수집 기간
 if CONDITION == 1:
+    # 예측 성장률 (기본값 : 5)
+    EXPECTED_GROWTH_RATE = 10
+    # 데이터 수집 기간
     DATA_COLLECTION_PERIOD = 365
+    # EarlyStopping
+    EARLYSTOPPING_PATIENCE = 5 #숏 10, 롱 20
+    # 반복 횟수 ( 5일: 100, 7일: 150, 10일: 200, 15일: 300)
+    EPOCHS_SIZE = 40
+    # 모델 저장 경로
+    model_dir = 'kospi_kosdaq_30(5)180_rmsprop_models_128'
+    # 종목
+    tickers = tickers_kospi + tickers_kosdaq # 전체
 elif CONDITION == 2:
+    EXPECTED_GROWTH_RATE = 5
     DATA_COLLECTION_PERIOD = 180
+    EARLYSTOPPING_PATIENCE = 10
+    EPOCHS_SIZE = 100
+    model_dir = 'kospi_kosdaq_30(5)180_rmsprop_models'
+    tickers = None # 선택한 배열
 else:
-    DATA_COLLECTION_PERIOD = 180
+    print('잘못된 값을 입력했습니다.')
 
-# EarlyStopping
-EARLYSTOPPING_PATIENCE = 10 #숏 10, 롱 20
 # 데이터셋 크기 ( 타겟 3일: 20, 5-7일: 30~50, 10일: 40~60, 15일: 50~90)
 LOOK_BACK = 30
-# 반복 횟수 ( 5일: 100, 7일: 150, 10일: 200, 15일: 300)
-EPOCHS_SIZE = 100
 BATCH_SIZE = 32
 
-AVERAGE_VOLUME = 20000
-AVERAGE_TRADING_VALUE = 1400000000
-
-# 그래프 저장 경로
-output_dir = 'D:\\kospi_stocks'
-# 모델 저장 경로
-# 기존 models는 LOOK_BACK = 60인 KOSPI 학습 모델이다
-# model_dir = 'kospi_30_models'
-
-if CONDITION == 1:
-    model_dir = 'kospi_kosdaq_30(5)365_rmsprop_models' # 신규모델
-elif CONDITION == 2:
-    model_dir = 'kospi_kosdaq_30(5)180_rmsprop_models' # 신규모델
-else:
-    model_dir = 'kospi_kosdaq_30(5)180_rmsprop_models_128'
+AVERAGE_VOLUME = 30000
+AVERAGE_TRADING_VALUE = 1600000000
 
 today = datetime.today().strftime('%Y%m%d')
 today_us = datetime.today().strftime('%Y-%m-%d')
 start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y%m%d')
 
 
-# tickers = stock.get_market_ticker_list(market="KOSPI")
 
-tickers_kospi = stock.get_market_ticker_list(market="KOSPI")
-tickers_kosdaq = stock.get_market_ticker_list(market="KOSDAQ")
-
-
-if CONDITION == 1:
-    tickers = tickers_kospi + tickers_kosdaq # 전체
-elif CONDITION == 2:
-    tickers = None # 선택한 배열
-
-
-
+# 그래프 저장 경로
+output_dir = 'D:\\kospi_stocks'
 # model_dir = os.path.join(output_dir, 'models')
 
 if not os.path.exists(output_dir):
@@ -187,33 +176,29 @@ def create_dataset(dataset, look_back=60):
 def create_model(input_shape):
     model = tf.keras.Sequential()
 
-    # 30일 훈련.. 예측이 안맞는걸까 장이 안좋을걸까
-    # model.add(LSTM(128, return_sequences=True, input_shape=input_shape))
-    # model.add(Dropout(0.2))
-    # model.add(LSTM(64, return_sequences=False))
-    # model.add(Dropout(0.2))
-    # model.add(Dense(32, activation='relu'))
-    # model.add(Dropout(0.2))
-    # model.add(Dense(16, activation='relu'))
-
-
-    model.add((LSTM(256, return_sequences=True, input_shape=input_shape)))
-    model.add(Dropout(DROPOUT))
-
-    # 두 번째 LSTM 층
-    model.add(LSTM(128, return_sequences=True))
-    model.add(Dropout(DROPOUT))
-
-    # 세 번째 LSTM 층
-    model.add(LSTM(64, return_sequences=False))
-    model.add(Dropout(DROPOUT))
-
-    # Dense 레이어
-    model.add(Dense(64, activation='relu'))
-    model.add(Dropout(DROPOUT))
-    model.add(Dense(32, activation='relu'))
-    model.add(Dropout(DROPOUT))
-    model.add(Dense(16, activation='relu'))
+    if CONDITION == 1:
+        model.add(LSTM(128, return_sequences=True, input_shape=input_shape))
+        model.add(Dropout(0.2))
+        model.add(LSTM(64, return_sequences=False))
+        model.add(Dropout(0.2))
+        model.add(Dense(32, activation='relu'))
+        model.add(Dropout(0.2))
+        model.add(Dense(16, activation='relu'))
+    elif CONDITION == 2:
+        model.add((LSTM(256, return_sequences=True, input_shape=input_shape)))
+        model.add(Dropout(DROPOUT))
+        # 두 번째 LSTM 층
+        model.add(LSTM(128, return_sequences=True))
+        model.add(Dropout(DROPOUT))
+        # 세 번째 LSTM 층
+        model.add(LSTM(64, return_sequences=False))
+        model.add(Dropout(DROPOUT))
+        # Dense 레이어
+        model.add(Dense(64, activation='relu'))
+        model.add(Dropout(DROPOUT))
+        model.add(Dense(32, activation='relu'))
+        model.add(Dropout(DROPOUT))
+        model.add(Dense(16, activation='relu'))
 
     # 출력 레이어
     model.add(Dense(1))
@@ -235,16 +220,10 @@ def create_model(input_shape):
 #     return model(data)
 
 
-# 종목 코드와 이름 딕셔너리 생성
-
-
-# 초기 설정
+# 반복 설정
 max_iterations = 5
 # all_tickers = stock.get_market_ticker_list(market="KOSPI") + stock.get_market_ticker_list(market="KOSDAQ")
-specific_tickers = ['011150', '000990', '000210', '375500', '017860', '006360', '001250', '009540', '267270', '010620', '322000', '042670', '267260', '204320', '001060', '092220', '003620', '001390', '058850', '058860', '011070', '037560', '051915', '079550', '010120', '000680', '229640', '108320', '035420', '181710', '456040', '010060', '178920', '005490', '010950', '034120', '002360', '011790', '402340', '361610', '100090', '285130', '011810', '465770', '002710', '007980', '002900', '037270', '000500', '012320', '002240', '009290', '017040', '017900', '083420', '014530', '073240', '000270', '004540', '008350', '004270', '090350', '006280', '145210', '000490', '001685', '084690', '084695', '128820', '014160', '069620', '000430', '006340', '006345', '002880', '012800', '006650', '001790', '012510', '004830', '145720', '460860', '001230', '004140', '002210', '008970', '014820', '163560', '000150', '454910', '000155', '336260', '192650', '092200', '000400', '020150', '286940', '011170', '001340', '035150', '007210', '003850', '003000', '026940', '100220', '090460', '003960', '014710', '009150', '005930', '001360', '010140', '068290', '003230', '005680', '004380', '009470', '011230', '001820', '000390', '007860', '200880', '021050', '004490', '336370', '004430', '126720', '011930', '031430', '006880', '008700', '002790', '267850', '010780', '001780', '018250', '078520', '007460', '003060', '900140', '097520', '006740', '271560', '017370', '105840', '016880', '000910', '047400', '077500', '000220', '008730', '025820', '457190', '007660', '081000', '103590', '033240', '194370', '462520', '018470', '185750', '011000', '033250', '035720', '323410', '377300', '281820', '007810', '005070', '138490', '003070', '450140', '120110', '024720', '020120', '014580', '004105', '214420', '363280', '005690', '028670', '010820', '022100', '058430', '047050', '352820', '071090', '036460', '010100', '161390', '053690', '042700', '105630', '014680', '011700', '014130', '052690', '009830', '272210', '082740', '004560', '004020', '005380', '011760', '008770', '378850', '010660', '093370', '000540', '003280', '060310', '265520', '211270', '241520', '180400', '214270', '083450', '297890', '440290', '278650', '403870', '095340', '035900', '151860', '035600', '060720', '061970', '309960', '060370', '417200', '104200', '024940', '218410', '419530', '036540', '048550', '067160', '289080', '048770', '057030', '040300', '078890', '399720', '198440', '217730', '114190', '094480', '024910', '348150', '098460', '029480', '043650', '035080', '402490', '186230', '204620', '282720', '049080', '407400', '121600', '247660', '039860', '405920', '190510', '242040', '138610', '330860', '348210', '376930', '142280', '234690', '348340', '144960', '085670', '064260', '340360', '039560', '032190', '020400', '008830', '048470', '027830', '129920', '045390', '108380', '078600', '054670', '067080', '298540', '317330', '077360', '263600', '194480', '263800', '261200', '005160', '075970', '033500', '088130', '005290', '025900', '131970', '223250', '060570', '362990', '110990', '214680', '376300', '092070', '104460', '105740', '066670', '187220', '383930', '418420', '300120', '214260', '171010', '443250', '228670', '199550', '281740', '277810', '215100', '090360', '108490', '328130', '058470', '277070', '042500', '219420', '439090', '195500', '098120', '093520', '100590', '446540', '235980', '041920', '086900', '140410', '059210', '363260', '250060', '288980', '142760', '095500', '254490', '218150', '049950', '207760', '059090', '418470', '064550', '314930', '323990', '382900', '006910', '226340', '014470', '406820', '064480', '288330', '089970', '439580', '126340', '419540', '146320', '083650', '042370', '148780', '032850', '072950', '452430', '419120', '419050', '009620', '000250', '437730', '027580', '091580', '263810', '411080', '252990', '294630', '100660', '014620', '015750', '148150', '017510', '036630', '053450', '321370', '108860', '208370', '068760', '290690', '032680', '066910', '357780', '036830', '328380', '253840', '094840', '099440', '330730', '352090', '253450', '408900', '033170', '025320', '215600', '065350', '416180', '162300', '290560', '138070', '243840', '036710', '160980', '099320', '088280', '050890', '109670', '066790', '222080', '352480', '264660', '297090', '359090', '060590', '123860', '125210', '074430', '092040', '083930', '339950', '099190', '040910', '461030', '451220', '031310', '114840', '027360', '059120', '158430', '053800', '131370', '140670', '347860', '293780', '900100', '052790', '174900', '255440', '102120', '238120', '019990', '270660', '389500', '060540', '056190', '246250', '041510', '109610', '096630', '039440', '288620', '058610', '203400', '195990', '445090', '355690', '021080', '200470', '038870', '101360', '086520', '247540', '038110', '036810', '083500', '205100', '317770', '092870', '455900', '419080', '348370', '069410', '291230', '290650', '170920', '058970', '373170', '179290', '033160', '122640', '322310', '036220', '226400', '080580', '440320', '394280', '131030', '232140', '112290', '273640', '273060', '122870', '332570', '403490', '032820', '041190', '215360', '101170', '103840', '046940', '457550', '396470', '074600', '104830', '014190', '030530', '382840', '336060', '330350', '036090', '097800', '036200', '086390', '142210', '048430', '206650', '032620', '054930', '056080', '240600', '221800', '179900', '146060', '044960', '302430', '073490', '272290', '264850', '054210', '009730', '115610', '351330', '047560', '239340', '418620', '123570', '091120', '039030', '389470', '277410', '450520', '049070', '048530', '071200', '333430', '094820', '950140', '389020', '234920', '289220', '110020', '095700', '159580', '147830', '033100', '079370', '033320', '417500', '204270', '452160', '094970', '418550', '089790', '199820', '038010', '080220', '067000', '036930', '072020', '000440', '228760', '144510', '119850', '388050', '109820', '036890', '285800', '261780', '278280', '362320', '094360', '293490', '452300', '451760', '078340', '063080', '307930', '263700', '214370', '192250', '115500', '093320', '073010', '053080', '199430', '432470', '272110', '032500', '089010', '220260', '391710', '123410', '183300', '089890', '360350', '355150', '045970', '384470', '950160', '033290', '448710', '015710', '432720', '365270', '060280', '372320', '115180', '445680', '405100', '900250', '237880', '139670', '219130', '360070', '044490', '124560', '095610', '089030', '393210', '199800', '057680', '064760', '131290', '388870', '150900', '047310', '368770', '441270', '027710', '087010', '389140', '105760', '009520', '189690', '039980', '041910', '234100', '445180', '321260', '053610', '237820', '032580', '051380', '031980', '347740', '137400', '128660', '376180', '087600', '161580', '347770', '417180', '166090', '136480', '003380', '365590', '126700', '256840', '041460', '054040', '032300', '030520', '052600', '114810', '430690', '078350', '091440', '024740', '005860', '059270', '084990', '170030', '460930', '039610', '061250', '097870', '078590', '115160', '175140', '200670', '243070', '037440']
-
-
-
+specific_tickers = ['000990', '009540', '267270', '322000', '267260', '058850', '079550', '010120', '229640', '108320', '178920', '011790', '402340', '465770', '000490', '006340', '006345', '012510', '192650', '286940', '003000', '090460', '200880', '007660', '103590', '194370', '281820', '003070', '053690', '082740', '035900', '309960', '043650', '035080', '186230', '204620', '234690', '008830', '108380', '078600', '214680', '439090', '363260', '254490', '418470', '083650', '042370', '000250', '411080', '015750', '017510', '108860', '357780', '050890', '123860', '040910', '461030', '031310', '059120', '270660', '389500', '246250', '203400', '247540', '083500', '058970', '036220', '080580', '273640', '403490', '041190', '396470', '206650', '264850', '054210', '091120', '039030', '277410', '095700', '033100', '204270', '228760', '119850', '261780', '362320', '452300', '073010', '448710', '365270', '060280', '445680', '095610', '089030', '199800', '131290', '039980', '041910', '053610', '237820', '126700', '059270', '039610']
 
 if tickers is None:
     tickers = specific_tickers
@@ -270,11 +249,6 @@ for iteration in range(max_iterations):
         tickers = specific_tickers  # 두 번째 반복은 특정 배열로 실행
     else:
         tickers = saved_tickers  # 그 이후는 이전 반복에서 저장된 종목들
-
-    # if iteration == 0:
-    #     tickers = all_tickers  # 첫 번째 반복은 모든 종목
-    # else:
-    #     tickers = saved_tickers  # 그 이후는 이전 반복에서 저장된 종목들
 
     # 결과를 저장할 배열
     saved_tickers = []
@@ -321,46 +295,40 @@ for iteration in range(max_iterations):
         three_months_ago_date = todayTime - pd.DateOffset(months=3)
         data_before_three_months = data.loc[:three_months_ago_date]
 
+        is_three_month_skip = False
         if len(data_before_three_months) > 0:
             closing_price_three_months_ago = data_before_three_months.iloc[-1]['종가']
             if closing_price_three_months_ago > 0 and (last_row['종가'] < closing_price_three_months_ago * 0.72): # 30~40
                 print(f"                                                        최근 종가가 3달 전의 종가보다 28% 이상 하락했으므로 작업을 건너뜁니다.")
+                is_three_month_skip = True
                 continue
 
-        # 1년 전의 종가와 비교
-        # 데이터를 기준으로 반복해서 날짜를 줄여가며 찾음
-        # data_before_one_year = pd.DataFrame()  # 초기 빈 데이터프레임
-        # days_offset = 365
-        #
-        # while days_offset >= 360:
-        #     one_year_ago_date = todayTime - pd.DateOffset(days=days_offset)
-        #     data_before_one_year = data.loc[:one_year_ago_date]
-        #
-        #     if not data_before_one_year.empty:  # 빈 배열이 아닌 경우
-        #         break  # 조건을 만족하면 반복 종료
-        #     days_offset -= 1  # 다음 날짜 시도
+        if DATA_COLLECTION_PERIOD >= 360:
+            # 1년 전의 종가와 비교, 데이터를 기준으로 반복해서 날짜를 줄여가며 찾음
+            data_before_one_year = pd.DataFrame()  # 초기 빈 데이터프레임
+            days_offset = 365
 
-        # 1년 전과 비교
-        # if len(data_before_one_year) > 0:
-        #     closing_price_one_year_ago = data_before_one_year.iloc[-1]['종가']
-        #     if closing_price_one_year_ago > 0 and (last_row['종가'] < closing_price_one_year_ago * 0.5):
-        #         print(f"                                                        최근 종가가 1년 전의 종가보다 50% 이상 하락했으므로 작업을 건너뜁니다.")
-        #         continue
+            while days_offset >= 360:
+                one_year_ago_date = todayTime - pd.DateOffset(days=days_offset)
+                data_before_one_year = data.loc[:one_year_ago_date]
+                if not data_before_one_year.empty:  # 빈 배열이 아닌 경우
+                    break  # 조건을 만족하면 반복 종료
+                days_offset -= 1  # 다음 날짜 시도
 
-        # 두 조건을 모두 만족하는지 확인
-        # should_skip = False
-        #
-        # if len(data_before_three_months) > 0 and len(data_before_one_year) > 0:
-        #     closing_price_three_months_ago = data_before_three_months.iloc[-1]['종가']
-        #     closing_price_one_year_ago = data_before_one_year.iloc[-1]['종가']
-        #
-        #     if (closing_price_three_months_ago > 0 and last_row['종가'] < closing_price_three_months_ago * 0.7) and \
-        #             (closing_price_one_year_ago > 0 and last_row['종가'] < closing_price_one_year_ago * 0.5):
-        #         should_skip = True
-        #
-        # if should_skip:
-        #     print(f"                                                        최근 종가가 3달 전의 종가보다 30% 이상 하락하고 1년 전의 종가보다 50% 이상 하락했으므로 작업을 건너뜁니다.")
-        #     continue
+            is_one_year_skip = False
+            # 1년 전과 비교
+            if len(data_before_one_year) > 0:
+                closing_price_one_year_ago = data_before_one_year.iloc[-1]['종가']
+                if closing_price_one_year_ago > 0 and (last_row['종가'] < closing_price_one_year_ago * 0.5):
+                    print(f"                                                        최근 종가가 1년 전의 종가보다 50% 이상 하락했으므로 작업을 건너뜁니다.")
+                    is_one_year_skip = True
+                    continue
+
+            # 두 조건을 모두 만족하는지 확인
+            if (is_three_month_skip and is_one_year_skip):
+                print(f"                                                        최근 종가가 3달 전의 종가보다 28% 이상 하락하고 1년 전의 종가보다 50% 이상 하락했으므로 작업을 건너뜁니다.")
+                continue
+
 
         scaler = MinMaxScaler(feature_range=(0, 1))
         scaled_data = scaler.fit_transform(data.values)
@@ -385,9 +353,6 @@ for iteration in range(max_iterations):
             model = tf.keras.models.load_model(model_file_path)
         else:
             model = create_model((X_train.shape[1], X_train.shape[2]))
-            # 지금은 매번 학습할 예정이다
-            # model.fit(X, Y, epochs=3, batch_size=32, verbose=1, validation_split=0.1)
-            # model.save(model_file_path)
 
         early_stopping = EarlyStopping(
             monitor='val_loss',
