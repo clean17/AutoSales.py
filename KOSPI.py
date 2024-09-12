@@ -15,9 +15,7 @@ import tensorflow as tf
 from send2trash import send2trash
 
 
-# tickers = stock.get_market_ticker_list(market="KOSPI")
-tickers_kospi = stock.get_market_ticker_list(market="KOSPI")
-tickers_kosdaq = stock.get_market_ticker_list(market="KOSDAQ")
+specific_tickers = ['105560', '108320', '181710', '011420', '011780', '004270', '001685', '004835', '068290', '900140', '077500', '000105', '457190', '005950', '007110', '033240', '018470', '086790', '036120', '098460', '366030', '186230', '129920', '213420', '263600', '434480', '214610', '307870', '000250', '378800', '046890', '215600', '290560', '462350', '123570', '307930', '263700', '432470', '102370', '199800', '033540', '388870', '234100', '163730', '450330', '149980', '053300', '452190', '234340']
 
 '''
 1: 365 5 1차 필터링
@@ -34,7 +32,7 @@ PREDICTION_PERIOD = 5
 
 if CONDITION == 1:
     # 예측 성장률 (기본값 : 5)
-    EXPECTED_GROWTH_RATE = 10
+    EXPECTED_GROWTH_RATE = 5
     # 데이터 수집 기간
     DATA_COLLECTION_PERIOD = 365
     # EarlyStopping
@@ -44,6 +42,8 @@ if CONDITION == 1:
     # 모델 저장 경로
     model_dir = 'kospi_kosdaq_30(5)180_rmsprop_models_128'
     # 종목
+    tickers_kospi = stock.get_market_ticker_list(market="KOSPI")
+    tickers_kosdaq = stock.get_market_ticker_list(market="KOSDAQ")
     tickers = tickers_kospi + tickers_kosdaq # 전체
 elif CONDITION == 2:
     EXPECTED_GROWTH_RATE = 5
@@ -223,12 +223,9 @@ def create_model(input_shape):
 # 반복 설정
 max_iterations = 5
 # all_tickers = stock.get_market_ticker_list(market="KOSPI") + stock.get_market_ticker_list(market="KOSDAQ")
-specific_tickers = ['000990', '009540', '267270', '322000', '267260', '058850', '079550', '010120', '229640', '108320', '178920', '011790', '402340', '465770', '000490', '006340', '006345', '012510', '192650', '286940', '003000', '090460', '200880', '007660', '103590', '194370', '281820', '003070', '053690', '082740', '035900', '309960', '043650', '035080', '186230', '204620', '234690', '008830', '108380', '078600', '214680', '439090', '363260', '254490', '418470', '083650', '042370', '000250', '411080', '015750', '017510', '108860', '357780', '050890', '123860', '040910', '461030', '031310', '059120', '270660', '389500', '246250', '203400', '247540', '083500', '058970', '036220', '080580', '273640', '403490', '041190', '396470', '206650', '264850', '054210', '091120', '039030', '277410', '095700', '033100', '204270', '228760', '119850', '261780', '362320', '452300', '073010', '448710', '365270', '060280', '445680', '095610', '089030', '199800', '131290', '039980', '041910', '053610', '237820', '126700', '059270', '039610']
 
 if tickers is None:
     tickers = specific_tickers
-else:
-    specific_tickers = tickers
 
 ticker_to_name = {ticker: stock.get_market_ticker_name(ticker) for ticker in tickers}
 ticker_returns = {}
@@ -245,10 +242,8 @@ for iteration in range(max_iterations):
             send2trash(os.path.join(output_dir, file_name))
 
     # 특정 배열을 가져왔을때 / 예를 들어 60(10)으로 가져온 배열을 40(5)로 돌리는 경우
-    if iteration == 0:
-        tickers = specific_tickers  # 두 번째 반복은 특정 배열로 실행
-    else:
-        tickers = saved_tickers  # 그 이후는 이전 반복에서 저장된 종목들
+    if iteration != 0:
+        tickers = saved_tickers  # 2회차 부터 이전 반복에서 저장된 종목들
 
     # 결과를 저장할 배열
     saved_tickers = []
@@ -428,6 +423,8 @@ for iteration in range(max_iterations):
     # for file_name in os.listdir(output_dir):
     #     if file_name.startswith(today):
     #         print(f"{file_name}")
+
+####################################
 
 results = []
 
