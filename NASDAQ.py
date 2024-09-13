@@ -17,16 +17,17 @@ from send2trash import send2trash
 # Set random seed for reproducibility
 # tf.random.set_seed(42)
 
-count = 0
 DROPOUT = 0.3
-PREDICTION_PERIOD = 10
+DROPOUT = 0.3
+PREDICTION_PERIOD = 5
 EXPECTED_GROWTH_RATE = 2
 DATA_COLLECTION_PERIOD = 180
-EARLYSTOPPING_PATIENCE = 30
+EARLYSTOPPING_PATIENCE = 10
 LOOK_BACK = 30
 EPOCHS_SIZE = 100
 BATCH_SIZE = 32
-
+AVERAGE_VOLUME = 30000
+AVERAGE_TRADING_VALUE = 2000000000
 
 # 미국 동부 시간대 설정
 us_timezone = pytz.timezone('America/New_York')
@@ -246,17 +247,18 @@ for iteration in range(max_iterations):
         if future_return < EXPECTED_GROWTH_RATE:
             continue
 
-        # average_volume = data['Volume'].mean() # volume
-        # if average_volume <= 5000:
-        #     print('##### average_volume ', average_volume)
-        #     continue
-        #
-        # # 일일 평균 거래대금
-        # trading_value = data['Volume'] * data['Close']
-        # average_trading_value = trading_value.mean()
-        # if average_trading_value <= 1000000000:
-        #     print('##### average_trading_value ', average_trading_value)
-        #     continue
+        average_volume = data['Volume'].mean() # volume
+        if average_volume <= AVERAGE_VOLUME:
+            print(f'                                                        average_volume ', average_volume)
+            continue
+
+        # 일일 평균 거래대금
+        trading_value = data['Volume'] * data['Close']
+        average_trading_value = trading_value.mean()
+        if average_trading_value <= AVERAGE_TRADING_VALUE:
+            formatted_value = f"{average_trading_value / 100000000:.0f}억"
+            print(f'                                                        average_trading_value ', {formatted_value})
+            continue
 
         if ticker in ticker_returns:
             ticker_returns[ticker].append(future_return)
