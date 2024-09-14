@@ -1,3 +1,5 @@
+import matplotlib # tkinter 충돌 방지, Agg 백엔드를 사용하여 GUI를 사용하지 않도록 한다
+matplotlib.use('Agg')
 import os
 import pytz
 import pandas as pd
