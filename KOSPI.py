@@ -13,6 +13,7 @@ from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
 import matplotlib.pyplot as plt
 import tensorflow as tf
 from send2trash import send2trash
+import ast
 
 
 specific_tickers = ['105560', '108320', '181710', '011420', '011780', '004270', '001685', '004835', '068290', '900140', '077500', '000105', '457190', '005950', '007110', '033240', '018470', '086790', '036120', '098460', '366030', '186230', '129920', '213420', '263600', '434480', '214610', '307870', '000250', '378800', '046890', '215600', '290560', '462350', '123570', '307930', '263700', '432470', '102370', '199800', '033540', '388870', '234100', '163730', '450330', '149980', '053300', '452190', '234340']
@@ -46,6 +47,8 @@ if CONDITION == 1:
     tickers_kosdaq = stock.get_market_ticker_list(market="KOSDAQ")
     tickers = tickers_kospi + tickers_kosdaq # 전체
 elif CONDITION == 2:
+    specific_tickers = input("specific_tickers에 넣을 값을 입력하세요 : ")
+    specific_tickers = ast.literal_eval(specific_tickers)
     EXPECTED_GROWTH_RATE = 5
     DATA_COLLECTION_PERIOD = 180
     EARLYSTOPPING_PATIENCE = 10
