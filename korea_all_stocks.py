@@ -18,27 +18,29 @@ DROPOUT = 0.3
 # 시작 종목 인덱스 ( 중단된 경우 다시 시작용 )
 count = 0
 # 예측 기간
-PREDICTION_PERIOD = 10
+PREDICTION_PERIOD = 5
 # 예측 성장률
-EXPECTED_GROWTH_RATE = 3
+EXPECTED_GROWTH_RATE = 5
 # 데이터 수집 기간
 DATA_COLLECTION_PERIOD = 365
 # EarlyStopping
-EARLYSTOPPING_PATIENCE = 20
+EARLYSTOPPING_PATIENCE = 5
 # 데이터셋 크기 ( 타겟 3일: 20, 5-7일: 30~50, 10일: 40~60, 15일: 50~90)
-LOOK_BACK = 60
+# LOOK_BACK = 60
+LOOK_BACK = 30
 # 반복 횟수 ( 5일: 100, 7일: 150, 10일: 200, 15일: 300)
-EPOCHS_SIZE = 100
+# EPOCHS_SIZE = 100
+EPOCHS_SIZE = 50 # 속성
 BATCH_SIZE = 32
 
-AVERAGE_VOLUME = 20000
-AVERAGE_TRADING_VALUE = 1200000000
-AVERAGE_TRADING_VALUE = 1200000000
+AVERAGE_VOLUME = 30000
+AVERAGE_TRADING_VALUE = 1600000000
 
 # 그래프 저장 경로
 output_dir = 'D:\\kospi_stocks'
 # 모델 저장 경로
 model_dir = 'kospi_kosdaq_60(10)_models' # 신규모델
+model_dir = 'kospi_kosdaq_30(5)365_rmsprop_models' # 신규모델
 
 today = datetime.today().strftime('%Y%m%d')
 today_us = datetime.today().strftime('%Y-%m-%d')
