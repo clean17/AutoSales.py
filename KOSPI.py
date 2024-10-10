@@ -15,21 +15,40 @@ import tensorflow as tf
 from send2trash import send2trash
 import ast
 
+# Set random seed for reproducibility
+# tf.random.set_seed(42)
 
 specific_tickers = ['229640', '181710', '011780', '004270', '000490', '004835', '192650', '005935', '068290', '004430', '097520', '077500', '007110', '033250', '003350', '105630', '003280', '036120', '255220', '067160', '289080', '098460', '253590', '213420', '131970', '281740', '235980', '049950', '307870', '032850', '419120', '000250', '378800', '294630', '046890', '049180', '328380', '215600', '456010', '059120', '109610', '203400', '021080', '356680', '039200', '080580', '273060', '240810', '101160', '101730', '123420', '303530', '462350', '123570', '033230', '095700', '452300', '263700', '432470', '102370', '033540', '388870', '234100', '053610', '163730', '450330', '149980', '053300', '430690', '054920', '084990']
 
 '''
 1: 365 5 1차 필터링
 2: 180 5 2차 필터링
+3: 1차 > 2차 필터링
 '''
-CONDITION = int(input("CONDITION에 넣을 값을 입력하세요 (1: 전체 스캔, 2: 집중 스캔) : "))
 
-# Set random seed for reproducibility
-# tf.random.set_seed(42)
+# 조건 입력
+CONDITION = int(input("CONDITION에 넣을 값을 입력하세요 (1: 전체 스캔, 2: 집중 스캔, 3: 후속 작업) : "))
 
+
+# 공통 설정값
 DROPOUT = 0.3
-# 예측 기간
 PREDICTION_PERIOD = 5
+LOOK_BACK = 30
+# 데이터셋 크기 ( 타겟 3일: 20, 5-7일: 30~50, 10일: 40~60, 15일: 50~90)
+BATCH_SIZE = 32
+# 그래프 저장 경로
+output_dir = 'D:\\kospi_stocks'
+# model_dir = os.path.join(output_dir, 'models')
+os.makedirs(output_dir, exist_ok=True)
+# 평균거래량
+AVERAGE_VOLUME = 25000
+# 평균거래대금
+AVERAGE_TRADING_VALUE = 1700000000 # 평균거래량
+
+# 변수 초기화
+tickers = None
+model_dir = ''
+saved_tickers = []  # 조건 만족한 종목을 저장할 리스트
 
 if CONDITION == 1:
     # 예측 성장률 (기본값 : 5)
@@ -55,111 +74,29 @@ elif CONDITION == 2:
     EPOCHS_SIZE = 100
     model_dir = 'kospi_kosdaq_30(5)180_rmsprop_models'
     tickers = None # 선택한 배열
+elif CONDITION == 3:
+    # 후속 작업 조건
+    print("작업 상태를 확인합니다...")
+    if saved_tickers and len(saved_tickers) >= 60:
+        print("저장된 종목 개수가 60개 이상입니다. 후속 작업을 진행합니다.")
+        # 후속 작업 코드를 여기에 작성
+    else:
+        print("조건을 만족하지 않아 작업을 종료합니다.")
+    exit()
 else:
     print('잘못된 값을 입력했습니다.')
+    exit()
 
-# 데이터셋 크기 ( 타겟 3일: 20, 5-7일: 30~50, 10일: 40~60, 15일: 50~90)
-LOOK_BACK = 30
-BATCH_SIZE = 32
-
-AVERAGE_VOLUME = 25000
-AVERAGE_TRADING_VALUE = 1700000000
 
 today = datetime.today().strftime('%Y%m%d')
 today_us = datetime.today().strftime('%Y-%m-%d')
 start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y%m%d')
 
 
-
-# 그래프 저장 경로
-output_dir = 'D:\\kospi_stocks'
-# model_dir = os.path.join(output_dir, 'models')
-
 if not os.path.exists(output_dir):
     os.makedirs(output_dir)
 if not os.path.exists(model_dir):
     os.makedirs(model_dir)
-
-# 주식 데이터와 기본적인 재무 데이터를 가져온다
-# def fetch_stock_data(ticker, fromdate, todate):
-#     ohlcv = stock.get_market_ohlcv_by_date(fromdate, todate, ticker)
-#     fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker)
-#     stock_name = ticker_to_name.get(ticker, 'Unknown Stock')
-#
-#     if 'PER' not in fundamental.columns:
-#         print(f"PER data not available for {ticker} ({stock_name}). Filling with 0.")
-#         fundamental['PER'] = 0  # PER 열이 없는 경우 0으로 채움
-#
-#     # PER 값이 NaN인 경우 0으로 채움
-#     fundamental['PER'] = fundamental['PER'].fillna(0)
-#     data = pd.concat([ohlcv, fundamental['PER']], axis=1).fillna(0)
-#     return data
-
-# def fetch_stock_data(ticker, fromdate, todate):
-#     ohlcv = stock.get_market_ohlcv_by_date(fromdate, todate, ticker)
-#     daily_fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker) # 기본 일별
-#     stock_name = ticker_to_name.get(ticker, 'Unknown Stock')
-#
-#     # 'PER' 컬럼이 존재하는지 먼저 확인
-#     if 'PER' not in daily_fundamental.columns:
-#         # 일별 데이터에서 PER 정보가 없으면 월별 데이터 요청
-#         monthly_fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker, "m")
-#         if 'PER' in monthly_fundamental.columns:
-#             # 월별 PER 정보를 일별 데이터에 매핑
-#             daily_fundamental['PER'] = monthly_fundamental['PER'].reindex(daily_fundamental.index, method='ffill')
-#         else:
-#             # 월별 PER 정보도 없는 경우 0으로 처리
-#             daily_fundamental['PER'] = 0
-#     else:
-#         # 일별 PER 데이터 사용, NaN 값 0으로 채우기
-#         daily_fundamental['PER'] = daily_fundamental['PER'].fillna(0)
-#
-#     # PER 데이터가 없으면 0으로 채우기
-#     if 'PER' not in daily_fundamental.columns or daily_fundamental['PER'].isnull().all():
-#         print(f"PER data not available for {ticker} ({stock_name}). Filling with 0.")
-#         daily_fundamental['PER'] = 0
-#
-#     # PER 값이 NaN인 경우 0으로 채움
-#     daily_fundamental['PER'] = daily_fundamental['PER'].fillna(0)
-#     data = pd.concat([ohlcv, daily_fundamental[['PER']]], axis=1).fillna(0)
-#     return data
-
-# def fetch_stock_data(ticker, fromdate, todate):
-#     ohlcv = stock.get_market_ohlcv_by_date(fromdate, todate, ticker)
-#     daily_fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker) # 기본 일별
-#     stock_name = ticker_to_name.get(ticker, 'Unknown Stock')
-#
-#     # 'PER' 컬럼이 존재하는지 먼저 확인
-#     if 'PER' not in daily_fundamental.columns:
-#         # 일별 데이터에서 PER 정보가 없으면 월별 데이터 요청
-#         monthly_fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker, "m")
-#         if 'PER' in monthly_fundamental.columns:
-#             # 월별 PER 정보를 일별 데이터에 매핑
-#             daily_fundamental['PER'] = monthly_fundamental['PER'].reindex(daily_fundamental.index, method='ffill')
-#         else:
-#             daily_fundamental['PER'] = 0
-#     else:
-#         daily_fundamental['PER'] = daily_fundamental['PER'].fillna(0)
-#
-#     # 'PBR' 컬럼이 존재하는지 먼저 확인
-#     if 'PBR' not in daily_fundamental.columns:
-#         monthly_fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker, "m")
-#         if 'PBR' in monthly_fundamental.columns:
-#             daily_fundamental['PBR'] = monthly_fundamental['PBR'].reindex(daily_fundamental.index, method='ffill')
-#         else:
-#             daily_fundamental['PBR'] = 0
-#     else:
-#         daily_fundamental['PBR'] = daily_fundamental['PBR'].fillna(0)
-#
-#     # PER 값이 NaN인 경우 0으로 채움
-#     daily_fundamental['PER'] = daily_fundamental['PER'].fillna(0)
-#     # PBR 값이 NaN인 경우 0으로 채움
-#     daily_fundamental['PBR'] = daily_fundamental['PBR'].fillna(0)
-#
-#     # 필요한 데이터만 선택하여 결합
-#     data = pd.concat([ohlcv[['종가', '거래량']], daily_fundamental[['PER', 'PBR']]], axis=1).fillna(0)
-#
-#     return data
 
 def fetch_stock_data(ticker, fromdate, todate):
     ohlcv = stock.get_market_ohlcv_by_date(fromdate, todate, ticker)
@@ -232,7 +169,6 @@ if tickers is None:
 
 ticker_to_name = {ticker: stock.get_market_ticker_name(ticker) for ticker in tickers}
 ticker_returns = {}
-saved_tickers = []
 
 for iteration in range(max_iterations):
     print("\n")
@@ -442,3 +378,90 @@ results.sort(reverse=True, key=lambda x: x[0])
 
 for avg_future_return, stock_name in results:
     print(f"==== [ {avg_future_return:.2f}% ] {stock_name} ====")
+
+
+
+
+
+
+
+# 주식 데이터와 기본적인 재무 데이터를 가져온다
+# def fetch_stock_data(ticker, fromdate, todate):
+#     ohlcv = stock.get_market_ohlcv_by_date(fromdate, todate, ticker)
+#     fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker)
+#     stock_name = ticker_to_name.get(ticker, 'Unknown Stock')
+#
+#     if 'PER' not in fundamental.columns:
+#         print(f"PER data not available for {ticker} ({stock_name}). Filling with 0.")
+#         fundamental['PER'] = 0  # PER 열이 없는 경우 0으로 채움
+#
+#     # PER 값이 NaN인 경우 0으로 채움
+#     fundamental['PER'] = fundamental['PER'].fillna(0)
+#     data = pd.concat([ohlcv, fundamental['PER']], axis=1).fillna(0)
+#     return data
+
+# def fetch_stock_data(ticker, fromdate, todate):
+#     ohlcv = stock.get_market_ohlcv_by_date(fromdate, todate, ticker)
+#     daily_fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker) # 기본 일별
+#     stock_name = ticker_to_name.get(ticker, 'Unknown Stock')
+#
+#     # 'PER' 컬럼이 존재하는지 먼저 확인
+#     if 'PER' not in daily_fundamental.columns:
+#         # 일별 데이터에서 PER 정보가 없으면 월별 데이터 요청
+#         monthly_fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker, "m")
+#         if 'PER' in monthly_fundamental.columns:
+#             # 월별 PER 정보를 일별 데이터에 매핑
+#             daily_fundamental['PER'] = monthly_fundamental['PER'].reindex(daily_fundamental.index, method='ffill')
+#         else:
+#             # 월별 PER 정보도 없는 경우 0으로 처리
+#             daily_fundamental['PER'] = 0
+#     else:
+#         # 일별 PER 데이터 사용, NaN 값 0으로 채우기
+#         daily_fundamental['PER'] = daily_fundamental['PER'].fillna(0)
+#
+#     # PER 데이터가 없으면 0으로 채우기
+#     if 'PER' not in daily_fundamental.columns or daily_fundamental['PER'].isnull().all():
+#         print(f"PER data not available for {ticker} ({stock_name}). Filling with 0.")
+#         daily_fundamental['PER'] = 0
+#
+#     # PER 값이 NaN인 경우 0으로 채움
+#     daily_fundamental['PER'] = daily_fundamental['PER'].fillna(0)
+#     data = pd.concat([ohlcv, daily_fundamental[['PER']]], axis=1).fillna(0)
+#     return data
+
+# def fetch_stock_data(ticker, fromdate, todate):
+#     ohlcv = stock.get_market_ohlcv_by_date(fromdate, todate, ticker)
+#     daily_fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker) # 기본 일별
+#     stock_name = ticker_to_name.get(ticker, 'Unknown Stock')
+#
+#     # 'PER' 컬럼이 존재하는지 먼저 확인
+#     if 'PER' not in daily_fundamental.columns:
+#         # 일별 데이터에서 PER 정보가 없으면 월별 데이터 요청
+#         monthly_fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker, "m")
+#         if 'PER' in monthly_fundamental.columns:
+#             # 월별 PER 정보를 일별 데이터에 매핑
+#             daily_fundamental['PER'] = monthly_fundamental['PER'].reindex(daily_fundamental.index, method='ffill')
+#         else:
+#             daily_fundamental['PER'] = 0
+#     else:
+#         daily_fundamental['PER'] = daily_fundamental['PER'].fillna(0)
+#
+#     # 'PBR' 컬럼이 존재하는지 먼저 확인
+#     if 'PBR' not in daily_fundamental.columns:
+#         monthly_fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker, "m")
+#         if 'PBR' in monthly_fundamental.columns:
+#             daily_fundamental['PBR'] = monthly_fundamental['PBR'].reindex(daily_fundamental.index, method='ffill')
+#         else:
+#             daily_fundamental['PBR'] = 0
+#     else:
+#         daily_fundamental['PBR'] = daily_fundamental['PBR'].fillna(0)
+#
+#     # PER 값이 NaN인 경우 0으로 채움
+#     daily_fundamental['PER'] = daily_fundamental['PER'].fillna(0)
+#     # PBR 값이 NaN인 경우 0으로 채움
+#     daily_fundamental['PBR'] = daily_fundamental['PBR'].fillna(0)
+#
+#     # 필요한 데이터만 선택하여 결합
+#     data = pd.concat([ohlcv[['종가', '거래량']], daily_fundamental[['PER', 'PBR']]], axis=1).fillna(0)
+#
+#     return data
