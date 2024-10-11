@@ -76,7 +76,6 @@ elif CONDITION == 2:
     tickers = None # 선택한 배열
 elif CONDITION == 3:
     # 후속 작업 조건
-    print("작업 상태를 확인합니다...")
     if saved_tickers and len(saved_tickers) >= 60:
         print("저장된 종목 개수가 60개 이상입니다. 후속 작업을 진행합니다.")
         # 후속 작업 코드를 여기에 작성
@@ -168,6 +167,7 @@ if tickers is None:
     tickers = specific_tickers
 
 ticker_to_name = {ticker: stock.get_market_ticker_name(ticker) for ticker in tickers}
+# 성장률을 저장할 오브젝트
 ticker_returns = {}
 
 for iteration in range(max_iterations):
@@ -323,6 +323,7 @@ for iteration in range(max_iterations):
         if future_return < EXPECTED_GROWTH_RATE:
             continue
 
+        # 각 종목의 튜플에 저장한다
         if ticker in ticker_returns:
             ticker_returns[ticker].append(future_return)
         else:
@@ -330,6 +331,7 @@ for iteration in range(max_iterations):
 
         saved_tickers.append(ticker)
 
+        # 그래프 생성
         extended_prices = np.concatenate((data['종가'].values, predicted_prices))
         extended_dates = pd.date_range(start=data.index[0], periods=len(extended_prices))
         last_price = data['종가'].iloc[-1]
@@ -368,6 +370,7 @@ for iteration in range(max_iterations):
 results = []
 
 for ticker in saved_tickers:
+    # 튜플에 5개의 데이터가 있으면 진행
     if len(ticker_returns.get(ticker, [])) == 5:
         stock_name = ticker_to_name.get(ticker, 'Unknown Stock')
         avg_future_return = sum(ticker_returns[ticker]) / 5
@@ -378,6 +381,31 @@ results.sort(reverse=True, key=lambda x: x[0])
 
 for avg_future_return, stock_name in results:
     print(f"==== [ {avg_future_return:.2f}% ] {stock_name} ====")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
