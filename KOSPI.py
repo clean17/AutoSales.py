@@ -43,14 +43,15 @@ os.makedirs(output_dir, exist_ok=True)
 # 평균거래량
 AVERAGE_VOLUME = 25000
 # 평균거래대금
-AVERAGE_TRADING_VALUE = 1700000000 # 평균거래량
+AVERAGE_TRADING_VALUE = 1800000000
+MAX_ITERATIONS = 5
 
 # 변수 초기화
 tickers = None
 model_dir = ''
 saved_tickers = []  # 조건 만족한 종목을 저장할 리스트
 
-if CONDITION == 1:
+if CONDITION == 1 or CONDITION == 3:
     # 예측 성장률 (기본값 : 5)
     EXPECTED_GROWTH_RATE = 5
     # 데이터 수집 기간
@@ -65,6 +66,8 @@ if CONDITION == 1:
     tickers_kospi = stock.get_market_ticker_list(market="KOSPI")
     tickers_kosdaq = stock.get_market_ticker_list(market="KOSDAQ")
     tickers = tickers_kospi + tickers_kosdaq # 전체
+    if CONDITION == 3:
+        MAX_ITERATIONS = 6
 elif CONDITION == 2:
     specific_tickers = input("specific_tickers에 넣을 값을 입력하세요 : ")
     specific_tickers = ast.literal_eval(specific_tickers)
@@ -74,14 +77,6 @@ elif CONDITION == 2:
     EPOCHS_SIZE = 100
     model_dir = 'kospi_kosdaq_30(5)180_rmsprop_models'
     tickers = None # 선택한 배열
-elif CONDITION == 3:
-    # 후속 작업 조건
-    if saved_tickers and len(saved_tickers) >= 60:
-        print("저장된 종목 개수가 60개 이상입니다. 후속 작업을 진행합니다.")
-        # 후속 작업 코드를 여기에 작성
-    else:
-        print("조건을 만족하지 않아 작업을 종료합니다.")
-    exit()
 else:
     print('잘못된 값을 입력했습니다.')
     exit()
@@ -159,20 +154,16 @@ def create_model(input_shape):
 #     return model(data)
 
 
-# 반복 설정
-max_iterations = 5
-# all_tickers = stock.get_market_ticker_list(market="KOSPI") + stock.get_market_ticker_list(market="KOSDAQ")
-
 if tickers is None:
     tickers = specific_tickers
 
 ticker_to_name = {ticker: stock.get_market_ticker_name(ticker) for ticker in tickers}
-# 성장률을 저장할 오브젝트
+# 성장률을 저장할 튜플
 ticker_returns = {}
 
-for iteration in range(max_iterations):
+for iteration in range(MAX_ITERATIONS):
     print("\n")
-    print(f"==== Iteration {iteration + 1}/{max_iterations} ====")
+    print(f"==== Iteration {iteration + 1}/{MAX_ITERATIONS} ====")
 
     # 디렉토리 내 파일 검색 및 휴지통으로 보내기
     for file_name in os.listdir(output_dir):
@@ -183,6 +174,13 @@ for iteration in range(max_iterations):
     # 특정 배열을 가져왔을때 / 예를 들어 60(10)으로 가져온 배열을 40(5)로 돌리는 경우
     if iteration != 0:
         tickers = saved_tickers  # 2회차 부터 이전 반복에서 저장된 종목들
+        if CONDITION == 3:
+            CONDITION = 2
+            EXPECTED_GROWTH_RATE = 5
+            DATA_COLLECTION_PERIOD = 180
+            EARLYSTOPPING_PATIENCE = 10
+            EPOCHS_SIZE = 100
+            model_dir = 'kospi_kosdaq_30(5)180_rmsprop_models'
 
     # 결과를 저장할 배열
     saved_tickers = []
@@ -193,7 +191,6 @@ for iteration in range(max_iterations):
     # for ticker in tickers[count:count+1]:
         stock_name = ticker_to_name.get(ticker, 'Unknown Stock')
         print(f"Processing {count+1}/{len(tickers)} : {stock_name} {ticker}")
-        # count += 1
 
         data = fetch_stock_data(ticker, start_date, today)
 
@@ -253,14 +250,14 @@ for iteration in range(max_iterations):
             # 1년 전과 비교
             if len(data_before_one_year) > 0:
                 closing_price_one_year_ago = data_before_one_year.iloc[-1]['종가']
-                if closing_price_one_year_ago > 0 and (last_row['종가'] < closing_price_one_year_ago * 0.5):
-                    print(f"                                                        최근 종가가 1년 전의 종가보다 50% 이상 하락했으므로 작업을 건너뜁니다.")
+                if closing_price_one_year_ago > 0 and (last_row['종가'] < closing_price_one_year_ago * 0.55):
+                    print(f"                                                        최근 종가가 1년 전의 종가보다 45% 이상 하락했으므로 작업을 건너뜁니다.")
                     is_one_year_skip = True
                     continue
 
             # 두 조건을 모두 만족하는지 확인
             if (is_three_month_skip and is_one_year_skip):
-                print(f"                                                        최근 종가가 3달 전의 종가보다 28% 이상 하락하고 1년 전의 종가보다 50% 이상 하락했으므로 작업을 건너뜁니다.")
+                print(f"                                                        최근 종가가 3달 전의 종가보다 28% 이상 하락하고 1년 전의 종가보다 45% 이상 하락했으므로 작업을 건너뜁니다.")
                 continue
 
 
