@@ -67,7 +67,7 @@ if CONDITION == 1 or CONDITION == 3:
     tickers_kosdaq = stock.get_market_ticker_list(market="KOSDAQ")
     tickers = tickers_kospi + tickers_kosdaq # 전체
     if CONDITION == 3:
-        MAX_ITERATIONS = 6
+        MAX_ITERATIONS = 7
 elif CONDITION == 2:
     specific_tickers = input("specific_tickers에 넣을 값을 입력하세요 : ")
     specific_tickers = ast.literal_eval(specific_tickers)
@@ -371,9 +371,10 @@ results = []
 
 for ticker in saved_tickers:
     # 튜플에 5개의 데이터가 있으면 진행
-    if len(ticker_returns.get(ticker, [])) == 5:
+    print(len(ticker_returns.get(ticker, [])))
+    if len(ticker_returns.get(ticker, [])) == MAX_ITERATIONS:
         stock_name = ticker_to_name.get(ticker, 'Unknown Stock')
-        avg_future_return = sum(ticker_returns[ticker]) / 5
+        avg_future_return = sum(ticker_returns[ticker]) / MAX_ITERATIONS
         results.append((avg_future_return, stock_name)) # 튜플
 
 # avg_future_return을 기준으로 내림차순 정렬
