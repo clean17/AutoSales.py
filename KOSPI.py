@@ -302,6 +302,9 @@ for iteration in range(MAX_ITERATIONS):
 
         # 예측, 입력 X만 필요하다
         predictions = model.predict(X[-PREDICTION_PERIOD:])
+        # 3차원이라면 2차원으로
+        if len(predictions.shape) == 3:
+            predictions = predictions.reshape(predictions.shape[0], -1)
         predicted_prices = close_scaler.inverse_transform(predictions).flatten()
 
         # 텐서 입력 사용하여 예측 실행 (권고)
