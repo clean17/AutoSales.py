@@ -30,8 +30,8 @@ specific_tickers = ['229640', '181710', '011780', '004270', '000490', '004835', 
 CONDITION = int(input("CONDITION에 넣을 값을 입력하세요 (1: 전체 스캔, 2: 집중 스캔, 3: 후속 작업) : "))
 
 
-# 공통 설정값
-DROPOUT = 0.3
+# 공통 설정값, 0.3 > 0.2 로 수정, 과적합이 보이면 0.3으로 상향필요 24.10.26
+DROPOUT = 0.2
 PREDICTION_PERIOD = 5
 LOOK_BACK = 30
 # 데이터셋 크기 ( 타겟 3일: 20, 5-7일: 30~50, 10일: 40~60, 15일: 50~90)
@@ -42,8 +42,8 @@ output_dir = 'D:\\kospi_stocks'
 os.makedirs(output_dir, exist_ok=True)
 # 평균거래량
 AVERAGE_VOLUME = 25000
-# 평균거래대금
-AVERAGE_TRADING_VALUE = 1800000000
+# 평균거래대금, 평균 18억 > 25억 상향 24.10.26
+AVERAGE_TRADING_VALUE = 2500000000
 MAX_ITERATIONS = 5
 
 # 변수 초기화
@@ -59,9 +59,10 @@ if CONDITION == 1 or CONDITION == 3:
     # EarlyStopping
     EARLYSTOPPING_PATIENCE = 5 #숏 10, 롱 20
     # 반복 횟수 ( 5일: 100, 7일: 150, 10일: 200, 15일: 300)
-    EPOCHS_SIZE = 40
+    EPOCHS_SIZE = 50
     # 모델 저장 경로
-    model_dir = 'kospi_kosdaq_30(5)365_rmsprop_models_128'
+    # model_dir = 'kospi_kosdaq_30(5)365_rmsprop_models_128' # 128레이어로 빠르게 1차 필터링
+    model_dir = 'kospi_kosdaq_30(5)365_adam_128' # 128레이어로 빠르게 1차 필터링
     # 종목
     tickers_kospi = stock.get_market_ticker_list(market="KOSPI")
     tickers_kosdaq = stock.get_market_ticker_list(market="KOSDAQ")
@@ -72,10 +73,12 @@ elif CONDITION == 2:
     specific_tickers = input("specific_tickers에 넣을 값을 입력하세요 : ")
     specific_tickers = ast.literal_eval(specific_tickers)
     EXPECTED_GROWTH_RATE = 5
-    DATA_COLLECTION_PERIOD = 180
+    # DATA_COLLECTION_PERIOD = 180 # 모델 갱신중 24.10.26
+    DATA_COLLECTION_PERIOD = 365
     EARLYSTOPPING_PATIENCE = 10
-    EPOCHS_SIZE = 100
-    model_dir = 'kospi_kosdaq_30(5)180_rmsprop_models'
+    EPOCHS_SIZE = 150
+    # model_dir = 'kospi_kosdaq_30(5)180_rmsprop_models'
+    model_dir = 'kospi_kosdaq_30(5)365_adam'# 256레이어로 2차 필터링
     tickers = None # 선택한 배열
 else:
     print('잘못된 값을 입력했습니다.')
@@ -136,7 +139,7 @@ def create_model(input_shape):
 
     # 출력 레이어
     model.add(Dense(1))
-    # model.compile(optimizer='adam', loss='mean_squared_error') # mes
+    model.compile(optimizer='adam', loss='mean_squared_error') # mes
 
     '''
     학습률을 각 파라미터에 맞게 조정하는 방식에서, 평균 제곱을 기반으로 학습률을 조정합니다. 
@@ -145,8 +148,12 @@ def create_model(input_shape):
     초기 실험 단계에서는 Adam을 사용하는 것을 추천드립니다. 
     Adam은 많은 경우에서 좋은 성능을 보이며, 하이퍼파라미터 튜닝 없이도 비교적 안정적인 학습을 제공합니다. 
     그 후, 모델의 성능을 RMSprop과 비교하여 어떤 옵티마이저가 주어진 데이터셋과 모델 구조에서 더 나은 결과를 제공하는지 평가해보는 것이 좋습니다.
+    
+    Adam: 시계열 데이터 학습에 가장 추천되는 옵티마이저입니다. 빠르고 안정적인 수렴과 적응적 학습률 덕분에 대부분의 시계열 데이터에서 잘 동작합니다.
+    RMSprop: Adam 다음으로 추천되는 옵티마이저입니다. 메모리 효율성과 적응적 학습률 조정의 장점이 있습니다.
+    SGD with Momentum: Adam이나 RMSprop의 성능이 충분하지 않을 때 사용할 수 있으며, 특히 학습률을 수동으로 조정하여 최적화하려는 경우 적합합니다.
     '''
-    model.compile(optimizer='rmsprop', loss='mse')
+    # model.compile(optimizer='rmsprop', loss='mse')
     return model
 
 # @tf.function(reduce_retracing=True)
@@ -177,10 +184,10 @@ for iteration in range(MAX_ITERATIONS):
         if CONDITION == 3:
             CONDITION = 2
             EXPECTED_GROWTH_RATE = 5
-            DATA_COLLECTION_PERIOD = 180
+            DATA_COLLECTION_PERIOD = 365
             EARLYSTOPPING_PATIENCE = 10
-            EPOCHS_SIZE = 100
-            model_dir = 'kospi_kosdaq_30(5)180_rmsprop_models'
+            EPOCHS_SIZE = 150
+            model_dir = model_dir = 'kospi_kosdaq_30(5)365_adam'
 
     # 결과를 저장할 배열
     saved_tickers = []
@@ -229,8 +236,8 @@ for iteration in range(MAX_ITERATIONS):
         is_three_month_skip = False
         if len(data_before_three_months) > 0:
             closing_price_three_months_ago = data_before_three_months.iloc[-1]['종가']
-            if closing_price_three_months_ago > 0 and (last_row['종가'] < closing_price_three_months_ago * 0.72): # 30~40
-                print(f"                                                        최근 종가가 3달 전의 종가보다 28% 이상 하락했으므로 작업을 건너뜁니다.")
+            if closing_price_three_months_ago > 0 and (last_row['종가'] < closing_price_three_months_ago * 0.75): # 30~40
+                print(f"                                                        최근 종가가 3달 전의 종가보다 25% 이상 하락했으므로 작업을 건너뜁니다.")
                 is_three_month_skip = True
                 continue
 
@@ -257,7 +264,7 @@ for iteration in range(MAX_ITERATIONS):
 
             # 두 조건을 모두 만족하는지 확인
             if (is_three_month_skip and is_one_year_skip):
-                print(f"                                                        최근 종가가 3달 전의 종가보다 28% 이상 하락하고 1년 전의 종가보다 45% 이상 하락했으므로 작업을 건너뜁니다.")
+                print(f"                                                        최근 종가가 3달 전의 종가보다 25% 이상 하락하고 1년 전의 종가보다 45% 이상 하락했으므로 작업을 건너뜁니다.")
                 continue
 
 
@@ -279,7 +286,7 @@ for iteration in range(MAX_ITERATIONS):
         # X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=0.2, random_state=42)
         X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=0.2)
 
-        model_file_path = os.path.join(model_dir, f'{ticker}_model_v2.Keras')
+        model_file_path = os.path.join(model_dir, f'{ticker}_model_v3.Keras')
         if os.path.exists(model_file_path):
             model = tf.keras.models.load_model(model_file_path)
         else:
@@ -293,9 +300,22 @@ for iteration in range(MAX_ITERATIONS):
             restore_best_weights=True  # 최적의 가중치를 복원
         )
 
+        # TensorBoard 콜백 : 학습 중 손실 및 정확도를 시각적으로 모니터링하고 로그로 남길 수 있습니다.
+        tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir="./logs", histogram_freq=1)
+        # ReduceLROnPlateau 콜백 : 검증 손실이 더 이상 감소하지 않을 때 학습률을 자동으로 줄여 과적합을 줄일 수 있습니다.
+        reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, min_lr=0.0001)
+        # CSVLogger 콜백 : 학습 과정을 CSV 파일로 저장하여, 나중에 학습 중 손실 및 정확도를 분석할 수 있습니다.
+        csv_logger = tf.keras.callbacks.CSVLogger('training_log.csv', append=True)
+
         # 모델 학습
-        model.fit(X_train, Y_train, epochs=EPOCHS_SIZE, batch_size=BATCH_SIZE, verbose=0, # 충분히 모델링 되었으므로 20번만
-                  validation_data=(X_val, Y_val), callbacks=[early_stopping])
+        model.fit(X_train, Y_train,
+                  epochs=EPOCHS_SIZE,
+                  batch_size=BATCH_SIZE,
+                  verbose=0,
+                  validation_data=(X_val, Y_val),
+                  callbacks=[early_stopping, reduce_lr, tensorboard_callback]) # 3개의 콞백
+                  # callbacks=[early_stopping, reduce_lr])
+                  # callbacks=[early_stopping, csv_logger])
 
         close_scaler = MinMaxScaler()
         close_prices_scaled = close_scaler.fit_transform(data[['종가']].values)
@@ -371,7 +391,6 @@ results = []
 
 for ticker in saved_tickers:
     # 튜플에 5개의 데이터가 있으면 진행
-    print(len(ticker_returns.get(ticker, [])))
     if len(ticker_returns.get(ticker, [])) == MAX_ITERATIONS:
         stock_name = ticker_to_name.get(ticker, 'Unknown Stock')
         avg_future_return = sum(ticker_returns[ticker]) / MAX_ITERATIONS
