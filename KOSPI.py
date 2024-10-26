@@ -45,6 +45,8 @@ AVERAGE_VOLUME = 25000
 # 평균거래대금, 평균 18억 > 25억 상향 24.10.26
 AVERAGE_TRADING_VALUE = 2500000000
 MAX_ITERATIONS = 5
+EXPECTED_GROWTH_RATE = 7
+
 
 # 변수 초기화
 tickers = None
@@ -53,7 +55,7 @@ saved_tickers = []  # 조건 만족한 종목을 저장할 리스트
 
 if CONDITION == 1 or CONDITION == 3:
     # 예측 성장률 (기본값 : 5)
-    EXPECTED_GROWTH_RATE = 5
+    # EXPECTED_GROWTH_RATE = 5
     # 데이터 수집 기간
     DATA_COLLECTION_PERIOD = 365
     # EarlyStopping
@@ -72,7 +74,7 @@ if CONDITION == 1 or CONDITION == 3:
 elif CONDITION == 2:
     specific_tickers = input("specific_tickers에 넣을 값을 입력하세요 : ")
     specific_tickers = ast.literal_eval(specific_tickers)
-    EXPECTED_GROWTH_RATE = 5
+    # EXPECTED_GROWTH_RATE = 5
     # DATA_COLLECTION_PERIOD = 180 # 모델 갱신중 24.10.26
     DATA_COLLECTION_PERIOD = 365
     EARLYSTOPPING_PATIENCE = 10
@@ -183,7 +185,7 @@ for iteration in range(MAX_ITERATIONS):
         tickers = saved_tickers  # 2회차 부터 이전 반복에서 저장된 종목들
         if CONDITION == 3:
             CONDITION = 2
-            EXPECTED_GROWTH_RATE = 5
+            # EXPECTED_GROWTH_RATE = 5
             DATA_COLLECTION_PERIOD = 365
             EARLYSTOPPING_PATIENCE = 10
             EPOCHS_SIZE = 150
