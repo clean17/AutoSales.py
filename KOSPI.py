@@ -42,8 +42,8 @@ output_dir = 'D:\\kospi_stocks'
 os.makedirs(output_dir, exist_ok=True)
 # 평균거래량
 AVERAGE_VOLUME = 25000
-# 평균거래대금, 평균 18억 > 25억 상향 24.10.26
-AVERAGE_TRADING_VALUE = 2500000000
+# 평균거래대금, 평균 18억 > 20억 상향 24.10.27
+AVERAGE_TRADING_VALUE = 2000000000
 MAX_ITERATIONS = 5
 EXPECTED_GROWTH_RATE = 7
 
@@ -227,6 +227,15 @@ for iteration in range(MAX_ITERATIONS):
         if average_trading_value <= AVERAGE_TRADING_VALUE:
             formatted_value = f"{average_trading_value / 100000000:.0f}억"
             print(f"                                                        평균 거래액({formatted_value})이 부족하여 작업을 건너뜁니다.")
+            continue
+
+        # 최근 한 달간의 일일 평균 거래액 계산
+        recent_data = data.tail(20)  # 마지막 20개의 데이터가 최근 한 달치 데이터라고 가정
+        recent_trading_value = recent_data['거래량'] * recent_data['종가']
+        recent_average_trading_value = recent_trading_value.mean()
+        if recent_average_trading_value <= AVERAGE_TRADING_VALUE:
+            formatted_recent_value = f"{recent_average_trading_value / 100000000:.0f}억"
+            print(f"                                                        최근 한 달 평균 거래액({formatted_recent_value})이 부족하여 작업을 건너뜁니다.")
             continue
 
         todayTime = datetime.today()  # `today`를 datetime 객체로 유지
