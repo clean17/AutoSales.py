@@ -139,4 +139,16 @@ $ python getPredictedBTCbyLSTM.py
 /src/graph (main)
 $ python getPredictedStockByLSTM.py 
 ```
-![alt text](src/readme_images/image-4.png)
+![alt text](src/readme_images/image-4.png)w
+
+### 리눅스 파이선 3.8 설치
+```
+wget https://www.python.org/ftp/python/3.8.11/Python-3.8.11.tgz
+tar -zxvf Python-3.8.11.tgz
+cd Python-3.8.11
+./configure --enable-optimizations
+make altinstall
+vi /root/.bashrc
+alias python="/usr/local/bin/python3.8" 추가
+source /root/.bashrc
+```
