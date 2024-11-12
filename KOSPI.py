@@ -42,8 +42,8 @@ output_dir = 'D:\\kospi_stocks'
 os.makedirs(output_dir, exist_ok=True)
 # 평균거래량
 AVERAGE_VOLUME = 25000
-# 평균거래대금, 평균 18억 > 20억 상향 24.10.27
-AVERAGE_TRADING_VALUE = 2000000000
+# 평균거래대금, 평균 18억 > 20억 상향 24.10.27 > 25억 상향 24.11.13
+AVERAGE_TRADING_VALUE = 2500000000
 MAX_ITERATIONS = 5
 EXPECTED_GROWTH_RATE = 7
 
