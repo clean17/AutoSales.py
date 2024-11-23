@@ -53,6 +53,35 @@ tickers = None
 model_dir = ''
 saved_tickers = []  # 조건 만족한 종목을 저장할 리스트
 
+def get_safe_ticker_list(market="KOSPI"):
+    def fetch_tickers_for_date(date):
+        try:
+            tickers = stock.get_market_ticker_list(market=market, date=date)
+            # 데이터가 비어 있다면 예외를 발생시킴
+            if not tickers:
+                raise ValueError("Ticker list is empty")
+            return tickers
+        except (IndexError, ValueError) as e:
+            return []
+
+    # 현재 날짜로 시도
+    today = datetime.now().strftime("%Y%m%d")
+    tickers = fetch_tickers_for_date(today)
+
+    # 첫 번째 시도가 실패한 경우 과거 날짜로 반복 시도
+    if not tickers:
+        print("데이터가 비어 있습니다. 가장 가까운 영업일로 재시도합니다.")
+        for days_back in range(1, 7):
+            previous_day = (datetime.now() - timedelta(days=days_back)).strftime("%Y%m%d")
+            tickers = fetch_tickers_for_date(previous_day)
+            if tickers:  # 성공적으로 데이터를 가져오면 반환
+                return tickers
+
+        print("영업일 데이터를 찾을 수 없습니다.")
+        return []
+
+    return tickers
+
 if CONDITION == 1 or CONDITION == 3:
     # 예측 성장률 (기본값 : 5)
     # EXPECTED_GROWTH_RATE = 5
@@ -66,8 +95,8 @@ if CONDITION == 1 or CONDITION == 3:
     # model_dir = 'kospi_kosdaq_30(5)365_rmsprop_models_128' # 128레이어로 빠르게 1차 필터링
     model_dir = 'kospi_kosdaq_30(5)365_adam_128' # 128레이어로 빠르게 1차 필터링
     # 종목
-    tickers_kospi = stock.get_market_ticker_list(market="KOSPI")
-    tickers_kosdaq = stock.get_market_ticker_list(market="KOSDAQ")
+    tickers_kospi = get_safe_ticker_list(market="KOSPI")
+    tickers_kosdaq = get_safe_ticker_list(market="KOSDAQ")
     tickers = tickers_kospi + tickers_kosdaq # 전체
     if CONDITION == 3:
         MAX_ITERATIONS = 7
