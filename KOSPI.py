@@ -31,7 +31,8 @@ CONDITION = int(input("CONDITION에 넣을 값을 입력하세요 (1: 전체 스
 
 
 # 공통 설정값, 0.3 > 0.2 로 수정, 과적합이 보이면 0.3으로 상향필요 24.10.26
-DROPOUT = 0.2
+# 0.3 으로 상향 테스트 24.12.14
+DROPOUT = 0.3
 PREDICTION_PERIOD = 5
 LOOK_BACK = 30
 # 데이터셋 크기 ( 타겟 3일: 20, 5-7일: 30~50, 10일: 40~60, 15일: 50~90)
@@ -42,8 +43,8 @@ output_dir = 'D:\\kospi_stocks'
 os.makedirs(output_dir, exist_ok=True)
 # 평균거래량
 AVERAGE_VOLUME = 25000
-# 평균거래대금, 평균 18억 > 20억 상향 24.10.27 > 50억 24.11.14
-AVERAGE_TRADING_VALUE = 5000000000
+# 평균거래대금, 평균 18억 > 20억 상향 24.10.27 > 50억 24.11.14 > 60억 24.12.14
+AVERAGE_TRADING_VALUE = 6000000000
 MAX_ITERATIONS = 5
 EXPECTED_GROWTH_RATE = 7
 
@@ -146,11 +147,11 @@ def create_model(input_shape):
 
     if CONDITION == 1:
         model.add(LSTM(128, return_sequences=True, input_shape=input_shape))
-        model.add(Dropout(0.2))
+        model.add(Dropout(DROPOUT))
         model.add(LSTM(64, return_sequences=False))
-        model.add(Dropout(0.2))
+        model.add(Dropout(DROPOUT))
         model.add(Dense(32, activation='relu'))
-        model.add(Dropout(0.2))
+        model.add(Dropout(DROPOUT))
         model.add(Dense(16, activation='relu'))
     elif CONDITION == 2:
         model.add((LSTM(256, return_sequences=True, input_shape=input_shape)))
@@ -218,7 +219,7 @@ for iteration in range(MAX_ITERATIONS):
             DATA_COLLECTION_PERIOD = 365
             EARLYSTOPPING_PATIENCE = 10
             EPOCHS_SIZE = 150
-            model_dir = model_dir = 'kospi_kosdaq_30(5)365_adam'
+            model_dir = 'kospi_kosdaq_30(5)365_adam'
 
     # 결과를 저장할 배열
     saved_tickers = []
