@@ -34,7 +34,7 @@ CONDITION = int(input("CONDITION에 넣을 값을 입력하세요 (1: 전체 스
 # 0.3 으로 상향 테스트 24.12.14
 DROPOUT = 0.3
 PREDICTION_PERIOD = 5
-LOOK_BACK = 30
+LOOK_BACK = 40
 # 데이터셋 크기 ( 타겟 3일: 20, 5-7일: 30~50, 10일: 40~60, 15일: 50~90)
 BATCH_SIZE = 32
 # 그래프 저장 경로
@@ -43,10 +43,10 @@ output_dir = 'D:\\kospi_stocks'
 os.makedirs(output_dir, exist_ok=True)
 # 평균거래량
 AVERAGE_VOLUME = 25000
-# 평균거래대금, 평균 18억 > 20억 상향 24.10.27 > 50억 24.11.14 > 60억 24.12.14
-AVERAGE_TRADING_VALUE = 6000000000
+# 평균거래대금, 평균 18억 > 20억 상향 24.10.27 > 50억 24.11.14 > 60억 24.12.14 > 50억 24.12.18
+AVERAGE_TRADING_VALUE = 5000000000
 MAX_ITERATIONS = 5
-EXPECTED_GROWTH_RATE = 7
+EXPECTED_GROWTH_RATE = 5
 
 
 # 변수 초기화
@@ -94,7 +94,7 @@ if CONDITION == 1 or CONDITION == 3:
     EPOCHS_SIZE = 50
     # 모델 저장 경로
     # model_dir = 'kospi_kosdaq_30(5)365_rmsprop_models_128' # 128레이어로 빠르게 1차 필터링
-    model_dir = 'kospi_kosdaq_30(5)365_adam_128' # 128레이어로 빠르게 1차 필터링
+    model_dir = 'kospi_kosdaq_40(5)365_adam_128' # 128레이어로 빠르게 1차 필터링
     # 종목
     tickers_kospi = get_safe_ticker_list(market="KOSPI")
     tickers_kosdaq = get_safe_ticker_list(market="KOSDAQ")
@@ -110,7 +110,7 @@ elif CONDITION == 2:
     EARLYSTOPPING_PATIENCE = 10
     EPOCHS_SIZE = 150
     # model_dir = 'kospi_kosdaq_30(5)180_rmsprop_models'
-    model_dir = 'kospi_kosdaq_30(5)365_adam'# 256레이어로 2차 필터링
+    model_dir = 'kospi_kosdaq_40(5)365_adam'# 256레이어로 2차 필터링
     tickers = None # 선택한 배열
 else:
     print('잘못된 값을 입력했습니다.')
@@ -212,14 +212,11 @@ for iteration in range(MAX_ITERATIONS):
 
     # 특정 배열을 가져왔을때 / 예를 들어 60(10)으로 가져온 배열을 40(5)로 돌리는 경우
     if iteration != 0:
+        print("2회차 시작")
         tickers = saved_tickers  # 2회차 부터 이전 반복에서 저장된 종목들
         if CONDITION == 3:
             CONDITION = 2
             # EXPECTED_GROWTH_RATE = 5
-            DATA_COLLECTION_PERIOD = 365
-            EARLYSTOPPING_PATIENCE = 10
-            EPOCHS_SIZE = 150
-            model_dir = 'kospi_kosdaq_30(5)365_adam'
 
     # 결과를 저장할 배열
     saved_tickers = []
@@ -270,6 +267,13 @@ for iteration in range(MAX_ITERATIONS):
 
         todayTime = datetime.today()  # `today`를 datetime 객체로 유지
 
+        # 이전 영업일의 종가와 비교
+        if len(data) > 1:
+            previous_day_close = data.iloc[-2]['종가']
+            if previous_day_close > 0 and (last_row['종가'] < previous_day_close * 0.85):  # 15% 이상 하락
+                print(f"                                                        최근 종가가 하루 전의 종가보다 15% 이상 하락했으므로 작업을 건너뜁니다.")
+                continue
+
         # 3달 전의 종가와 비교
         three_months_ago_date = todayTime - pd.DateOffset(months=3)
         data_before_three_months = data.loc[:three_months_ago_date]
@@ -277,8 +281,8 @@ for iteration in range(MAX_ITERATIONS):
         is_three_month_skip = False
         if len(data_before_three_months) > 0:
             closing_price_three_months_ago = data_before_three_months.iloc[-1]['종가']
-            if closing_price_three_months_ago > 0 and (last_row['종가'] < closing_price_three_months_ago * 0.75): # 30~40
-                print(f"                                                        최근 종가가 3달 전의 종가보다 25% 이상 하락했으므로 작업을 건너뜁니다.")
+            if closing_price_three_months_ago > 0 and (last_row['종가'] < closing_price_three_months_ago * 0.70): # 30~40
+                print(f"                                                        최근 종가가 3달 전의 종가보다 30% 이상 하락했으므로 작업을 건너뜁니다.")
                 is_three_month_skip = True
                 continue
 
@@ -303,10 +307,10 @@ for iteration in range(MAX_ITERATIONS):
                     is_one_year_skip = True
                     continue
 
-            # 두 조건을 모두 만족하는지 확인
-            if (is_three_month_skip and is_one_year_skip):
-                print(f"                                                        최근 종가가 3달 전의 종가보다 25% 이상 하락하고 1년 전의 종가보다 45% 이상 하락했으므로 작업을 건너뜁니다.")
-                continue
+            # 두 조건을 모두 만족하는지 확인 > 하나라도 걸리면 패스
+            """ if (is_three_month_skip and is_one_year_skip):
+                print(f"                                                        최근 종가가 3달 전의 종가보다 30% 이상 하락하고 1년 전의 종가보다 45% 이상 하락했으므로 작업을 건너뜁니다.")
+                continue """
 
 
         scaler = MinMaxScaler(feature_range=(0, 1))
