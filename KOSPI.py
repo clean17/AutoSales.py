@@ -216,7 +216,9 @@ for iteration in range(MAX_ITERATIONS):
         tickers = saved_tickers  # 2회차 부터 이전 반복에서 저장된 종목들
         if CONDITION == 3:
             CONDITION = 2
-            # EXPECTED_GROWTH_RATE = 5
+            EARLYSTOPPING_PATIENCE = 10
+            EPOCHS_SIZE = 150
+            model_dir = 'kospi_kosdaq_40(5)365_adam'
 
     # 결과를 저장할 배열
     saved_tickers = []
@@ -270,8 +272,8 @@ for iteration in range(MAX_ITERATIONS):
         # 이전 영업일의 종가와 비교
         if len(data) > 1:
             previous_day_close = data.iloc[-2]['종가']
-            if previous_day_close > 0 and (last_row['종가'] < previous_day_close * 0.85):  # 15% 이상 하락
-                print(f"                                                        최근 종가가 하루 전의 종가보다 15% 이상 하락했으므로 작업을 건너뜁니다.")
+            if previous_day_close > 0 and (last_row['종가'] < previous_day_close * 0.90):  # 10% 이상 하락
+                print(f"                                                        최근 종가가 하루 전의 종가보다 10% 이상 하락했으므로 작업을 건너뜁니다.")
                 continue
 
         # 3달 전의 종가와 비교
