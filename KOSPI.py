@@ -272,8 +272,8 @@ for iteration in range(MAX_ITERATIONS):
         # 이전 영업일의 종가와 비교
         if len(data) > 1:
             previous_day_close = data.iloc[-2]['종가']
-            if previous_day_close > 0 and (last_row['종가'] < previous_day_close * 0.90):  # 10% 이상 하락
-                print(f"                                                        최근 종가가 하루 전의 종가보다 10% 이상 하락했으므로 작업을 건너뜁니다.")
+            if previous_day_close > 0 and (last_row['종가'] < previous_day_close * 0.87):  # 13% 이상 하락
+                print(f"                                                        최근 종가가 하루 전의 종가보다 13% 이상 하락했으므로 작업을 건너뜁니다.")
                 continue
 
         # 3달 전의 종가와 비교
@@ -286,7 +286,7 @@ for iteration in range(MAX_ITERATIONS):
             if closing_price_three_months_ago > 0 and (last_row['종가'] < closing_price_three_months_ago * 0.70): # 30~40
                 print(f"                                                        최근 종가가 3달 전의 종가보다 30% 이상 하락했으므로 작업을 건너뜁니다.")
                 is_three_month_skip = True
-                continue
+                # continue
 
         if DATA_COLLECTION_PERIOD >= 360:
             # 1년 전의 종가와 비교, 데이터를 기준으로 반복해서 날짜를 줄여가며 찾음
@@ -307,12 +307,12 @@ for iteration in range(MAX_ITERATIONS):
                 if closing_price_one_year_ago > 0 and (last_row['종가'] < closing_price_one_year_ago * 0.55):
                     print(f"                                                        최근 종가가 1년 전의 종가보다 45% 이상 하락했으므로 작업을 건너뜁니다.")
                     is_one_year_skip = True
-                    continue
+                    # continue
 
             # 두 조건을 모두 만족하는지 확인 > 하나라도 걸리면 패스
-            """ if (is_three_month_skip and is_one_year_skip):
+            if (is_three_month_skip and is_one_year_skip):
                 print(f"                                                        최근 종가가 3달 전의 종가보다 30% 이상 하락하고 1년 전의 종가보다 45% 이상 하락했으므로 작업을 건너뜁니다.")
-                continue """
+                continue
 
 
         scaler = MinMaxScaler(feature_range=(0, 1))
