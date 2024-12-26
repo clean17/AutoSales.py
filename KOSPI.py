@@ -212,7 +212,6 @@ for iteration in range(MAX_ITERATIONS):
 
     # 특정 배열을 가져왔을때 / 예를 들어 60(10)으로 가져온 배열을 40(5)로 돌리는 경우
     if iteration != 0:
-        print("2회차 시작")
         tickers = saved_tickers  # 2회차 부터 이전 반복에서 저장된 종목들
         if CONDITION == 3:
             CONDITION = 2
@@ -284,7 +283,7 @@ for iteration in range(MAX_ITERATIONS):
         if len(data_before_three_months) > 0:
             closing_price_three_months_ago = data_before_three_months.iloc[-1]['종가']
             if closing_price_three_months_ago > 0 and (last_row['종가'] < closing_price_three_months_ago * 0.70): # 30~40
-                print(f"                                                        최근 종가가 3달 전의 종가보다 30% 이상 하락했으므로 작업을 건너뜁니다.")
+                # print(f"                                                        최근 종가가 3달 전의 종가보다 30% 이상 하락했으므로 작업을 건너뜁니다.")
                 is_three_month_skip = True
                 # continue
 
@@ -305,7 +304,7 @@ for iteration in range(MAX_ITERATIONS):
             if len(data_before_one_year) > 0:
                 closing_price_one_year_ago = data_before_one_year.iloc[-1]['종가']
                 if closing_price_one_year_ago > 0 and (last_row['종가'] < closing_price_one_year_ago * 0.55):
-                    print(f"                                                        최근 종가가 1년 전의 종가보다 45% 이상 하락했으므로 작업을 건너뜁니다.")
+                    # print(f"                                                        최근 종가가 1년 전의 종가보다 45% 이상 하락했으므로 작업을 건너뜁니다.")
                     is_one_year_skip = True
                     # continue
 
