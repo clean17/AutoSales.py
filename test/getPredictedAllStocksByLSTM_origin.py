@@ -222,8 +222,7 @@ for ticker in tickers[:5]: # test
 
 # 이미지 저장 경로 설정 (절대경로.. C:\)
 output_dir = 'D:\stocks'
-if not os.path.exists(output_dir):
-    os.makedirs(output_dir)
+os.makedirs(output_dir, exist_ok=True)
 
 # 현재 작업 디렉토리를 기준으로 output_dir 설정
 # output_dir = os.path.join(os.getcwd(), 'images')

@@ -41,10 +41,8 @@ today_us = today
 
 output_dir = 'D:\\sp500'
 model_dir = 'sp_models'
-if not os.path.exists(output_dir):
-    os.makedirs(output_dir)
-if not os.path.exists(model_dir):
-    os.makedirs(model_dir)
+os.makedirs(output_dir, exist_ok=True)
+os.makedirs(model_dir, exist_ok=True)
 
 # 주식 데이터를 가져오는 함수
 def fetch_stock_data(ticker, fromdate, todate):

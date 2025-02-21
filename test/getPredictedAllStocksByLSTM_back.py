@@ -30,10 +30,8 @@ ticker_to_name = {ticker: stock.get_market_ticker_name(ticker) for ticker in tic
 output_dir = 'D:\\stocks'
 # model_dir = os.path.join(output_dir, 'models')
 model_dir = 'models'
-if not os.path.exists(output_dir):
-    os.makedirs(output_dir)
-if not os.path.exists(model_dir):
-    os.makedirs(model_dir)
+os.makedirs(output_dir, exist_ok=True)
+os.makedirs(model_dir, exist_ok=True)
 
 # 주식 데이터와 기본적인 재무 데이터를 가져온다
 def fetch_stock_data(ticker, fromdate, todate):
