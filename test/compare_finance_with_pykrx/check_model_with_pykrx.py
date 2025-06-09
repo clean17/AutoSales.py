@@ -1,6 +1,5 @@
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-from tensorflow.keras.models import load_model
-import FinanceDataReader as fdr
+from pykrx import stock
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
@@ -11,10 +10,10 @@ import matplotlib.pyplot as plt
 
 # 데이터 수집
 ticker = '000150'  # 예시: 000150 종목 코드
-data = fdr.DataReader(ticker, '2020-01-01', '2023-09-20')
+data = stock.get_market_ohlcv_by_date("2020-01-01", "2023-09-20", ticker)
 
 # 필요한 컬럼 선택 및 NaN 값 처리
-data = data[['Open', 'High', 'Low', 'Close', 'Volume']].fillna(0)
+data = data[['시가', '고가', '저가', '종가', '거래량']].fillna(0)
 
 # 데이터 스케일링
 scaler = MinMaxScaler()
@@ -48,13 +47,13 @@ model.compile(optimizer='adam', loss='mean_squared_error')
 model.fit(X_train, y_train, batch_size=32, epochs=50, validation_split=0.1)
 
 '''
-Mean Squared Error: 0.0013977729885025624
-Mean Absolute Error: 0.02338053107408163
-Root Mean Squared Error: 0.03738680233053587
-R-squared: 0.9660283643066935
-'''
+Mean Squared Error: 0.0011627674458137632
+Mean Absolute Error: 0.02076215798103702
+Root Mean Squared Error: 0.034099376032616244
+R-squared: 0.9717399660816601
 
-# model = load_model('my_model.Keras')
+오차 범위 내 거의 유효.. pykrx가 미세하게 더 정확
+'''
 
 # 예측 값 (predictions)과 실제 값 (y_val)
 predictions = model.predict(X_val)

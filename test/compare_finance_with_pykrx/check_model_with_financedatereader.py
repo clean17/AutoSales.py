@@ -1,5 +1,5 @@
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-from pykrx import stock
+import FinanceDataReader as fdr
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
@@ -10,10 +10,10 @@ import matplotlib.pyplot as plt
 
 # 데이터 수집
 ticker = '000150'  # 예시: 000150 종목 코드
-data = stock.get_market_ohlcv_by_date("2020-01-01", "2023-09-20", ticker)
+data = fdr.DataReader(ticker, '2020-01-01', '2023-09-20')
 
 # 필요한 컬럼 선택 및 NaN 값 처리
-data = data[['시가', '고가', '저가', '종가', '거래량']].fillna(0)
+data = data[['Open', 'High', 'Low', 'Close', 'Volume']].fillna(0)
 
 # 데이터 스케일링
 scaler = MinMaxScaler()
@@ -47,11 +47,10 @@ model.compile(optimizer='adam', loss='mean_squared_error')
 model.fit(X_train, y_train, batch_size=32, epochs=50, validation_split=0.1)
 
 '''
-Mean Squared Error: 0.0009922800291819384
-Mean Absolute Error: 0.01982604859513681
-Root Mean Squared Error: 0.031500476650075285
-R-squared: 0.9758835118904213
-Segmentation fault
+Mean Squared Error: 0.0014941637517253234
+Mean Absolute Error: 0.024819481228264103
+Root Mean Squared Error: 0.038654414388596334
+R-squared: 0.9636856720960567
 '''
 
 # 예측 값 (predictions)과 실제 값 (y_val)
