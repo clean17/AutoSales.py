@@ -152,3 +152,81 @@ vi /root/.bashrc
 alias python="/usr/local/bin/python3.8" 추가
 source /root/.bashrc
 ```
+
+## Tensorflow 체크
+
+- nvidia gpu 확인
+```bash
+$ nvidia-smi
+
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 566.14                 Driver Version: 566.14         CUDA Version: 12.7     |
+|-----------------------------------------+------------------------+----------------------+
+| GPU  Name                  Driver-Model | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  NVIDIA GeForce RTX 4050 ...  WDDM  |   00000000:01:00.0  On |                  N/A |
+| N/A   49C    P8              4W /   75W |    1847MiB /   6141MiB |      8%      Default |
+|                                         |                        |                  N/A |
++-----------------------------------------+------------------------+----------------------+
+```
+> Compute Capability 확인하기
+
+https://developer.nvidia.com/cuda-gpus
+
+> SDK 확인하기
+ 
+https://en.wikipedia.org/wiki/CUDA
+
+> GPU가 지원하는 Tensorflow 버전 확인<br>
+> 윈도우는 2.10 이하 및 CUDA 11.2/cuDNN 8.1 까지만 지원한다
+ 
+https://www.tensorflow.org/install/source_windows?hl=ko#tested_build_configurations
+
+> CUDA Toolkit 설치
+
+https://developer.nvidia.com/cuda-toolkit-archive
+
+- CUDA 설치 확인
+```bash
+$ nvcc --version
+```
+
+> CuDNN 설치
+
+https://developer.nvidia.com/rdp/cudnn-archive
+
+압축을 풀어서 CUDA 설치경로에 '덮어쓰기'
+
+> 환경변수 PATH 확인
+
+아래 3개의 경로가 최상단에 위치해야 함<br>
+C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.2\bin<br>
+C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.2\include<br>
+C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.2\lib<br>
+
+- 환경변수 확인 후 이상 있으면 설정
+```bash
+$ export CUDA_HOME="C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v11.2"
+$ export PATH="C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v11.2/bin:$PATH"
+$ export PATH="C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v11.2/include:$PATH"
+$ export PATH="C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v11.2/lib:$PATH"
+$ export PATH="/c/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v11.2/libnvvp:$PATH"
+```
+
+> Tensorflow 설치 (재설치)
+```bash
+$ pip uninstall tensorflow tensorflow-intel tensorflow-cpu tensorflow-estimator tensorflow-io-gcs-filesystem tensorboard tensorboard-data-server tensorboard-plugin-wit -y
+$ pip install tensorflow==2.9
+```
+
+- TensorFlow 버전 확인
+
+```bash
+$ pip show tensorflow
+```
+
+CUDA 설치 후에 다시 TensorFlow를 설치하는 것이 버전 호환에 유리함
+
+
