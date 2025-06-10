@@ -11,7 +11,7 @@ import tensorflow as tf
 # 데이터 수집
 today = datetime.today().strftime('%Y%m%d')
 last_year = (datetime.today() - timedelta(days=60)).strftime('%Y%m%d')
-ticker = "000660"
+ticker = "214450"
 
 # 주요 피처(시가, 고가, 저가, 종가, 거래량) + 재무 지표(PER)
 ohlcv = stock.get_market_ohlcv_by_date(fromdate=last_year, todate=today, ticker=ticker)
@@ -95,12 +95,20 @@ future_prices = close_scaler.inverse_transform(future_preds_arr).flatten()
 # 날짜 생성 (마지막 거래일 다음 날짜부터)
 future_dates = pd.date_range(start=ohlcv.index[-1] + pd.Timedelta(days=1), periods=n_future, freq='B')  # 'B'=business day
 
-print("미래 5일 예측 종가:", future_prices)
-
+print("미래 5일 예측 종가:")
+for price in future_prices:
+    print(format(int(price),','))
 
 plt.figure(figsize=(10, 5))
 plt.plot(ohlcv.index, actual_prices, label='Actual Prices')
 plt.plot(future_dates, future_prices, label='Future Predicted Prices', linestyle='--', marker='o', color='orange')
+
+plt.plot(
+    [ohlcv.index[-1], future_dates[0]],
+    [actual_prices[-1], future_prices[0]],
+    linestyle='dashed', color='gray', linewidth=1.5, label='Actual-Predicted Bridge'
+)
+
 plt.title(f'Actual and 5-day Predicted Prices for {ticker}')
 plt.xlabel('Date')
 plt.ylabel('Price')
