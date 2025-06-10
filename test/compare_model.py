@@ -28,7 +28,7 @@ def invert_scale(scaled_preds, scaler, feature_index=3):
 
 
 # 데이터 수집
-ticker = '087010'
+ticker = '000660' # 하이닉스
 data = fdr.DataReader(ticker, '2024-01-01', '2025-06-09')
 
 # 필요한 컬럼 선택 및 NaN 값 처리
@@ -104,7 +104,7 @@ checkpoint = ModelCheckpoint('best_model.h5', monitor='val_loss', save_best_only
 
 '''
 epochs; 전체 데이터셋(X_train, Y_train)을 한 번 모두 학습하는 과정의 횟수 (많으면 과적합)
-batch_size; 한 번에 모델에 넣어서 학습하는 데이터 샘플 수 (크면 효율, 불안정 작으면 일반화, 노이즈)
+batch_size; 한 번에 모델에 넣어서 학습하는 데이터 샘플 수 (크면 효율, 불안정 작으면 일반화, 노이즈(과적합))
 validation_data; 학습 도중 모델의 성능을 평가할 데이터셋
 
 * Overfitting(과적합) 확인법
@@ -116,14 +116,6 @@ validation_data; 학습 도중 모델의 성능을 평가할 데이터셋
  LSTM 레이어(노드) 수 줄이기 64 > 32 > 16
  조기 종료(EarlyStopping) 콜백 사용
 '''
-history = model.fit(
-    X_train, Y_train,
-    epochs=200,
-    batch_size=32, # 32가 좀 더 잘 맞는것 같다
-    verbose=0,
-    validation_data=(X_val, Y_val),
-    callbacks=[early_stop, checkpoint]
-)
 
 # 체크포인트한 파일 존재하면 이어서 학습
 model_file = 'best_model.h5'
@@ -131,7 +123,16 @@ if os.path.exists(model_file):
     model = load_model(model_file)
     print("기존 best_model.h5 불러옴, 이어서 학습/예측 가능합니다.")
 else:
-    pass
+    print(" *** 새로운 모델 생성")
+
+history = model.fit(
+    X_train, Y_train,
+    epochs=200,
+    batch_size=16,
+    verbose=0,
+    validation_data=(X_val, Y_val),
+    callbacks=[early_stop, checkpoint]
+)
 
 # 이후 예측 등 사용
 predictions = model.predict(X_val)
