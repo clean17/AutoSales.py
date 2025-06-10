@@ -8,19 +8,9 @@ from tensorflow.keras.layers import LSTM, Dense, Dropout
 import matplotlib.pyplot as plt
 
 
-
-# # 데이터 수집
-# ticker = "005930.KS"  # 삼성전자
-# data = yf.download(ticker, start="2021-01-01", end="2022-12-31")
-#
-# # 필요한 컬럼 선택 및 NaN 값 처리
-# data = data[['Open', 'High', 'Low', 'Close', 'Volume']].fillna(0)
-
-
-
 # 데이터 수집
-ticker = '000150'  # 예시: 000150 종목 코드
-data = stock.get_market_ohlcv_by_date("2020-01-01", "2023-09-20", ticker)
+ticker = '000660'  # 예시: 000150 종목 코드
+data = stock.get_market_ohlcv_by_date("2025-01-01", "2025-06-08", ticker)
 
 # 필요한 컬럼 선택 및 NaN 값 처리
 data = data[['시가', '고가', '저가', '종가', '거래량']].fillna(0)
@@ -35,14 +25,14 @@ scaler = MinMaxScaler(feature_range=(0, 1))
 scaled_data = scaler.fit_transform(data)
 
 # 시계열 데이터를 윈도우로 나누기
-def create_dataset(dataset, look_back=60):
+def create_dataset(dataset, look_back):
     X, Y = [], []
     for i in range(len(dataset) - look_back):
         X.append(dataset[i:i + look_back])
         Y.append(dataset[i + look_back, 3])  # 종가(Close) 예측
     return np.array(X), np.array(Y)
 
-look_back = 60
+look_back = 25
 X, Y = create_dataset(scaled_data, look_back)
 
 # 학습 데이터와 테스트 데이터 분리
@@ -52,18 +42,24 @@ Y_train, Y_test = Y[:train_size], Y[train_size:]
 
 # 모델 생성
 model = Sequential()
-model.add(LSTM(256, return_sequences=True, input_shape=(look_back, X_train.shape[2])))
-model.add(LSTM(128, return_sequences=True))
-model.add(LSTM(64, return_sequences=False))
-model.add(Dense(128))
-model.add(Dense(64))
-model.add(Dense(32))
-model.add(Dense(1))
 
+model.add(LSTM(128, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2]))) # 4번 반복 0.91에 수렴
+model.add(Dropout(0.3))
+model.add(LSTM(64, return_sequences=False))
+model.add(Dropout(0.3))
+
+# model.add(LSTM(64, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])))
+# model.add(Dropout(0.2))
+# model.add(LSTM(32, return_sequences=False))
+# model.add(Dropout(0.2))
+
+model.add(Dense(32, activation='relu'))
+model.add(Dense(16, activation='relu'))
+model.add(Dense(1))
 model.compile(optimizer='adam', loss='mean_squared_error')
 
 # 모델 학습
-model.fit(X_train, Y_train, batch_size=32, epochs=50, validation_data=(X_test, Y_test))
+model.fit(X_train, Y_train, batch_size=16, epochs=50, verbose=0, validation_data=(X_test, Y_test))
 
 '''
 Train Actual (훈련 실제 값):
@@ -108,3 +104,12 @@ plt.xlabel('Time')
 plt.ylabel('Price')
 plt.legend()
 plt.show()
+
+'''
+테스트 결과
+look_back = 25
+LSTM(128)
+batch_size = 16
+
+에서 가장 유사하게 나온다
+'''
