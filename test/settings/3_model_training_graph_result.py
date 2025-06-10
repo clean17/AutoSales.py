@@ -5,11 +5,12 @@ import numpy as np
 from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout
+from tensorflow.keras.callbacks import EarlyStopping
 import matplotlib.pyplot as plt
 
 
 # 데이터 수집
-ticker = '000660'  # 예시: 000150 종목 코드
+ticker = '214450'  # 예시: 000150 종목 코드
 data = stock.get_market_ohlcv_by_date("2025-01-01", "2025-06-08", ticker)
 
 # 필요한 컬럼 선택 및 NaN 값 처리
@@ -59,7 +60,8 @@ model.add(Dense(1))
 model.compile(optimizer='adam', loss='mean_squared_error')
 
 # 모델 학습
-model.fit(X_train, Y_train, batch_size=16, epochs=50, verbose=0, validation_data=(X_test, Y_test))
+early_stop = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
+model.fit(X_train, Y_train, batch_size=16, epochs=200, verbose=0, validation_data=(X_test, Y_test), callbacks=[early_stop])
 
 '''
 Train Actual (훈련 실제 값):

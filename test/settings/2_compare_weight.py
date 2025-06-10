@@ -18,7 +18,7 @@ def invert_scale(scaled_preds, scaler, feature_index=3):
     return np.array(inv_preds)
 
 # 여러 종목코드 예시
-tickers = ['000660']
+tickers = ['214450']
 
 for ticker in tickers:
     print(f'\n### {ticker} 모델 학습/예측 시작 ###')
@@ -28,7 +28,7 @@ for ticker in tickers:
     scaler = MinMaxScaler()
     scaled_data = scaler.fit_transform(data)
 
-    sequence_length = 60
+    sequence_length = 25
     forecast_horizon = 5
 
     X, y = [], []
@@ -44,15 +44,15 @@ for ticker in tickers:
     def build_model(input_shape, forecast_horizon):
         model = Sequential()
 
-#         model.add(LSTM(128, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2]))) # 4번 반복 0.91에 수렴
-#         model.add(Dropout(0.3))
-#         model.add(LSTM(64, return_sequences=False))
-#         model.add(Dropout(0.3))
+        model.add(LSTM(128, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2]))) # 4번 반복 0.91에 수렴
+        model.add(Dropout(0.3))
+        model.add(LSTM(64, return_sequences=False))
+        model.add(Dropout(0.3))
 
-        model.add(LSTM(64, return_sequences=True, input_shape=input_shape)) # 4번 반복 0.91 수렴
-        model.add(Dropout(0.2))
-        model.add(LSTM(32, return_sequences=False))
-        model.add(Dropout(0.2))
+#         model.add(LSTM(64, return_sequences=True, input_shape=input_shape)) # 4번 반복 0.91 수렴
+#         model.add(Dropout(0.2))
+#         model.add(LSTM(32, return_sequences=False))
+#         model.add(Dropout(0.2))
 
 #         model.add(LSTM(32, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2]))) # 4번 반복 0.89에 수렴
 #         model.add(Dropout(0.2))

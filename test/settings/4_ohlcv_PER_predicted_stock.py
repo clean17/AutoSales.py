@@ -7,6 +7,7 @@ from tensorflow.keras.models import Sequential, load_model
 from tensorflow.keras.layers import LSTM, Dense, Dropout
 import matplotlib.pyplot as plt
 import tensorflow as tf
+import os
 
 # 데이터 수집
 today = datetime.today().strftime('%Y%m%d')
@@ -54,10 +55,10 @@ model.compile(optimizer='adam', loss='mean_squared_error')
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
 
 early_stop = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True) # 10회 동안 개선없으면 종료, 최적의 가중치를 복원
-model.fit(X, Y, batch_size=16, epochs=200, validation_split=0.1, verbose=0, callbacks=[early_stop])
+model.fit(X, Y, batch_size=16, epochs=200, validation_split=0.2, verbose=0, callbacks=[early_stop])
 
 # 모델 저장
-model_path = 'PER_test.h5'
+model_path = 'save_model.h5'
 model.save(model_path)
 
 # 모델 로드 및 예측
@@ -92,12 +93,9 @@ for _ in range(n_future):
 future_preds_arr = np.array(future_preds).reshape(-1, 1)
 future_prices = close_scaler.inverse_transform(future_preds_arr).flatten()
 
-# 날짜 생성 (마지막 거래일 다음 날짜부터)
 future_dates = pd.date_range(start=ohlcv.index[-1] + pd.Timedelta(days=1), periods=n_future, freq='B')  # 'B'=business day
 
-print("미래 5일 예측 종가:")
-for price in future_prices:
-    print(format(int(price),','))
+print("미래 5일 예측 종가:", future_prices)
 
 plt.figure(figsize=(10, 5))
 plt.plot(ohlcv.index, actual_prices, label='Actual Prices')
@@ -106,7 +104,7 @@ plt.plot(future_dates, future_prices, label='Future Predicted Prices', linestyle
 plt.plot(
     [ohlcv.index[-1], future_dates[0]],
     [actual_prices[-1], future_prices[0]],
-    linestyle='dashed', color='gray', linewidth=1.5, label='Actual-Predicted Bridge'
+    linestyle='dashed', color='gray', linewidth=1.5
 )
 
 plt.title(f'Actual and 5-day Predicted Prices for {ticker}')
@@ -114,4 +112,16 @@ plt.xlabel('Date')
 plt.ylabel('Price')
 plt.legend()
 plt.grid(True)
-plt.show()
+# plt.show()
+
+
+
+
+output_dir = 'D:\\stocks'
+last_price = data['종가'].iloc[-1]
+future_return = (future_prices[-1] / last_price - 1) * 100
+stock_name = stock.get_market_ticker_name(ticker)
+timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+file_path = os.path.join(output_dir, f'4 {today} [ {future_return:.2f}% ] {stock_name} {ticker} [ {last_price} ] {timestamp}.png')
+plt.savefig(file_path)
+plt.close()

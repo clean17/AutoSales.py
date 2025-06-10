@@ -43,7 +43,7 @@ model = Sequential([
 ])
 model.compile(optimizer='adam', loss='mean_squared_error')
 
-model_path = 'PER_test_weights.h5'
+model_path = 'save_weights.h5'
 
 if os.path.exists(model_path):
     model.load_weights(model_path)
@@ -51,7 +51,7 @@ if os.path.exists(model_path):
 
 from tensorflow.keras.callbacks import EarlyStopping
 early_stop = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
-model.fit(X, Y, batch_size=16, epochs=200, validation_split=0.1, verbose=0, callbacks=[early_stop]) # fit; 학습 > 저장
+model.fit(X, Y, batch_size=16, epochs=200, validation_split=0.2, verbose=0, callbacks=[early_stop]) # fit; 학습 > 저장
 
 model.save_weights(model_path)
 print(f"{ticker}: 학습 후 가중치 저장됨 -> {model_path}")
@@ -66,19 +66,21 @@ X_input = scaled_data[-look_back:].reshape(1, look_back, scaled_data.shape[1])
 future_preds = model.predict(X_input, verbose=0).flatten()
 future_prices = close_scaler.inverse_transform(future_preds.reshape(-1, 1)).flatten()
 
+print("미래 5일 예측 종가:", future_prices)
+
 # 날짜 처리
-future_dates = pd.date_range(start=ohlcv.index[-1] + pd.Timedelta(days=1), periods=n_future, freq='B')
-actual_prices = ohlcv['종가'].values
+future_dates = pd.date_range(start=ohlcv.index[-1] + pd.Timedelta(days=1), periods=n_future, freq='B') # 예측할 5 영업일 날짜
+actual_prices = ohlcv['종가'].values # 최근 종가 배열
 
 plt.figure(figsize=(10, 5))
-plt.plot(ohlcv.index, actual_prices, label='Actual Prices')
-plt.plot(future_dates, future_prices, label='Future Predicted Prices', linestyle='--', marker='o', color='orange')
+plt.plot(ohlcv.index, actual_prices, label='Actual Prices') # 과거; ohlcv.index 받아온 날짜 인덱스
+plt.plot(future_dates, future_prices, label='Future Predicted Prices', linestyle='--', marker='o', color='orange') # 예측
 
 # 마지막 실제값과 첫 번째 예측값을 점선으로 연결
 plt.plot(
     [ohlcv.index[-1], future_dates[0]],  # x축: 마지막 실제날짜와 첫 예측날짜
     [actual_prices[-1], future_prices[0]],  # y축: 마지막 실제종가와 첫 예측종가
-    linestyle='dashed', color='gray', linewidth=1.5, label='Actual-Predicted Bridge'
+    linestyle='dashed', color='gray', linewidth=1.5
 )
 
 plt.title(f'Actual and 5-day Predicted Prices for {ticker}')
@@ -86,4 +88,16 @@ plt.xlabel('Date')
 plt.ylabel('Price')
 plt.legend()
 plt.grid(True)
-plt.show()
+# plt.show()
+
+
+
+
+output_dir = 'D:\\stocks'
+last_price = data['종가'].iloc[-1]
+future_return = (future_prices[-1] / last_price - 1) * 100
+stock_name = stock.get_market_ticker_name(ticker)
+timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+file_path = os.path.join(output_dir, f'5 {today} [ {future_return:.2f}% ] {stock_name} {ticker} [ {last_price} ] {timestamp}.png')
+plt.savefig(file_path)
+plt.close()

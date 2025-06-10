@@ -47,7 +47,7 @@ scaler = MinMaxScaler()
 scaled_data = scaler.fit_transform(data)
 
 # 시계열 데이터를 윈도우로 나누기
-sequence_length = 60  # 거래일 기준 약 60일 (3개월)
+sequence_length = 25  # 거래일 기준 약 60일 (3개월)
 forecast_horizon = 5  # 앞으로 5일 예측 (영업일 기준 일주일)
 
 # 시계열 데이터에서, 최근 N일 데이터를 가지고 미래 M일치를 예측하는 딥러닝 구조에 맞는 방식으로 변환
@@ -94,15 +94,15 @@ LSTM 레이어(노드) 수의 의미
 '''
 model = Sequential()
 
-# model.add(LSTM(128, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])))
-# model.add(Dropout(0.3))  # Dropout 비율도 늘려볼 것 추천
-# model.add(LSTM(64, return_sequences=False))
-# model.add(Dropout(0.3))
+model.add(LSTM(128, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])))
+model.add(Dropout(0.3))  # Dropout 비율도 늘려볼 것 추천
+model.add(LSTM(64, return_sequences=False))
+model.add(Dropout(0.3))
 
-model.add(LSTM(64, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])))
-model.add(Dropout(0.2))
-model.add(LSTM(32, return_sequences=False))
-model.add(Dropout(0.2))
+# model.add(LSTM(64, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])))
+# model.add(Dropout(0.2))
+# model.add(LSTM(32, return_sequences=False))
+# model.add(Dropout(0.2))
 
 # model.add(LSTM(32, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])))
 # model.add(Dropout(0.2))
@@ -158,7 +158,7 @@ history2 = model.fit(
     batch_size=16,
     verbose=0,
     validation_data=(X_val, Y_val),
-    callbacks=[early_stop, checkpoint]
+    callbacks=[early_stop]
 )
 
 # 실제 값과 예측 값의 비교, 7 일치 평균 비교, 실제 값으로 복원
