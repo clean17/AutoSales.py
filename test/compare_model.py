@@ -9,90 +9,158 @@ import matplotlib.pyplot as plt
 from tensorflow.keras.callbacks import ModelCheckpoint
 import os
 
+
+
+# 예측 결과를 실제 값(주가)으로 복원
+def invert_scale(scaled_preds, scaler, feature_index=3):
+    """
+    scaled_preds: (샘플수, forecast_horizon) - 스케일된 종가 예측 결과
+    scaler: 학습에 사용된 MinMaxScaler 객체
+    feature_index: 종가 컬럼 인덱스(보통 3)
+    """
+    inv_preds = []
+    for row in scaled_preds:
+        temp = np.zeros((len(row), scaler.n_features_in_))
+        temp[:, feature_index] = row  # 종가 위치에 예측값 할당
+        inv = scaler.inverse_transform(temp)[:, feature_index]  # 역변환 후 종가만 추출
+        inv_preds.append(inv)
+    return np.array(inv_preds)
+
+
 # 데이터 수집
-ticker = '000150'  # 예시: 000150 종목 코드
-data = fdr.DataReader(ticker, '2020-01-01', '2023-09-20')
+ticker = '087010'
+data = fdr.DataReader(ticker, '2024-01-01', '2025-06-09')
 
 # 필요한 컬럼 선택 및 NaN 값 처리
 data = data[['Open', 'High', 'Low', 'Close', 'Volume']].fillna(0)
 
 # 데이터 스케일링
+'''
+딥러닝, 머신러닝은 입력값의 크기에 민감 > 모델의 가중치 업데이트(학습)에 더 많은 영향을 끼치게 됨
+모든 입력값이 비슷한 범위(주로 0~1)여야 신경망이 안정적으로 학습됨
+
+특성마다 값의 범위를 맞춰서
+신경망이 모든 입력을 골고루 잘 학습하게 하고,
+학습 속도·성능·안정성을 크게 높이기 위해서
+'''
 scaler = MinMaxScaler()
 scaled_data = scaler.fit_transform(data)
 
 # 시계열 데이터를 윈도우로 나누기
-sequence_length = 30  # 예: 최근 60일 데이터를 기반으로 예측
-X = []
-y = []
-for i in range(len(scaled_data) - sequence_length):
+sequence_length = 60  # 거래일 기준 약 60일 (3개월)
+forecast_horizon = 5  # 앞으로 5일 예측 (영업일 기준 일주일)
+
+# 시계열 데이터에서, 최근 N일 데이터를 가지고 미래 M일치를 예측하는 딥러닝 구조에 맞는 방식으로 변환
+'''
+|---60일---|---예측---|
+[Day1~Day60] [Day61~Day67]
+[Day2~Day61] [Day62~Day68]
+
+이런 패턴이 오면, 이후 7일은 이렇게 된다! 를 통째로 배우게 됨
+'''
+X = [] # 과거 60일의 모든 특성
+y = [] # 미래 7일의 예측 종가
+# for i in range(len(scaled_data) - sequence_length):
+#     X.append(scaled_data[i:i+sequence_length])
+#     y.append(scaled_data[i+sequence_length, 3])  # 종가(Close) 예측
+for i in range(len(scaled_data) - sequence_length - forecast_horizon + 1):
     X.append(scaled_data[i:i+sequence_length])
-    y.append(scaled_data[i+sequence_length, 3])  # 종가(Close) 예측
+    # 7일치 종가 [D+1 ~ D+7] > Dense(7)로 만들려면 y값도 (샘플수, 7) 로 만들어야 한다
+    y.append(scaled_data[i+sequence_length:i+sequence_length+forecast_horizon, 3]) # 종가 예측
 
 X = np.array(X)
 Y = np.array(y)
 
 # 학습 데이터와 검증 데이터 분리
+# random_state; 데이터를 랜덤하게 분할할 때의 랜덤 시드(seed) 값 > 항상 같은 방식으로 데이터를 나눔 (재현성 보장)
 X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=0.2, random_state=42)
 
-# 모델 정의 및 학습
-# model = Sequential([
-#     LSTM(256, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])),
-#     LSTM(128, return_sequences=True),
-#     LSTM(64, return_sequences=False),
-#     Dense(128),
-#     Dense(64),
-#     Dense(32),
-#     Dense(1)
-# ])
-# model = Sequential([
-#     LSTM(256, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])),
-#     Dropout(0.2),  # 드롭아웃 추가
-#     LSTM(128, return_sequences=True),
-#     Dropout(0.2),  # 드롭아웃 추가
-#     LSTM(64, return_sequences=False),
-#     Dense(128),
-#     Dropout(0.2),  # 드롭아웃 추가
-#     Dense(64),
-#     Dense(32),
-#     Dense(1)
-# ])
+
+# LSTM(64), LSTM(128) 큰 차이가 없는데..
 model = Sequential()
-model.add(LSTM(128, return_sequences=True, input_shape=sequence_length))
-model.add(Dropout(0.2))  # 과적합 방지를 위한 드롭아웃 레이어
-model.add(LSTM(64, return_sequences=False))
-model.add(Dropout(0.2))  # 과적합 방지를 위한 드롭아웃 레이어
+# model.add(LSTM(128, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])))
+# model.add(Dropout(0.3))  # Dropout 비율도 늘려볼 것 추천
+# model.add(LSTM(64, return_sequences=False))
+# model.add(Dropout(0.3))
+# model.add(Dense(32, activation='relu'))
+# model.add(Dense(16, activation='relu'))
+# model.add(Dense(7))
+
+model.add(LSTM(64, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])))
+model.add(Dropout(0.2))
+model.add(LSTM(32, return_sequences=False))
+model.add(Dropout(0.2))
 model.add(Dense(32, activation='relu'))
 model.add(Dense(16, activation='relu'))
-model.add(Dense(1))
+model.add(Dense(forecast_horizon))
 model.compile(optimizer='adam', loss='mean_squared_error')
 
-model_file_path = 'my_model.h5'
-checkpoint = ModelCheckpoint(
-    model_file_path,
-    monitor='val_loss',
-    save_best_only=True,
-    mode='min',
-    verbose=1
+
+# 콜백 설정
+from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
+
+early_stop = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True) # 10회 동안 개선없으면 종료, 최적의 가중치를 복원
+checkpoint = ModelCheckpoint('best_model.h5', monitor='val_loss', save_best_only=True, mode='min') # 학습(fit()) 도중 검증 손실(val_loss)이 가장 낮은 시점의 모델을 자동 저장
+
+'''
+epochs; 전체 데이터셋(X_train, Y_train)을 한 번 모두 학습하는 과정의 횟수 (많으면 과적합)
+batch_size; 한 번에 모델에 넣어서 학습하는 데이터 샘플 수 (크면 효율, 불안정 작으면 일반화, 노이즈)
+validation_data; 학습 도중 모델의 성능을 평가할 데이터셋
+
+* Overfitting(과적합) 확인법
+훈련 손실(loss)은 계속 떨어지는데
+검증 손실(val_loss)은 어느 순간부터 더 이상 떨어지지 않고 오히려 올라갈 때
+
+줄이는 방법
+ Dropout 수치 증가 0.3 ~ 0.5
+ LSTM 레이어(노드) 수 줄이기 64 > 32 > 16
+ 조기 종료(EarlyStopping) 콜백 사용
+'''
+history = model.fit(
+    X_train, Y_train,
+    epochs=200,
+    batch_size=32, # 32가 좀 더 잘 맞는것 같다
+    verbose=0,
+    validation_data=(X_val, Y_val),
+    callbacks=[early_stop, checkpoint]
 )
 
-model.fit(X_train, Y_train, epochs=80, batch_size=32, verbose=1,
-          validation_data=(X_val, Y_val))
-          # validation_data=(X_val, Y_val), callbacks=[checkpoint])
+# 체크포인트한 파일 존재하면 이어서 학습
+model_file = 'best_model.h5'
+if os.path.exists(model_file):
+    model = load_model(model_file)
+    print("기존 best_model.h5 불러옴, 이어서 학습/예측 가능합니다.")
+else:
+    pass
 
-# 모델 저장
-# model.save('my_model.h5')
-# 모델 로드
-# model_loaded = load_model('my_model.h5') # 체크포인트가 자동으로 저장
-
-# 새로운 데이터 예측
+# 이후 예측 등 사용
 predictions = model.predict(X_val)
 
-# 실제 값과 예측 값의 비교
-plt.figure(figsize=(24, 10))
-plt.plot(Y_val, label='Actual Price')
-plt.plot(predictions, label='Predicted Price')
+# 실제 복원
+predictions_inv = invert_scale(predictions, scaler)
+Y_val_inv = invert_scale(Y_val, scaler)
+
+# 실제 값과 예측 값의 비교, 7 일치 평균 비교
+plt.figure(figsize=(10, 5))
 plt.title(f'{ticker} Stock Price Prediction')
-plt.xlabel('Time')
+plt.plot(Y_val_inv.mean(axis=1), label='Actual Mean')
+plt.plot(predictions_inv.mean(axis=1), label='Predicted Mean')
+plt.xlabel(f'Next {forecast_horizon} days')
 plt.ylabel('Price')
 plt.legend()
 plt.show()
+
+
+
+
+
+# loss 그래프 그리기
+# 0에 수렴하면 학습이 정상, 다시 오르면 과적합
+# plt.figure(figsize=(10, 5))
+# plt.plot(history.history['loss'], label='Train Loss')
+# plt.plot(history.history['val_loss'], label='Validation Loss')
+# plt.xlabel('Epoch')
+# plt.ylabel('Loss')
+# plt.legend()
+# plt.title('Training and Validation Loss')
+# plt.show()
