@@ -8,7 +8,7 @@ from tensorflow.keras.layers import LSTM, Dense, Dropout
 import matplotlib.pyplot as plt
 from tensorflow.keras.callbacks import ModelCheckpoint
 import os
-
+import pickle
 
 
 # 예측 결과를 실제 값(주가)으로 복원
@@ -76,23 +76,43 @@ Y = np.array(y)
 X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=0.2, random_state=42)
 
 
-# LSTM(64), LSTM(128) 큰 차이가 없는데..
+'''
+LSTM 레이어(노드) 수의 의미
+
+많으면
+
+모델이 더 많은 패턴(복잡한 시계열, 미세한 변화, 다양한 데이터 특성 등)을
+기억하고 학습할 수 있음
+과적합 위험↑
+학습 속도↓, 메모리 사용↑
+
+적으면
+
+모델이 단순한/짧은/규칙적인 패턴을 빠르고 안정적으로 학습
+과적합 위험↓
+학습 속도↑, 자원 소모↓
+'''
 model = Sequential()
+
 # model.add(LSTM(128, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])))
 # model.add(Dropout(0.3))  # Dropout 비율도 늘려볼 것 추천
 # model.add(LSTM(64, return_sequences=False))
 # model.add(Dropout(0.3))
-# model.add(Dense(32, activation='relu'))
-# model.add(Dense(16, activation='relu'))
-# model.add(Dense(7))
 
 model.add(LSTM(64, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])))
 model.add(Dropout(0.2))
 model.add(LSTM(32, return_sequences=False))
 model.add(Dropout(0.2))
+
+# model.add(LSTM(32, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])))
+# model.add(Dropout(0.2))
+# model.add(LSTM(32, return_sequences=False))
+# model.add(Dropout(0.2))
+
 model.add(Dense(32, activation='relu'))
 model.add(Dense(16, activation='relu'))
 model.add(Dense(forecast_horizon))
+
 model.compile(optimizer='adam', loss='mean_squared_error')
 
 
@@ -117,15 +137,22 @@ validation_data; 학습 도중 모델의 성능을 평가할 데이터셋
  조기 종료(EarlyStopping) 콜백 사용
 '''
 
+old_history = None
+
 # 체크포인트한 파일 존재하면 이어서 학습
 model_file = 'best_model.h5'
+history_file = 'history.pkl' # pkl; 파이썬 객체를 그대로 저장/불러오는 파일
+
 if os.path.exists(model_file):
     model = load_model(model_file)
-    print("기존 best_model.h5 불러옴, 이어서 학습/예측 가능합니다.")
+    print("기존 best_model.h5 불러옴, 이어서 학습/예측 가능")
+    if os.path.exists(history_file):
+        with open(history_file, 'rb') as f:
+            old_history = pickle.load(f)
 else:
     print(" *** 새로운 모델 생성")
 
-history = model.fit(
+history2 = model.fit(
     X_train, Y_train,
     epochs=200,
     batch_size=16,
@@ -134,34 +161,45 @@ history = model.fit(
     callbacks=[early_stop, checkpoint]
 )
 
-# 이후 예측 등 사용
-predictions = model.predict(X_val)
+# 실제 값과 예측 값의 비교, 7 일치 평균 비교, 실제 값으로 복원
+# predictions = model.predict(X_val)
+# predictions_inv = invert_scale(predictions, scaler)
+# Y_val_inv = invert_scale(Y_val, scaler)
+# plt.figure(figsize=(10, 5))
+# plt.title(f'{ticker} Stock Price Prediction')
+# plt.plot(Y_val_inv.mean(axis=1), label='Actual Mean')
+# plt.plot(predictions_inv.mean(axis=1), label='Predicted Mean')
+# plt.xlabel(f'Next {forecast_horizon} days')
+# plt.ylabel('Price')
+# plt.legend()
+# plt.show()
 
-# 실제 복원
-predictions_inv = invert_scale(predictions, scaler)
-Y_val_inv = invert_scale(Y_val, scaler)
 
-# 실제 값과 예측 값의 비교, 7 일치 평균 비교
+
+if old_history:
+    combined_loss = list(old_history['loss']) + list(history2.history['loss'])
+    combined_val_loss = list(old_history['val_loss']) + list(history2.history['val_loss'])
+else:
+    combined_loss = list(history2.history['loss'])
+    combined_val_loss = list(history2.history['val_loss'])
+
+# loss 그래프 그리기
+# 0에 수렴하면 학습이 정상, 다시 오르면 과적합
 plt.figure(figsize=(10, 5))
-plt.title(f'{ticker} Stock Price Prediction')
-plt.plot(Y_val_inv.mean(axis=1), label='Actual Mean')
-plt.plot(predictions_inv.mean(axis=1), label='Predicted Mean')
-plt.xlabel(f'Next {forecast_horizon} days')
-plt.ylabel('Price')
+plt.plot(combined_loss, label='Train Loss')
+plt.plot(combined_val_loss, label='Validation Loss')
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
 plt.legend()
+plt.title('Training and Validation Loss')
 plt.show()
 
 
 
-
-
-# loss 그래프 그리기
-# 0에 수렴하면 학습이 정상, 다시 오르면 과적합
-# plt.figure(figsize=(10, 5))
-# plt.plot(history.history['loss'], label='Train Loss')
-# plt.plot(history.history['val_loss'], label='Validation Loss')
-# plt.xlabel('Epoch')
-# plt.ylabel('Loss')
-# plt.legend()
-# plt.title('Training and Validation Loss')
-# plt.show()
+# **합쳐진 history 저장**
+history_to_save = {
+    'loss': combined_loss,
+    'val_loss': combined_val_loss
+}
+with open(history_file, 'wb') as f:
+    pickle.dump(history_to_save, f)

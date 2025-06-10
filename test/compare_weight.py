@@ -6,6 +6,7 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout
 from tensorflow.keras.callbacks import EarlyStopping
 import os
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 
 def invert_scale(scaled_preds, scaler, feature_index=3):
     inv_preds = []
@@ -17,7 +18,7 @@ def invert_scale(scaled_preds, scaler, feature_index=3):
     return np.array(inv_preds)
 
 # 여러 종목코드 예시
-tickers = ['087010', '000660', '005930']
+tickers = ['000660']
 
 for ticker in tickers:
     print(f'\n### {ticker} 모델 학습/예측 시작 ###')
@@ -42,12 +43,25 @@ for ticker in tickers:
     # 모델 정의 함수로 빼면 더 깔끔
     def build_model(input_shape, forecast_horizon):
         model = Sequential()
-        model.add(LSTM(64, return_sequences=True, input_shape=input_shape))
+
+#         model.add(LSTM(128, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2]))) # 4번 반복 0.91에 수렴
+#         model.add(Dropout(0.3))
+#         model.add(LSTM(64, return_sequences=False))
+#         model.add(Dropout(0.3))
+
+        model.add(LSTM(64, return_sequences=True, input_shape=input_shape)) # 4번 반복 0.91 수렴
         model.add(Dropout(0.2))
         model.add(LSTM(32, return_sequences=False))
         model.add(Dropout(0.2))
+
+#         model.add(LSTM(32, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2]))) # 4번 반복 0.89에 수렴
+#         model.add(Dropout(0.2))
+#         model.add(LSTM(32, return_sequences=False))
+#         model.add(Dropout(0.2))
+
         model.add(Dense(32, activation='relu'))
         model.add(Dense(16, activation='relu'))
+
         model.add(Dense(forecast_horizon))
         model.compile(optimizer='adam', loss='mean_squared_error')
         return model
@@ -94,3 +108,7 @@ for ticker in tickers:
     plt.ylabel('Price')
     plt.legend()
     plt.show()
+
+    # R-squared : 1에 가까울수록 좋다; 0.89~0.90 매우 높음, 0.7~0.8 우수, 0.5~0.7 개선이 필요
+    r2 = r2_score(Y_val, predictions)
+    print("R-squared:", r2)

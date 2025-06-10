@@ -98,7 +98,7 @@ Y_train_actual = scaler.inverse_transform(np.concatenate((np.zeros((Y_train.shap
 Y_test_actual = scaler.inverse_transform(np.concatenate((np.zeros((Y_test.shape[0], 3)), Y_test.reshape(-1, 1), np.zeros((Y_test.shape[0], 1))), axis=1))[:,3]
 
 # 시각화
-plt.figure(figsize=(26, 12))
+plt.figure(figsize=(10, 5))
 plt.plot(Y_train_actual, label='Train Actual')
 plt.plot(range(len(Y_train_actual), len(Y_train_actual) + len(Y_test_actual)), Y_test_actual, label='Test Actual')
 plt.plot(train_predict, label='Train Predict')
