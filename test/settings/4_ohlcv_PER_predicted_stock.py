@@ -16,9 +16,10 @@ tf.random.set_seed(42)
 random.seed(42)
 
 # 데이터 수집
-today = datetime.today().strftime('%Y%m%d')
-last_year = (datetime.today() - timedelta(days=60)).strftime('%Y%m%d')
-ticker = "214450"
+# today = datetime.today().strftime('%Y%m%d')
+today = (datetime.today() - timedelta(days=6)).strftime('%Y%m%d')
+last_year = (datetime.today() - timedelta(days=90)).strftime('%Y%m%d')
+ticker = "000660"
 
 # 주요 피처(시가, 고가, 저가, 종가, 거래량) + 재무 지표(PER)
 ohlcv = stock.get_market_ohlcv_by_date(fromdate=last_year, todate=today, ticker=ticker)
@@ -28,22 +29,26 @@ fundamental = stock.get_market_fundamental_by_date(fromdate=last_year, todate=to
 fundamental['PER'] = fundamental['PER'].fillna(0)
 
 # 주가 데이터와 재무 지표 결합 및 NaN 값 처리
-data = pd.concat([ohlcv, fundamental['PER']], axis=1).fillna(0)
+# data = pd.concat([ohlcv, fundamental['PER']], axis=1).fillna(0)
+data = ohlcv
+print('len', len(data))
 
 # 데이터 스케일링
 scaler = MinMaxScaler(feature_range=(0, 1))
 scaled_data = scaler.fit_transform(data)
 
 # 시계열 데이터를 윈도우로 나누기
-def create_dataset(dataset, look_back=60):
+def create_dataset(dataset, look_back):
     X, Y = [], []
     for i in range(len(dataset) - look_back):
         X.append(dataset[i:i+look_back])
         Y.append(dataset[i+look_back, 3])  # 종가(Close) 예측
     return np.array(X), np.array(Y)
 
-look_back = 25
+look_back = 30
 X, Y = create_dataset(scaled_data, look_back)
+print("X.shape:", X.shape) # X.shape: (0,) 데이터가 부족해서 슬라이딩 윈도우로 샘플이 만들어지지 않음
+print("Y.shape:", Y.shape)
 
 # 모델 생성 및 학습
 model = Sequential([
@@ -57,18 +62,25 @@ model = Sequential([
 ])
 model.compile(optimizer='adam', loss='mean_squared_error')
 
+# 기존 모델이 있으면 불러와서 이어서 학습
+model_path = 'models/save_model.h5'
+if os.path.exists(model_path):
+    model = tf.keras.models.load_model(model_path)
+    print(f"{ticker}: 이전 모델 로드")
+
 # 콜백 설정
-from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
-
+from tensorflow.keras.callbacks import EarlyStopping
 early_stop = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True) # 10회 동안 개선없으면 종료, 최적의 가중치를 복원
-model.fit(X, Y, batch_size=16, epochs=200, validation_split=0.2, verbose=0, callbacks=[early_stop])
 
-# 모델 저장
-model_path = 'save_model.h5'
+# 이어서(혹은 처음부터) 학습
+model.fit(X, Y, batch_size=16, epochs=200, validation_split=0.1, shuffle=False, verbose=0, callbacks=[early_stop])
+
+# 학습 후 모델 저장
 model.save(model_path)
+print(f"{ticker}: 학습 후 모델 저장됨 -> {model_path}")
 
-# 모델 로드 및 예측
-model_loaded = tf.keras.models.load_model(model_path)
+
+
 
 # 종가 데이터에 대한 스케일러 생성 및 훈련
 close_scaler = MinMaxScaler()
@@ -78,14 +90,14 @@ close_scaler.fit(close_prices)
 # 실제 값과 예측 값 비교를 위한 그래프
 actual_prices = ohlcv['종가'].values
 
-n_future = 5  # 앞으로 5일 예측
-last_window = scaled_data[-look_back:]  # 최근 25일 데이터
+n_future = 5  # 예측 기간
+last_window = scaled_data[-look_back:]  # 최근 데이터
 
 future_preds = []
 current_window = last_window.copy()
 
 for _ in range(n_future):
-    pred = model_loaded.predict(current_window.reshape(1, look_back, scaled_data.shape[1]), verbose=0)
+    pred = model.predict(current_window.reshape(1, look_back, scaled_data.shape[1]), verbose=0)
     # pred shape: (1, 1) → 실제 종가만 추출
     future_preds.append(pred[0, 0])
 
