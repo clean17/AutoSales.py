@@ -46,8 +46,8 @@ def create_dataset(dataset, look_back):
 
 look_back = 15
 X, Y = create_dataset(scaled_data, look_back)
-# print("X.shape:", X.shape) # X.shape: (0,) 데이터가 부족해서 슬라이딩 윈도우로 샘플이 만들어지지 않음
-# print("Y.shape:", Y.shape)
+print("X.shape:", X.shape) # X.shape: (0,) 데이터가 부족해서 슬라이딩 윈도우로 샘플이 만들어지지 않음
+print("Y.shape:", Y.shape)
 
 # 모델 생성 및 학습
 model = Sequential([

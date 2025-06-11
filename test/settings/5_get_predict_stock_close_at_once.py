@@ -18,7 +18,7 @@ random.seed(42)
 # 데이터 수집
 # today = datetime.today().strftime('%Y%m%d')
 today = (datetime.today() - timedelta(days=6)).strftime('%Y%m%d')
-last_year = (datetime.today() - timedelta(days=365)).strftime('%Y%m%d')
+last_year = (datetime.today() - timedelta(days=365).strftime('%Y%m%d')
 ticker = "000660"
 
 # 주요 피처(시가, 고가, 저가, 종가, 거래량) + 재무 지표(PER)
@@ -43,10 +43,10 @@ def create_multistep_dataset(dataset, look_back, n_future):
     return np.array(X), np.array(Y)
 
 n_future = 3
-look_back = 20
+look_back = 15
 X, Y = create_multistep_dataset(scaled_data, look_back, n_future)
-# print("X.shape:", X.shape) # X.shape: (0,) 데이터가 부족해서 슬라이딩 윈도우로 샘플이 만들어지지 않음
-# print("Y.shape:", Y.shape)
+print("X.shape:", X.shape) # X.shape: (0,) 데이터가 부족해서 슬라이딩 윈도우로 샘플이 만들어지지 않음
+print("Y.shape:", Y.shape)
 '''
 X[0]: 0~9일 데이터 (과거 10일)
 Y[0]: 10~14일 '종가' (미래 5일 정답)
@@ -78,7 +78,7 @@ from tensorflow.keras.callbacks import EarlyStopping
 early_stop = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True) # 10회 동안 개선없으면 종료, 최적의 가중치를 복원
 
 # 이어서(혹은 처음부터) 학습
-model.fit(X, Y, batch_size=16, epochs=200, validation_split=0.1, shuffle=False, verbose=0, callbacks=[early_stop])
+model.fit(X, Y, batch_size=8, epochs=200, validation_split=0.1, shuffle=False, verbose=0, callbacks=[early_stop])
 
 # 학습 후 모델 저장
 model.save(model_path)
