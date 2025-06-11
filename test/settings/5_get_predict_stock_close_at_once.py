@@ -9,9 +9,11 @@ import matplotlib.pyplot as plt
 import tensorflow as tf
 import os
 
-today = datetime.today().strftime('%Y%m%d')
-last_year = (datetime.today() - timedelta(days=60)).strftime('%Y%m%d')
-ticker = "214450"
+# 시드 고정 테스트
+import numpy as np, tensorflow as tf, random
+np.random.seed(42)
+tf.random.set_seed(42)
+random.seed(42)
 
 ohlcv = stock.get_market_ohlcv_by_date(fromdate=last_year, todate=today, ticker=ticker)
 fundamental = stock.get_market_fundamental_by_date(fromdate=last_year, todate=today, ticker=ticker)

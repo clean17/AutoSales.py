@@ -9,8 +9,11 @@ from tensorflow.keras.layers import LSTM, Dense, Dropout
 import matplotlib.pyplot as plt
 import tensorflow as tf
 
-# Set random seed for reproducibility
+# 시드 고정
+import numpy as np, tensorflow as tf, random
+np.random.seed(42)
 tf.random.set_seed(42)
+random.seed(42)
 
 # 예측 기간
 PREDICTION_PERIOD = 5

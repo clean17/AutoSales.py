@@ -9,6 +9,12 @@ import matplotlib.pyplot as plt
 import tensorflow as tf
 import os
 
+# 시드 고정 테스트
+import numpy as np, tensorflow as tf, random
+np.random.seed(42)
+tf.random.set_seed(42)
+random.seed(42)
+
 # 데이터 수집
 today = datetime.today().strftime('%Y%m%d')
 last_year = (datetime.today() - timedelta(days=60)).strftime('%Y%m%d')
