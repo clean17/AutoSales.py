@@ -18,7 +18,7 @@ random.seed(42)
 # 데이터 수집
 # today = datetime.today().strftime('%Y%m%d')
 today = (datetime.today() - timedelta(days=6)).strftime('%Y%m%d')
-last_year = (datetime.today() - timedelta(days=60)).strftime('%Y%m%d')
+last_year = (datetime.today() - timedelta(days=365)).strftime('%Y%m%d')
 ticker = "000660"
 
 # 주요 피처(시가, 고가, 저가, 종가, 거래량) + 재무 지표(PER)
@@ -42,8 +42,8 @@ def create_multistep_dataset(dataset, look_back, n_future):
         Y.append(dataset[i+look_back:i+look_back+n_future, 3])
     return np.array(X), np.array(Y)
 
-n_future = 5
-look_back = 25
+n_future = 3
+look_back = 20
 X, Y = create_multistep_dataset(scaled_data, look_back, n_future)
 # print("X.shape:", X.shape) # X.shape: (0,) 데이터가 부족해서 슬라이딩 윈도우로 샘플이 만들어지지 않음
 # print("Y.shape:", Y.shape)
@@ -70,9 +70,8 @@ model.compile(optimizer='adam', loss='mean_squared_error')
 # 기존 모델이 있으면 불러와서 이어서 학습
 model_path = 'models/save_model2.h5'
 if os.path.exists(model_path):
-    pass
-#     model = tf.keras.models.load_model(model_path)
-#     print(f"{ticker}: 이전 모델 로드")
+    model = tf.keras.models.load_model(model_path)
+    print(f"{ticker}: 이전 모델 로드")
 
 # 콜백 설정
 from tensorflow.keras.callbacks import EarlyStopping
@@ -82,8 +81,8 @@ early_stop = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights
 model.fit(X, Y, batch_size=16, epochs=200, validation_split=0.1, shuffle=False, verbose=0, callbacks=[early_stop])
 
 # 학습 후 모델 저장
-# model.save(model_path)
-# print(f"{ticker}: 학습 후 모델 저장됨 -> {model_path}")
+model.save(model_path)
+print(f"{ticker}: 학습 후 모델 저장됨 -> {model_path}")
 
 
 # 종가 scaler fit (실제 데이터로)
@@ -96,7 +95,7 @@ X_input = scaled_data[-look_back:].reshape(1, look_back, scaled_data.shape[1])
 future_preds = model.predict(X_input, verbose=0).flatten()
 future_prices = close_scaler.inverse_transform(future_preds.reshape(-1, 1)).flatten()
 
-print("미래 5일 예측 종가:", future_prices)
+print("예측 종가:", future_prices)
 
 # 날짜 처리
 future_dates = pd.date_range(start=ohlcv.index[-1] + pd.Timedelta(days=1), periods=n_future, freq='B') # 예측할 5 영업일 날짜

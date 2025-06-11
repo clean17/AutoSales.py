@@ -8,6 +8,12 @@ from tensorflow.keras.callbacks import EarlyStopping
 import os
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 
+# 시드 고정 테스트
+import numpy as np, tensorflow as tf, random
+np.random.seed(42)
+tf.random.set_seed(42)
+random.seed(42)
+
 def invert_scale(scaled_preds, scaler, feature_index=3):
     inv_preds = []
     for row in scaled_preds:
@@ -86,6 +92,7 @@ for ticker in tickers:
         batch_size=16,
         verbose=0,
         validation_data=(X_val, Y_val),
+        shuffle=False,
         callbacks=[early_stop]
     )
 

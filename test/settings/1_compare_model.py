@@ -10,6 +10,11 @@ from tensorflow.keras.callbacks import ModelCheckpoint
 import os
 import pickle
 
+# 시드 고정 테스트
+import numpy as np, tensorflow as tf, random
+np.random.seed(42)
+tf.random.set_seed(42)
+random.seed(42)
 
 # 예측 결과를 실제 값(주가)으로 복원
 def invert_scale(scaled_preds, scaler, feature_index=3):
@@ -29,7 +34,7 @@ def invert_scale(scaled_preds, scaler, feature_index=3):
 
 # 데이터 수집
 ticker = '000660' # 하이닉스
-data = fdr.DataReader(ticker, '2024-01-01', '2025-06-09')
+data = fdr.DataReader(ticker, '2024-06-01', '2025-06-03')
 
 # 필요한 컬럼 선택 및 NaN 값 처리
 data = data[['Open', 'High', 'Low', 'Close', 'Volume']].fillna(0)
@@ -47,8 +52,8 @@ scaler = MinMaxScaler()
 scaled_data = scaler.fit_transform(data)
 
 # 시계열 데이터를 윈도우로 나누기
-sequence_length = 25  # 거래일 기준 약 60일 (3개월)
-forecast_horizon = 5  # 앞으로 5일 예측 (영업일 기준 일주일)
+sequence_length = 15  # 거래일 기준 약 60일 (3개월)
+forecast_horizon = 3  # 앞으로 5일 예측 (영업일 기준 일주일)
 
 # 시계열 데이터에서, 최근 N일 데이터를 가지고 미래 M일치를 예측하는 딥러닝 구조에 맞는 방식으로 변환
 '''
@@ -137,20 +142,20 @@ validation_data; 학습 도중 모델의 성능을 평가할 데이터셋
  조기 종료(EarlyStopping) 콜백 사용
 '''
 
-old_history = None
-
-# 체크포인트한 파일 존재하면 이어서 학습
-model_file = 'best_model.h5'
-history_file = 'history.pkl' # pkl; 파이썬 객체를 그대로 저장/불러오는 파일
-
-if os.path.exists(model_file):
-    model = load_model(model_file)
-    print("기존 best_model.h5 불러옴, 이어서 학습/예측 가능")
-    if os.path.exists(history_file):
-        with open(history_file, 'rb') as f:
-            old_history = pickle.load(f)
-else:
-    print(" *** 새로운 모델 생성")
+# old_history = None
+#
+# # 체크포인트한 파일 존재하면 이어서 학습
+# model_file = 'best_model.h5'
+# history_file = 'history.pkl' # pkl; 파이썬 객체를 그대로 저장/불러오는 파일
+#
+# if os.path.exists(model_file):
+#     model = load_model(model_file)
+#     print("기존 best_model.h5 불러옴, 이어서 학습/예측 가능")
+#     if os.path.exists(history_file):
+#         with open(history_file, 'rb') as f:
+#             old_history = pickle.load(f)
+# else:
+#     print(" *** 새로운 모델 생성")
 
 history2 = model.fit(
     X_train, Y_train,
@@ -158,48 +163,50 @@ history2 = model.fit(
     batch_size=16,
     verbose=0,
     validation_data=(X_val, Y_val),
-    callbacks=[early_stop, checkpoint]
+    shuffle=False,
+#     callbacks=[early_stop, checkpoint]
+    callbacks=[early_stop]
 )
 
 # 실제 값과 예측 값의 비교, 7 일치 평균 비교, 실제 값으로 복원
-# predictions = model.predict(X_val)
-# predictions_inv = invert_scale(predictions, scaler)
-# Y_val_inv = invert_scale(Y_val, scaler)
-# plt.figure(figsize=(10, 5))
-# plt.title(f'{ticker} Stock Price Prediction')
-# plt.plot(Y_val_inv.mean(axis=1), label='Actual Mean')
-# plt.plot(predictions_inv.mean(axis=1), label='Predicted Mean')
-# plt.xlabel(f'Next {forecast_horizon} days')
-# plt.ylabel('Price')
-# plt.legend()
-# plt.show()
-
-
-
-if old_history:
-    combined_loss = list(old_history['loss']) + list(history2.history['loss'])
-    combined_val_loss = list(old_history['val_loss']) + list(history2.history['val_loss'])
-else:
-    combined_loss = list(history2.history['loss'])
-    combined_val_loss = list(history2.history['val_loss'])
-
-# loss 그래프 그리기
-# 0에 수렴하면 학습이 정상, 다시 오르면 과적합
+predictions = model.predict(X_val)
+predictions_inv = invert_scale(predictions, scaler)
+Y_val_inv = invert_scale(Y_val, scaler)
 plt.figure(figsize=(10, 5))
-plt.plot(combined_loss, label='Train Loss')
-plt.plot(combined_val_loss, label='Validation Loss')
-plt.xlabel('Epoch')
-plt.ylabel('Loss')
+plt.title(f'{ticker} Stock Price Prediction')
+plt.plot(Y_val_inv.mean(axis=1), label='Actual Mean')
+plt.plot(predictions_inv.mean(axis=1), label='Predicted Mean')
+plt.xlabel(f'Next {forecast_horizon} days')
+plt.ylabel('Price')
 plt.legend()
-plt.title('Training and Validation Loss')
 plt.show()
 
 
 
-# **합쳐진 history 저장**
-history_to_save = {
-    'loss': combined_loss,
-    'val_loss': combined_val_loss
-}
-with open(history_file, 'wb') as f:
-    pickle.dump(history_to_save, f)
+# if old_history:
+#     combined_loss = list(old_history['loss']) + list(history2.history['loss'])
+#     combined_val_loss = list(old_history['val_loss']) + list(history2.history['val_loss'])
+# else:
+#     combined_loss = list(history2.history['loss'])
+#     combined_val_loss = list(history2.history['val_loss'])
+#
+# # loss 그래프 그리기
+# # 0에 수렴하면 학습이 정상, 다시 오르면 과적합
+# plt.figure(figsize=(10, 5))
+# plt.plot(combined_loss, label='Train Loss')
+# plt.plot(combined_val_loss, label='Validation Loss')
+# plt.xlabel('Epoch')
+# plt.ylabel('Loss')
+# plt.legend()
+# plt.title('Training and Validation Loss')
+# plt.show()
+#
+#
+#
+# # **합쳐진 history 저장**
+# history_to_save = {
+#     'loss': combined_loss,
+#     'val_loss': combined_val_loss
+# }
+# with open(history_file, 'wb') as f:
+#     pickle.dump(history_to_save, f)

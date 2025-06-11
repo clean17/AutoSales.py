@@ -62,3 +62,4 @@ my_model.Keras/
 my_model_origin.Keras/
 *.h5
 *.keras
+*.pkl

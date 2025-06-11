@@ -16,7 +16,7 @@ random.seed(42)
 
 # 데이터 수집
 ticker = '000660'
-data = stock.get_market_ohlcv_by_date("2025-01-01", "2025-06-08", ticker)
+data = stock.get_market_ohlcv_by_date("2024-06-01", "2025-06-08", ticker)
 
 # 필요한 컬럼 선택 및 NaN 값 처리
 data = data[['시가', '고가', '저가', '종가', '거래량']].fillna(0)
@@ -38,7 +38,7 @@ def create_dataset(dataset, look_back):
         Y.append(dataset[i + look_back, 3])  # 종가(Close) 예측
     return np.array(X), np.array(Y)
 
-look_back = 25
+look_back = 20
 X, Y = create_dataset(scaled_data, look_back)
 
 # 학습 데이터와 테스트 데이터 분리
@@ -77,7 +77,7 @@ model.compile(optimizer='adam', loss='mean_squared_error')
 
 # 모델 학습
 early_stop = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
-model.fit(X_train, Y_train, batch_size=16, epochs=200, verbose=0, validation_data=(X_test, Y_test), callbacks=[early_stop])
+model.fit(X_train, Y_train, batch_size=16, epochs=200, verbose=0, shuffle=False, validation_data=(X_test, Y_test), callbacks=[early_stop])
 
 '''
 Train Actual (훈련 실제 값):
@@ -122,12 +122,3 @@ plt.xlabel('Time')
 plt.ylabel('Price')
 plt.legend()
 plt.show()
-
-'''
-테스트 결과
-look_back = 25
-LSTM(128)
-batch_size = 16
-
-에서 가장 유사하게 나온다
-'''

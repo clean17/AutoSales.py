@@ -18,7 +18,7 @@ random.seed(42)
 # 데이터 수집
 # today = datetime.today().strftime('%Y%m%d')
 today = (datetime.today() - timedelta(days=6)).strftime('%Y%m%d')
-last_year = (datetime.today() - timedelta(days=90)).strftime('%Y%m%d')
+last_year = (datetime.today() - timedelta(days=180)).strftime('%Y%m%d')
 ticker = "000660"
 
 # 주요 피처(시가, 고가, 저가, 종가, 거래량) + 재무 지표(PER)
@@ -29,9 +29,8 @@ fundamental = stock.get_market_fundamental_by_date(fromdate=last_year, todate=to
 fundamental['PER'] = fundamental['PER'].fillna(0)
 
 # 주가 데이터와 재무 지표 결합 및 NaN 값 처리
-# data = pd.concat([ohlcv, fundamental['PER']], axis=1).fillna(0)
-data = ohlcv
-print('len', len(data))
+data = pd.concat([ohlcv, fundamental['PER']], axis=1).fillna(0)
+# print('data', len(data))
 
 # 데이터 스케일링
 scaler = MinMaxScaler(feature_range=(0, 1))
@@ -45,10 +44,10 @@ def create_dataset(dataset, look_back):
         Y.append(dataset[i+look_back, 3])  # 종가(Close) 예측
     return np.array(X), np.array(Y)
 
-look_back = 30
+look_back = 15
 X, Y = create_dataset(scaled_data, look_back)
-print("X.shape:", X.shape) # X.shape: (0,) 데이터가 부족해서 슬라이딩 윈도우로 샘플이 만들어지지 않음
-print("Y.shape:", Y.shape)
+# print("X.shape:", X.shape) # X.shape: (0,) 데이터가 부족해서 슬라이딩 윈도우로 샘플이 만들어지지 않음
+# print("Y.shape:", Y.shape)
 
 # 모델 생성 및 학습
 model = Sequential([
@@ -90,7 +89,7 @@ close_scaler.fit(close_prices)
 # 실제 값과 예측 값 비교를 위한 그래프
 actual_prices = ohlcv['종가'].values
 
-n_future = 5  # 예측 기간
+n_future = 3  # 예측 기간
 last_window = scaled_data[-look_back:]  # 최근 데이터
 
 future_preds = []
@@ -113,7 +112,7 @@ future_prices = close_scaler.inverse_transform(future_preds_arr).flatten()
 
 future_dates = pd.date_range(start=ohlcv.index[-1] + pd.Timedelta(days=1), periods=n_future, freq='B')  # 'B'=business day
 
-print("미래 5일 예측 종가:", future_prices)
+print("예측 종가:", future_prices)
 
 plt.figure(figsize=(10, 5))
 plt.plot(ohlcv.index, actual_prices, label='Actual Prices')
