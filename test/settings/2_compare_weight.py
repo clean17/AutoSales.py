@@ -44,7 +44,7 @@ for ticker in tickers:
     def build_model(input_shape, forecast_horizon):
         model = Sequential()
 
-        model.add(LSTM(128, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2]))) # 4번 반복 0.91에 수렴
+        model.add(LSTM(128, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])))
         model.add(Dropout(0.3))
         model.add(LSTM(64, return_sequences=False))
         model.add(Dropout(0.3))

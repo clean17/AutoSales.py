@@ -95,7 +95,7 @@ LSTM 레이어(노드) 수의 의미
 model = Sequential()
 
 model.add(LSTM(128, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])))
-model.add(Dropout(0.3))  # Dropout 비율도 늘려볼 것 추천
+model.add(Dropout(0.3))
 model.add(LSTM(64, return_sequences=False))
 model.add(Dropout(0.3))
 
@@ -158,7 +158,7 @@ history2 = model.fit(
     batch_size=16,
     verbose=0,
     validation_data=(X_val, Y_val),
-    callbacks=[early_stop]
+    callbacks=[early_stop, checkpoint]
 )
 
 # 실제 값과 예측 값의 비교, 7 일치 평균 비교, 실제 값으로 복원

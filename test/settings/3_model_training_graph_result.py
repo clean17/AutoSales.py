@@ -8,9 +8,14 @@ from tensorflow.keras.layers import LSTM, Dense, Dropout
 from tensorflow.keras.callbacks import EarlyStopping
 import matplotlib.pyplot as plt
 
+# 시드 고정 테스트
+import numpy as np, tensorflow as tf, random
+np.random.seed(42)
+tf.random.set_seed(42)
+random.seed(42)
 
 # 데이터 수집
-ticker = '214450'  # 예시: 000150 종목 코드
+ticker = '000660'
 data = stock.get_market_ohlcv_by_date("2025-01-01", "2025-06-08", ticker)
 
 # 필요한 컬럼 선택 및 NaN 값 처리
@@ -41,10 +46,21 @@ train_size = int(len(X) * 0.8)
 X_train, X_test = X[:train_size], X[train_size:]
 Y_train, Y_test = Y[:train_size], Y[train_size:]
 
+'''
+Dense 레이어의 역할
+모든 입력 뉴런이 모든 출력 뉴런과 연결되어 있는 층
+복잡한 패턴을 비선형적으로 조합해서 결과값(예측, 분류, 회귀 등)을 만든다.
+
+Dense(32) → Dense(16) → Dense(1): 복잡한 문제, 더 높은 표현력 필요할 때
+
+Dense(32) → Dense(1): 간단하거나 빠르게 실험할 때
+
+Dropout 0.2/0.3 비교 테스트 필요
+'''
 # 모델 생성
 model = Sequential()
 
-model.add(LSTM(128, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2]))) # 4번 반복 0.91에 수렴
+model.add(LSTM(128, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])))
 model.add(Dropout(0.3))
 model.add(LSTM(64, return_sequences=False))
 model.add(Dropout(0.3))
