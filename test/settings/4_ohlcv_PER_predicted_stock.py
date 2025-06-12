@@ -18,19 +18,24 @@ random.seed(42)
 # 데이터 수집
 # today = datetime.today().strftime('%Y%m%d')
 today = (datetime.today() - timedelta(days=6)).strftime('%Y%m%d')
-last_year = (datetime.today() - timedelta(days=180)).strftime('%Y%m%d')
+last_year = (datetime.today() - timedelta(days=365)).strftime('%Y%m%d')
 ticker = "000660"
 
-# 주요 피처(시가, 고가, 저가, 종가, 거래량) + 재무 지표(PER)
-ohlcv = stock.get_market_ohlcv_by_date(fromdate=last_year, todate=today, ticker=ticker)
-fundamental = stock.get_market_fundamental_by_date(fromdate=last_year, todate=today, ticker=ticker)
+# 주식 데이터((시가, 고가, 저가, 종가, 거래량))와 재무 데이터(PER)를 가져온다
+def fetch_stock_data(ohlcv, ticker, fromdate, todate):
+    fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker)
+    fundamental['PER'] = fundamental['PER'].fillna(0)
+    data = pd.concat([ohlcv, fundamental['PER']], axis=1).fillna(0)
+    return data
 
-# PER 값이 없는 경우 대체 값 사용 (예: 0으로 채우기)
-fundamental['PER'] = fundamental['PER'].fillna(0)
+# ohlcv = stock.get_market_ohlcv_by_date(fromdate=last_year, todate=today, ticker=ticker)
+# data = fetch_stock_data(ohlcv, ticker, last_year, today)
 
-# 주가 데이터와 재무 지표 결합 및 NaN 값 처리
-data = pd.concat([ohlcv, fundamental['PER']], axis=1).fillna(0)
-# print('data', len(data))
+# data.to_csv(f'{ticker}.csv')  # 원하는 경로/이름으로 저장
+# data = pd.read_csv(f'{ticker}.csv', index_col=0, parse_dates=True)
+
+# data.to_pickle(f'{ticker}.pkl')
+data = pd.read_pickle(f'{ticker}.pkl')
 
 # 데이터 스케일링
 scaler = MinMaxScaler(feature_range=(0, 1))
@@ -87,7 +92,7 @@ close_prices = data['종가'].values.reshape(-1, 1)
 close_scaler.fit(close_prices)
 
 # 실제 값과 예측 값 비교를 위한 그래프
-actual_prices = ohlcv['종가'].values
+actual_prices = data['종가'].values
 
 n_future = 3  # 예측 기간
 last_window = scaled_data[-look_back:]  # 최근 데이터
@@ -110,16 +115,16 @@ for _ in range(n_future):
 future_preds_arr = np.array(future_preds).reshape(-1, 1)
 future_prices = close_scaler.inverse_transform(future_preds_arr).flatten()
 
-future_dates = pd.date_range(start=ohlcv.index[-1] + pd.Timedelta(days=1), periods=n_future, freq='B')  # 'B'=business day
+future_dates = pd.date_range(start=data.index[-1] + pd.Timedelta(days=1), periods=n_future, freq='B')  # 'B'=business day
 
 print("예측 종가:", future_prices)
 
 plt.figure(figsize=(10, 5))
-plt.plot(ohlcv.index, actual_prices, label='Actual Prices')
+plt.plot(data.index, actual_prices, label='Actual Prices')
 plt.plot(future_dates, future_prices, label='Future Predicted Prices', linestyle='--', marker='o', color='orange')
 
 plt.plot(
-    [ohlcv.index[-1], future_dates[0]],
+    [data.index[-1], future_dates[0]],
     [actual_prices[-1], future_prices[0]],
     linestyle='dashed', color='gray', linewidth=1.5
 )
