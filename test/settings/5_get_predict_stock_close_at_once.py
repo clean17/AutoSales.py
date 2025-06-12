@@ -16,20 +16,21 @@ tf.random.set_seed(42)
 random.seed(42)
 
 # 데이터 수집
-# today = datetime.today().strftime('%Y%m%d')
-today = (datetime.today() - timedelta(days=6)).strftime('%Y%m%d')
-last_year = (datetime.today() - timedelta(days=365).strftime('%Y%m%d')
+today = datetime.today().strftime('%Y%m%d')
+# today = (datetime.today() - timedelta(days=5)).strftime('%Y%m%d')
+last_year = (datetime.today() - timedelta(days=100)).strftime('%Y%m%d')
 ticker = "000660"
 
-# 주요 피처(시가, 고가, 저가, 종가, 거래량) + 재무 지표(PER)
+# 주식 데이터((시가, 고가, 저가, 종가, 거래량))와 재무 데이터(PER)를 가져온다
+def fetch_stock_data(ohlcv, ticker, fromdate, todate):
+    fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker)
+    fundamental['PER'] = fundamental['PER'].fillna(0)
+    data = pd.concat([ohlcv, fundamental['PER']], axis=1).fillna(0)
+    return data
+
 ohlcv = stock.get_market_ohlcv_by_date(fromdate=last_year, todate=today, ticker=ticker)
-fundamental = stock.get_market_fundamental_by_date(fromdate=last_year, todate=today, ticker=ticker)
-
-# PER 값이 없는 경우 대체 값 사용 (예: 0으로 채우기)
-fundamental['PER'] = fundamental['PER'].fillna(0)
-
-# 주가 데이터와 재무 지표 결합 및 NaN 값 처리
-data = pd.concat([ohlcv, fundamental['PER']], axis=1).fillna(0)
+data = fetch_stock_data(ohlcv, ticker, last_year, today)
+data.to_pickle(f'{ticker}.pkl')
 
 # 데이터 스케일링
 scaler = MinMaxScaler(feature_range=(0, 1))
@@ -56,22 +57,32 @@ Y[1]: 11~15일 '종가'
 '''
 
 model = Sequential([
-    LSTM(128, return_sequences=True, input_shape=(X.shape[1], X.shape[2])),
-    Dropout(0.3),
-    LSTM(64, return_sequences=False),
-    Dropout(0.3),
-    Dense(32, activation='relu'),
+    LSTM(32, return_sequences=True, input_shape=(X.shape[1], X.shape[2])),
+    Dropout(0.2),
+    LSTM(16, return_sequences=False),
+    Dropout(0.2),
     Dense(16, activation='relu'),
+    Dense(8, activation='relu'),
     Dense(n_future)
 ])
+
+# model = Sequential([
+#     LSTM(16, return_sequences=True, input_shape=(X.shape[1], X.shape[2])),
+#     Dropout(0.2),
+#     LSTM(8, return_sequences=False),
+#     Dropout(0.2),
+#     Dense(8, activation='relu'),
+#     Dense(4, activation='relu'),
+#     Dense(n_future)
+# ])
 model.compile(optimizer='adam', loss='mean_squared_error')
 
 
 # 기존 모델이 있으면 불러와서 이어서 학습
-model_path = 'models/save_model2.h5'
-if os.path.exists(model_path):
-    model = tf.keras.models.load_model(model_path)
-    print(f"{ticker}: 이전 모델 로드")
+# model_path = 'models/save_model2.h5'
+# if os.path.exists(model_path):
+#     model = tf.keras.models.load_model(model_path)
+#     print(f"{ticker}: 이전 모델 로드")
 
 # 콜백 설정
 from tensorflow.keras.callbacks import EarlyStopping
@@ -81,8 +92,8 @@ early_stop = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights
 model.fit(X, Y, batch_size=8, epochs=200, validation_split=0.1, shuffle=False, verbose=0, callbacks=[early_stop])
 
 # 학습 후 모델 저장
-model.save(model_path)
-print(f"{ticker}: 학습 후 모델 저장됨 -> {model_path}")
+# model.save(model_path)
+# print(f"{ticker}: 학습 후 모델 저장됨 -> {model_path}")
 
 
 # 종가 scaler fit (실제 데이터로)
