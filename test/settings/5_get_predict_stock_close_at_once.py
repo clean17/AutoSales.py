@@ -46,6 +46,19 @@ def create_multistep_dataset(dataset, look_back, n_future):
         Y.append(dataset[i+look_back:i+look_back+n_future, 3])
     return np.array(X), np.array(Y)
 
+def create_model(input_shape, n_future):
+    model = Sequential([
+        LSTM(32, return_sequences=True, input_shape=input_shape),
+        Dropout(0.2),
+        LSTM(16, return_sequences=False),
+        Dropout(0.2),
+        Dense(16, activation='relu'),
+        Dense(8, activation='relu'),
+        Dense(n_future)
+    ])
+    model.compile(optimizer='adam', loss='mean_squared_error')
+    return model
+
 n_future = 3
 look_back = 15
 X, Y = create_multistep_dataset(scaled_data, look_back, n_future)
@@ -59,33 +72,7 @@ X[1]: 1~10일 데이터
 Y[1]: 11~15일 '종가'
 '''
 
-model = Sequential([
-    LSTM(32, return_sequences=True, input_shape=(X.shape[1], X.shape[2])),
-    Dropout(0.2),
-    LSTM(16, return_sequences=False),
-    Dropout(0.2),
-    Dense(16, activation='relu'),
-    Dense(8, activation='relu'),
-    Dense(n_future)
-])
-
-# model = Sequential([
-#     LSTM(16, return_sequences=True, input_shape=(X.shape[1], X.shape[2])),
-#     Dropout(0.2),
-#     LSTM(8, return_sequences=False),
-#     Dropout(0.2),
-#     Dense(8, activation='relu'),
-#     Dense(4, activation='relu'),
-#     Dense(n_future)
-# ])
-model.compile(optimizer='adam', loss='mean_squared_error')
-
-
-# 기존 모델이 있으면 불러와서 이어서 학습
-# model_path = 'models/save_model2.h5'
-# if os.path.exists(model_path):
-#     model = tf.keras.models.load_model(model_path)
-#     print(f"{ticker}: 이전 모델 로드")
+model = create_model((X.shape[1], X.shape[2]), n_future)
 
 # 콜백 설정
 from tensorflow.keras.callbacks import EarlyStopping
@@ -93,10 +80,6 @@ early_stop = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights
 
 # 이어서(혹은 처음부터) 학습
 model.fit(X, Y, batch_size=8, epochs=200, validation_split=0.1, shuffle=False, verbose=0, callbacks=[early_stop])
-
-# 학습 후 모델 저장
-# model.save(model_path)
-# print(f"{ticker}: 학습 후 모델 저장됨 -> {model_path}")
 
 '''
 스윙(중기 트레이딩)
@@ -112,7 +95,7 @@ model.fit(X, Y, batch_size=8, epochs=200, validation_split=0.1, shuffle=False, v
 '''
 # 5일 이동평균선이 하락중이면 제외
 data['MA_5'] = data['종가'].rolling(window=5).mean()
-print(data['MA_5']) # MA_5: 5일 이동편ㄱㄴ선
+print(data['MA_5'])
 
 # 각도(변화량) 계산
 ma_angle = data['MA_5'].iloc[-1] - data['MA_5'].iloc[-2]

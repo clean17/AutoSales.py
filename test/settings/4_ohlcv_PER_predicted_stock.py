@@ -52,38 +52,25 @@ def create_dataset(dataset, look_back):
         Y.append(dataset[i+look_back, 3])  # 종가(Close) 예측
     return np.array(X), np.array(Y)
 
+def create_model(input_shape, n_future):
+    model = Sequential([
+        LSTM(32, return_sequences=True, input_shape=input_shape),
+        Dropout(0.2),
+        LSTM(16, return_sequences=False),
+        Dropout(0.2),
+        Dense(16, activation='relu'),
+        Dense(8, activation='relu'),
+        Dense(n_future)
+    ])
+    model.compile(optimizer='adam', loss='mean_squared_error')
+    return model
+
 look_back = 15
 X, Y = create_dataset(scaled_data, look_back)
 print("X.shape:", X.shape) # X.shape: (0,) 데이터가 부족해서 슬라이딩 윈도우로 샘플이 만들어지지 않음
 print("Y.shape:", Y.shape)
 
-# 모델 생성 및 학습
-model = Sequential([
-    LSTM(32, return_sequences=True, input_shape=(X.shape[1], X.shape[2])),
-    Dropout(0.2),
-    LSTM(16, return_sequences=False),
-    Dropout(0.2),
-    Dense(16, activation='relu'),
-    Dense(8, activation='relu'),
-    Dense(1)
-])
-
-# model = Sequential([
-#     LSTM(16, return_sequences=True, input_shape=(X.shape[1], X.shape[2])),
-#     Dropout(0.2),
-#     LSTM(8, return_sequences=False),
-#     Dropout(0.2),
-#     Dense(8, activation='relu'),
-#     Dense(4, activation='relu'),
-#     Dense(1)
-# ])
-model.compile(optimizer='adam', loss='mean_squared_error')
-
-# 기존 모델이 있으면 불러와서 이어서 학습
-# model_path = 'models/save_model.h5'
-# if os.path.exists(model_path):
-#     model = tf.keras.models.load_model(model_path)
-#     print(f"{ticker}: 이전 모델 로드")
+model = create_model((X.shape[1], X.shape[2]), 1)
 
 # 콜백 설정
 from tensorflow.keras.callbacks import EarlyStopping
@@ -93,10 +80,6 @@ early_stop = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights
 # batch_size 4 > var_loss 0.056
 # batch_size 8 > var_loss 0.045
 history = model.fit(X, Y, batch_size=8, epochs=200, validation_split=0.1, shuffle=False, verbose=0, callbacks=[early_stop])
-
-# 학습 후 모델 저장
-# model.save(model_path)
-# print(f"{ticker}: 학습 후 모델 저장됨 -> {model_path}")
 
 
 
