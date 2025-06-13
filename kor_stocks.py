@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 import tensorflow as tf
 from send2trash import send2trash
 import ast
+from utils import create_dataset, create_multistep_dataset, get_safe_ticker_list, fetch_stock_data
 
 # 시드 고정
 import numpy as np, tensorflow as tf, random
@@ -25,7 +26,7 @@ os.makedirs(output_dir, exist_ok=True)
 PREDICTION_PERIOD = 3
 LOOK_BACK = 15
 AVERAGE_VOLUME = 25000 # 평균거래량
-AVERAGE_TRADING_VALUE = 5000000000 # 평균거래대금
+AVERAGE_TRADING_VALUE = 3000000000 # 평균거래대금
 MAX_ITERATIONS = 1
 EXPECTED_GROWTH_RATE = 5
 DATA_COLLECTION_PERIOD = 100
@@ -35,73 +36,10 @@ today_us = datetime.today().strftime('%Y-%m-%d')
 start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y%m%d')
 
 
-def get_safe_ticker_list(market="KOSPI"):
-    def fetch_tickers_for_date(date):
-        try:
-            tickers = stock.get_market_ticker_list(market=market, date=date)
-            # 데이터가 비어 있다면 예외를 발생시킴
-            if not tickers:
-                raise ValueError("Ticker list is empty")
-            return tickers
-        except (IndexError, ValueError) as e:
-            return []
-
-    # 현재 날짜로 시도
-    today = datetime.now().strftime("%Y%m%d")
-    tickers = fetch_tickers_for_date(today)
-
-    # 첫 번째 시도가 실패한 경우 과거 날짜로 반복 시도
-    if not tickers:
-        print("데이터가 비어 있습니다. 가장 가까운 영업일로 재시도합니다.")
-        for days_back in range(1, 7):
-            previous_day = (datetime.now() - timedelta(days=days_back)).strftime("%Y%m%d")
-            tickers = fetch_tickers_for_date(previous_day)
-            if tickers:  # 성공적으로 데이터를 가져오면 반환
-                return tickers
-
-        print("영업일 데이터를 찾을 수 없습니다.")
-        return []
-
-    return tickers
-
-
-tickers_kospi = get_safe_ticker_list(market="KOSPI")
-tickers_kosdaq = get_safe_ticker_list(market="KOSDAQ")
-tickers = tickers_kospi + tickers_kosdaq # 전체
-
-# 주식 데이터(시가, 고가, 저가, 종가, 거래량)와 재무 데이터(PER)를 가져온다
-def fetch_stock_data(ticker, fromdate, todate):
-    ohlcv = stock.get_market_ohlcv_by_date(fromdate=fromdate, todate=todate, ticker=ticker)
-    fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker)
-    if 'PER' not in fundamental.columns:
-        fundamental['PER'] = 0
-    else:
-        fundamental['PER'] = fundamental['PER'].fillna(0)
-    data = pd.concat([ohlcv, fundamental['PER']], axis=1).fillna(0)
-    return data
-
-def create_dataset(dataset, look_back=30):
-    X, Y = [], []
-    if len(dataset) < look_back:
-        return np.array(X), np.array(Y)  # 빈 배열 반환
-    for i in range(len(dataset) - look_back):
-        X.append(dataset[i:i+look_back, :])
-        Y.append(dataset[i+look_back, 0])  # 종가(Close) 예측
-    return np.array(X), np.array(Y)
-
-# LSTM 모델 학습 및 예측 함수 정의
-def create_model(input_shape):
-    model = Sequential([
-        LSTM(32, return_sequences=True, input_shape=(input_shape)),
-        Dropout(0.2),
-        LSTM(16, return_sequences=False),
-        Dropout(0.2),
-        Dense(16, activation='relu'),
-        Dense(8, activation='relu'),
-        Dense(1)
-    ])
-    model.compile(optimizer='adam', loss='mean_squared_error')
-    return model
+# tickers_kospi = get_safe_ticker_list(market="KOSPI")
+# tickers_kosdaq = get_safe_ticker_list(market="KOSDAQ")
+# tickers = tickers_kospi + tickers_kosdaq # 전체
+tickers = ['014970']
 
 ticker_to_name = {ticker: stock.get_market_ticker_name(ticker) for ticker in tickers}
 # 성장률을 저장할 튜플
@@ -125,8 +63,8 @@ for count, ticker in enumerate(tickers):
 
     # 종가가 0.0이거나 500원 미만이면 건너뜀
     last_row = data.iloc[-1]
-#     if last_row['종가'] == 0.0 or last_row['종가'] < 500:
-        print("                                                        종가가 0이거나 500원 미만이므로 작업을 건너뜁니다.")
+    if last_row['종가'] == 0.0 or last_row['종가'] < 500:
+#         print("                                                        종가가 0이거나 500원 미만이므로 작업을 건너뜁니다.")
         continue
 
     # 데이터가 부족하면 건너뜀
