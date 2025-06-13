@@ -69,9 +69,9 @@ tickers_kospi = get_safe_ticker_list(market="KOSPI")
 tickers_kosdaq = get_safe_ticker_list(market="KOSDAQ")
 tickers = tickers_kospi + tickers_kosdaq # 전체
 
-# 주식 데이터((시가, 고가, 저가, 종가, 거래량))와 재무 데이터(PER)를 가져온다
+# 주식 데이터(시가, 고가, 저가, 종가, 거래량)와 재무 데이터(PER)를 가져온다
 def fetch_stock_data(ticker, fromdate, todate):
-    ohlcv = stock.get_market_ohlcv_by_date(fromdate=fromdate, todate=today, ticker=ticker)
+    ohlcv = stock.get_market_ohlcv_by_date(fromdate=fromdate, todate=todate, ticker=ticker)
     fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker)
     if 'PER' not in fundamental.columns:
         fundamental['PER'] = 0

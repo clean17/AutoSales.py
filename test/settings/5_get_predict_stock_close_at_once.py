@@ -21,7 +21,7 @@ today = (datetime.today() - timedelta(days=5)).strftime('%Y%m%d')
 last_year = (datetime.today() - timedelta(days=100)).strftime('%Y%m%d')
 ticker = "000660"
 
-# 주식 데이터((시가, 고가, 저가, 종가, 거래량))와 재무 데이터(PER)를 가져온다
+# 주식 데이터(시가, 고가, 저가, 종가, 거래량)와 재무 데이터(PER)를 가져온다
 def fetch_stock_data(ticker, fromdate, todate):
     ohlcv = stock.get_market_ohlcv_by_date(fromdate=fromdate, todate=today, ticker=ticker)
     fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker)
