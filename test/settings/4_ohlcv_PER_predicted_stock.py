@@ -18,18 +18,21 @@ random.seed(42)
 # 데이터 수집
 # today = datetime.today().strftime('%Y%m%d')
 today = (datetime.today() - timedelta(days=5)).strftime('%Y%m%d')
-last_year = (datetime.today() - timedelta(days=70)).strftime('%Y%m%d')
+last_year = (datetime.today() - timedelta(days=80)).strftime('%Y%m%d')
 ticker = "000660"
 
 # 주식 데이터((시가, 고가, 저가, 종가, 거래량))와 재무 데이터(PER)를 가져온다
-def fetch_stock_data(ohlcv, ticker, fromdate, todate):
+def fetch_stock_data(ticker, fromdate, todate):
+    ohlcv = stock.get_market_ohlcv_by_date(fromdate=fromdate, todate=today, ticker=ticker)
     fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker)
-    fundamental['PER'] = fundamental['PER'].fillna(0)
+    if 'PER' not in fundamental.columns:
+        fundamental['PER'] = 0
+    else:
+        fundamental['PER'] = fundamental['PER'].fillna(0)
     data = pd.concat([ohlcv, fundamental['PER']], axis=1).fillna(0)
     return data
 
-ohlcv = stock.get_market_ohlcv_by_date(fromdate=last_year, todate=today, ticker=ticker)
-data = fetch_stock_data(ohlcv, ticker, last_year, today)
+data = fetch_stock_data(ticker, last_year, today)
 data.to_pickle(f'{ticker}.pkl')
 
 # data.to_csv(f'{ticker}.csv')  # 원하는 경로/이름으로 저장
@@ -49,7 +52,7 @@ def create_dataset(dataset, look_back):
         Y.append(dataset[i+look_back, 3])  # 종가(Close) 예측
     return np.array(X), np.array(Y)
 
-look_back = 10
+look_back = 15
 X, Y = create_dataset(scaled_data, look_back)
 print("X.shape:", X.shape) # X.shape: (0,) 데이터가 부족해서 슬라이딩 윈도우로 샘플이 만들어지지 않음
 print("Y.shape:", Y.shape)
@@ -89,7 +92,7 @@ early_stop = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights
 # 이어서(혹은 처음부터) 학습
 # batch_size 4 > var_loss 0.056
 # batch_size 8 > var_loss 0.045
-history = model.fit(X, Y, batch_size=8, epochs=200, validation_split=0.1, shuffle=False, verbose=1, callbacks=[early_stop])
+history = model.fit(X, Y, batch_size=8, epochs=200, validation_split=0.1, shuffle=False, verbose=0, callbacks=[early_stop])
 
 # 학습 후 모델 저장
 # model.save(model_path)

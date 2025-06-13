@@ -16,20 +16,23 @@ tf.random.set_seed(42)
 random.seed(42)
 
 # 데이터 수집
-today = datetime.today().strftime('%Y%m%d')
-# today = (datetime.today() - timedelta(days=5)).strftime('%Y%m%d')
+# today = datetime.today().strftime('%Y%m%d')
+today = (datetime.today() - timedelta(days=5)).strftime('%Y%m%d')
 last_year = (datetime.today() - timedelta(days=100)).strftime('%Y%m%d')
 ticker = "000660"
 
 # 주식 데이터((시가, 고가, 저가, 종가, 거래량))와 재무 데이터(PER)를 가져온다
-def fetch_stock_data(ohlcv, ticker, fromdate, todate):
+def fetch_stock_data(ticker, fromdate, todate):
+    ohlcv = stock.get_market_ohlcv_by_date(fromdate=fromdate, todate=today, ticker=ticker)
     fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker)
-    fundamental['PER'] = fundamental['PER'].fillna(0)
+    if 'PER' not in fundamental.columns:
+        fundamental['PER'] = 0
+    else:
+        fundamental['PER'] = fundamental['PER'].fillna(0)
     data = pd.concat([ohlcv, fundamental['PER']], axis=1).fillna(0)
     return data
 
-ohlcv = stock.get_market_ohlcv_by_date(fromdate=last_year, todate=today, ticker=ticker)
-data = fetch_stock_data(ohlcv, ticker, last_year, today)
+data = fetch_stock_data(ticker, last_year, today)
 data.to_pickle(f'{ticker}.pkl')
 
 # 데이터 스케일링
@@ -109,16 +112,16 @@ future_prices = close_scaler.inverse_transform(future_preds.reshape(-1, 1)).flat
 print("예측 종가:", future_prices)
 
 # 날짜 처리
-future_dates = pd.date_range(start=ohlcv.index[-1] + pd.Timedelta(days=1), periods=n_future, freq='B') # 예측할 5 영업일 날짜
-actual_prices = ohlcv['종가'].values # 최근 종가 배열
+future_dates = pd.date_range(start=data.index[-1] + pd.Timedelta(days=1), periods=n_future, freq='B') # 예측할 5 영업일 날짜
+actual_prices = data['종가'].values # 최근 종가 배열
 
 plt.figure(figsize=(10, 5))
-plt.plot(ohlcv.index, actual_prices, label='Actual Prices') # 과거; ohlcv.index 받아온 날짜 인덱스
+plt.plot(data.index, actual_prices, label='Actual Prices') # 과거; data.index 받아온 날짜 인덱스
 plt.plot(future_dates, future_prices, label='Future Predicted Prices', linestyle='--', marker='o', color='orange') # 예측
 
 # 마지막 실제값과 첫 번째 예측값을 점선으로 연결
 plt.plot(
-    [ohlcv.index[-1], future_dates[0]],  # x축: 마지막 실제날짜와 첫 예측날짜
+    [data.index[-1], future_dates[0]],  # x축: 마지막 실제날짜와 첫 예측날짜
     [actual_prices[-1], future_prices[0]],  # y축: 마지막 실제종가와 첫 예측종가
     linestyle='dashed', color='gray', linewidth=1.5
 )
