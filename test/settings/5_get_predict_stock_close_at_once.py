@@ -98,49 +98,71 @@ model.fit(X, Y, batch_size=8, epochs=200, validation_split=0.1, shuffle=False, v
 # model.save(model_path)
 # print(f"{ticker}: 학습 후 모델 저장됨 -> {model_path}")
 
+'''
+스윙(중기 트레이딩)
+20일선, 60일선, 120일선
 
-# 종가 scaler fit (실제 데이터로)
-close_scaler = MinMaxScaler()
-close_prices = data['종가'].values.reshape(-1, 1)
-close_scaler.fit(close_prices)
+20MA, 60MA, 120MA
 
-# 예측
-X_input = scaled_data[-look_back:].reshape(1, look_back, scaled_data.shape[1])
-future_preds = model.predict(X_input, verbose=0).flatten()
-future_prices = close_scaler.inverse_transform(future_preds.reshape(-1, 1)).flatten()
+20일선: 약 한 달, 60일선: 분기, 120일선: 6개월
 
-print("예측 종가:", future_prices)
+스윙에서는 20일선 이상에서 주가가 머무르는지,
+60/120일선 돌파 여부,
+20/60MA 기울기 등이 중요하게 쓰임
+'''
+# 5일 이동평균선이 하락중이면 제외
+data['MA_5'] = data['종가'].rolling(window=5).mean()
+print(data['MA_5']) # MA_5: 5일 이동편ㄱㄴ선
 
-# 날짜 처리
-future_dates = pd.date_range(start=data.index[-1] + pd.Timedelta(days=1), periods=n_future, freq='B') # 예측할 5 영업일 날짜
-actual_prices = data['종가'].values # 최근 종가 배열
+# 각도(변화량) 계산
+ma_angle = data['MA_5'].iloc[-1] - data['MA_5'].iloc[-2]
+print('ma_angle', ma_angle)
 
-plt.figure(figsize=(10, 5))
-plt.plot(data.index, actual_prices, label='Actual Prices') # 과거; data.index 받아온 날짜 인덱스
-plt.plot(future_dates, future_prices, label='Future Predicted Prices', linestyle='--', marker='o', color='orange') # 예측
+if ma_angle > 0:
+    # 5일선이 상승 중인 종목만 예측/추천
 
-# 마지막 실제값과 첫 번째 예측값을 점선으로 연결
-plt.plot(
-    [data.index[-1], future_dates[0]],  # x축: 마지막 실제날짜와 첫 예측날짜
-    [actual_prices[-1], future_prices[0]],  # y축: 마지막 실제종가와 첫 예측종가
-    linestyle='dashed', color='gray', linewidth=1.5
-)
+    # 종가 scaler fit (실제 데이터로)
+    close_scaler = MinMaxScaler()
+    close_prices = data['종가'].values.reshape(-1, 1)
+    close_scaler.fit(close_prices)
 
-plt.title(f'Actual and 5-day Predicted Prices for {ticker}')
-plt.xlabel('Date')
-plt.ylabel('Price')
-plt.legend()
-plt.grid(True)
-# plt.show()
+    # 예측
+    X_input = scaled_data[-look_back:].reshape(1, look_back, scaled_data.shape[1])
+    future_preds = model.predict(X_input, verbose=0).flatten()
+    future_prices = close_scaler.inverse_transform(future_preds.reshape(-1, 1)).flatten()
+
+    print("예측 종가:", future_prices)
+
+    # 날짜 처리
+    future_dates = pd.date_range(start=data.index[-1] + pd.Timedelta(days=1), periods=n_future, freq='B') # 예측할 5 영업일 날짜
+    actual_prices = data['종가'].values # 최근 종가 배열
+
+    plt.figure(figsize=(10, 5))
+    plt.plot(data.index, actual_prices, label='Actual Prices') # 과거; data.index 받아온 날짜 인덱스
+    plt.plot(future_dates, future_prices, label='Future Predicted Prices', linestyle='--', marker='o', color='orange') # 예측
+
+    # 마지막 실제값과 첫 번째 예측값을 점선으로 연결
+    plt.plot(
+        [data.index[-1], future_dates[0]],  # x축: 마지막 실제날짜와 첫 예측날짜
+        [actual_prices[-1], future_prices[0]],  # y축: 마지막 실제종가와 첫 예측종가
+        linestyle='dashed', color='gray', linewidth=1.5
+    )
+
+    plt.title(f'Actual and 5-day Predicted Prices for {ticker}')
+    plt.xlabel('Date')
+    plt.ylabel('Price')
+    plt.legend()
+    plt.grid(True)
+    # plt.show()
 
 
 
 
-output_dir = 'D:\\stocks'
-last_price = data['종가'].iloc[-1]
-future_return = (future_prices[-1] / last_price - 1) * 100
-stock_name = stock.get_market_ticker_name(ticker)
-timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
-file_path = os.path.join(output_dir, f'5 {today} [ {future_return:.2f}% ] {stock_name} {ticker} [ {last_price} ] {timestamp}.png')
-plt.savefig(file_path)
-plt.close()
+    output_dir = 'D:\\stocks'
+    last_price = data['종가'].iloc[-1]
+    future_return = (future_prices[-1] / last_price - 1) * 100
+    stock_name = stock.get_market_ticker_name(ticker)
+    timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+    file_path = os.path.join(output_dir, f'5 {today} [ {future_return:.2f}% ] {stock_name} {ticker} [ {last_price} ] {timestamp}.png')
+    plt.savefig(file_path)
+    plt.close()
