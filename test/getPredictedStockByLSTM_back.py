@@ -16,9 +16,9 @@ tf.random.set_seed(42)
 random.seed(42)
 
 # 예측 기간
-PREDICTION_PERIOD = 5
+PREDICTION_PERIOD = 3
 # 데이터 수집 기간
-DATA_COLLECTION_PERIOD = 60
+DATA_COLLECTION_PERIOD = 100
 
 today = datetime.today().strftime('%Y%m%d')
 start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y%m%d')
@@ -29,10 +29,14 @@ model_dir = 'models'
 os.makedirs(output_dir, exist_ok=True)
 os.makedirs(model_dir, exist_ok=True)
 
-# 주식 데이터와 기본적인 재무 데이터를 가져온다
-def fetch_stock_data(ohlcv, ticker, fromdate, todate):
+# 주식 데이터((시가, 고가, 저가, 종가, 거래량))와 재무 데이터(PER)를 가져온다
+def fetch_stock_data(ticker, fromdate, todate):
+    ohlcv = stock.get_market_ohlcv_by_date(fromdate=fromdate, todate=today, ticker=ticker)
     fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker)
-    fundamental['PER'] = fundamental['PER'].fillna(0)
+    if 'PER' not in fundamental.columns:
+        fundamental['PER'] = 0
+    else:
+        fundamental['PER'] = fundamental['PER'].fillna(0)
     data = pd.concat([ohlcv, fundamental['PER']], axis=1).fillna(0)
     return data
 
@@ -53,12 +57,12 @@ def create_multistep_dataset(dataset, look_back=25, n_future=5):
 # LSTM 모델 학습 및 예측 함수 정의
 def create_model(input_shape):
     model = Sequential([
-        LSTM(128, return_sequences=True, input_shape=input_shape),
-        Dropout(0.3),
-        LSTM(64, return_sequences=False),
-        Dropout(0.3),
-        Dense(32, activation='relu'),
+        LSTM(32, return_sequences=True, input_shape=input_shape),
+        Dropout(0.2),
+        LSTM(16, return_sequences=False),
+        Dropout(0.2),
         Dense(16, activation='relu'),
+        Dense(8, activation='relu'),
         Dense(n_future)
     ])
     model.compile(optimizer='adam', loss='mean_squared_error')
@@ -70,37 +74,37 @@ ticker = '002710'
 stock_name = stock.get_market_ticker_name(ticker)
 
 # 데이터 로드 및 스케일링
-ohlcv = stock.get_market_ohlcv_by_date(fromdate=start_date, todate=today, ticker=ticker)
-data = fetch_stock_data(ohlcv, ticker, start_date, today)
+data = fetch_stock_data(ticker, start_date, today)
+
 scaler = MinMaxScaler(feature_range=(0, 1))
 scaled_data = scaler.fit_transform(data.values)
 
-n_future = 5
-look_back = 25
+n_future = 3
+look_back = 15
 
 # 데이터셋 생성
 X, Y = create_multistep_dataset(scaled_data, look_back=look_back, n_future=n_future)
 
 model = create_model((X.shape[1], X.shape[2]))
 
-model_file_path = os.path.join(model_dir, f'{ticker}_model_v4.h5')
-if os.path.exists(model_file_path):
-    model.load_weights(model_file_path)
-    print(f"{ticker}: 이전 가중치 로드")
+# model_file_path = os.path.join(model_dir, f'{ticker}_model_v4.h5')
+# if os.path.exists(model_file_path):
+#     model.load_weights(model_file_path)
+#     print(f"{ticker}: 이전 가중치 로드")
 
 from tensorflow.keras.callbacks import EarlyStopping
 early_stop = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
-model.fit(X, Y, batch_size=16, epochs=200, validation_split=0.1, verbose=0, callbacks=[early_stop]) # fit; 학습 > 저장
+model.fit(X, Y, batch_size=8, epochs=200, validation_split=0.1, shuffle=False, verbose=0, callbacks=[early_stop]) # fit; 학습 > 저장
 
-model.save_weights(model_file_path)
-print(f"{ticker}: 학습 후 가중치 저장됨 -> {model_file_path}")
+# model.save_weights(model_file_path)
+# print(f"{ticker}: 학습 후 가중치 저장됨 -> {model_file_path}")
 
 # 종가 scaler fit (실제 데이터로)
 close_scaler = MinMaxScaler()
 close_prices = data['종가'].values.reshape(-1, 1)
 close_scaler.fit(close_prices)
 
-# 미래 5일 예측
+# 미래 예측
 X_input = scaled_data[-look_back:].reshape(1, look_back, scaled_data.shape[1])
 future_preds = model.predict(X_input, verbose=0).flatten()
 future_prices = close_scaler.inverse_transform(future_preds.reshape(-1, 1)).flatten()
@@ -108,8 +112,8 @@ future_prices = close_scaler.inverse_transform(future_preds.reshape(-1, 1)).flat
 # 실제 마지막 종가와 미래 예측 종가 합치기
 all_prices = np.concatenate((data['종가'].values, future_prices))
 extended_dates = pd.date_range(start=data.index[0], periods=len(all_prices), freq='B')
-print('extended_dates', extended_dates)
-print('all_prices', all_prices)
+# print('extended_dates', extended_dates)
+# print('all_prices', all_prices)
 
 # 미래 수익률 계산
 last_price = data['종가'].iloc[-1]
