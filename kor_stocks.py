@@ -25,7 +25,7 @@ os.makedirs(output_dir, exist_ok=True)
 PREDICTION_PERIOD = 3
 LOOK_BACK = 15
 AVERAGE_VOLUME = 25000 # 평균거래량
-AVERAGE_TRADING_VALUE = 3000000000 # 평균거래대금
+AVERAGE_TRADING_VALUE = 5000000000 # 평균거래대금
 MAX_ITERATIONS = 1
 EXPECTED_GROWTH_RATE = 5
 DATA_COLLECTION_PERIOD = 100
@@ -119,19 +119,19 @@ results = []
 
 for count, ticker in enumerate(tickers):
     stock_name = ticker_to_name.get(ticker, 'Unknown Stock')
-    print(f"Processing {count+1}/{len(tickers)} : {stock_name} {ticker}")
+    print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
 
     data = fetch_stock_data(ticker, start_date, today)
 
     # 종가가 0.0이거나 500원 미만이면 건너뜀
     last_row = data.iloc[-1]
-    if last_row['종가'] == 0.0 or last_row['종가'] < 500:
+#     if last_row['종가'] == 0.0 or last_row['종가'] < 500:
         print("                                                        종가가 0이거나 500원 미만이므로 작업을 건너뜁니다.")
         continue
 
     # 데이터가 부족하면 건너뜀
     if data.empty or len(data) < LOOK_BACK:
-        print(f"                                                        데이터가 부족하여 작업을 건너뜁니다")
+#         print(f"                                                        데이터가 부족하여 작업을 건너뜁니다")
         continue
 
     # 일일 평균 거래량/거래대금 체크
@@ -175,16 +175,17 @@ for count, ticker in enumerate(tickers):
     close_scaler = MinMaxScaler()
     close_prices = data['종가'].values.reshape(-1, 1)
     close_scaler.fit(close_prices)
+
     last_window = scaled_data[-LOOK_BACK:]
     current_window = last_window.copy()
     future_preds = []
 
     for _ in range(PREDICTION_PERIOD):
         pred = model.predict(current_window.reshape(1, LOOK_BACK, scaled_data.shape[1]), verbose=0)
-        future_preds.append(pred[0, 0])
+        future_preds.append(pred[0, 0]) # 예측 결과 저장
         next_row = np.zeros(scaled_data.shape[1])
         next_row[3] = pred  # 종가 인덱스에 예측값
-        current_window = np.vstack([current_window[1:], next_row])
+        current_window = np.vstack([current_window[1:], next_row]) # 다음 윈도우 만들기: 뒤에 예측값 추가, 앞에서 하나 빼서 15개 유지
 
     # 예측값 스케일 역변환
     future_preds_arr = np.array(future_preds).reshape(-1, 1)
@@ -193,6 +194,15 @@ for count, ticker in enumerate(tickers):
 
     last_close = data['종가'].iloc[-1]
     avg_future_return = (np.mean(predicted_prices) / last_close - 1) * 100
+
+    # 최고가 대비 현재가 하락률 계산
+    max_close = np.max(data['종가'].values)
+    last_close = data['종가'].iloc[-1]
+    drop_pct = ((max_close - last_close) / max_close) * 100
+
+    # 40% 이상 하락한 경우 건너뜀
+    if drop_pct >= 40:
+        continue
 
     # 기대 성장률 미만이면 건너뜀
     if avg_future_return < EXPECTED_GROWTH_RATE:
@@ -236,7 +246,7 @@ for count, ticker in enumerate(tickers):
     plt.legend()
     plt.xticks(rotation=45)
 
-    final_file_name = f'{today} [ {avg_future_return:.2f}% ] {stock_name} {ticker} [ {last_price} ].png'
+    final_file_name = f'{today} [ {avg_future_return:.2f}% ] {stock_name} [{ticker}].png'
     final_file_path = os.path.join(output_dir, final_file_name)
     plt.savefig(final_file_path)
     plt.close()
