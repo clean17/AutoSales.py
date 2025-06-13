@@ -1,3 +1,9 @@
+from datetime import datetime, timedelta
+from pykrx import stock
+import pandas as pd
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, Dropout
+
 # 시드 고정
 import numpy as np, tensorflow as tf, random
 np.random.seed(42)

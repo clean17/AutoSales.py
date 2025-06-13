@@ -5,9 +5,6 @@ import pandas as pd
 from pykrx import stock
 from datetime import datetime, timedelta
 from sklearn.preprocessing import MinMaxScaler
-from sklearn.model_selection import train_test_split
-from tensorflow.keras.models import Sequential, load_model
-from tensorflow.keras.layers import LSTM, Dense, Dropout, BatchNormalization
 import matplotlib.pyplot as plt
 import tensorflow as tf
 from send2trash import send2trash
