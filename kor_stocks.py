@@ -19,16 +19,13 @@ np.random.seed(42)
 tf.random.set_seed(42)
 random.seed(42)
 
-
+output_dir = 'D:\\kospi_stocks'
+os.makedirs(output_dir, exist_ok=True)
 
 PREDICTION_PERIOD = 3
 LOOK_BACK = 15
-output_dir = 'D:\\kospi_stocks'
-os.makedirs(output_dir, exist_ok=True)
-# 평균거래량
-AVERAGE_VOLUME = 25000
-# 평균거래대금
-AVERAGE_TRADING_VALUE = 3000000000
+AVERAGE_VOLUME = 25000 # 평균거래량
+AVERAGE_TRADING_VALUE = 3000000000 # 평균거래대금
 MAX_ITERATIONS = 1
 EXPECTED_GROWTH_RATE = 5
 DATA_COLLECTION_PERIOD = 100
@@ -74,7 +71,7 @@ tickers = tickers_kospi + tickers_kosdaq # 전체
 
 # 주식 데이터((시가, 고가, 저가, 종가, 거래량))와 재무 데이터(PER)를 가져온다
 def fetch_stock_data(ticker, fromdate, todate):
-    ohlcv = stock.get_market_ohlcv_by_date(fromdate=start_date, todate=today, ticker=ticker)
+    ohlcv = stock.get_market_ohlcv_by_date(fromdate=fromdate, todate=today, ticker=ticker)
     fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker)
     if 'PER' not in fundamental.columns:
         fundamental['PER'] = 0
@@ -140,14 +137,14 @@ for count, ticker in enumerate(tickers):
     # 일일 평균 거래량/거래대금 체크
     average_volume = data['거래량'].mean()
     if average_volume <= AVERAGE_VOLUME:
-        print(f"                                                        평균 거래량({average_volume:.0f}주)이 부족하여 작업을 건너뜁니다.")
+#         print(f"                                                        평균 거래량({average_volume:.0f}주)이 부족하여 작업을 건너뜁니다.")
         continue
 
     trading_value = data['거래량'] * data['종가']
     average_trading_value = trading_value.mean()
     if average_trading_value <= AVERAGE_TRADING_VALUE:
         formatted_value = f"{average_trading_value / 100000000:.0f}억"
-        print(f"                                                        평균 거래액({formatted_value})이 부족하여 작업을 건너뜁니다.")
+#         print(f"                                                        평균 거래액({formatted_value})이 부족하여 작업을 건너뜁니다.")
         continue
 
     # 최근 한 달 거래액 체크
@@ -156,7 +153,7 @@ for count, ticker in enumerate(tickers):
     recent_average_trading_value = recent_trading_value.mean()
     if recent_average_trading_value <= AVERAGE_TRADING_VALUE:
         formatted_recent_value = f"{recent_average_trading_value / 100000000:.0f}억"
-        print(f"                                                        최근 한 달 평균 거래액({formatted_recent_value})이 부족하여 작업을 건너뜁니다.")
+#         print(f"                                                        최근 한 달 평균 거래액({formatted_recent_value})이 부족하여 작업을 건너뜁니다.")
         continue
 
     # 데이터셋 생성
@@ -181,6 +178,7 @@ for count, ticker in enumerate(tickers):
     last_window = scaled_data[-LOOK_BACK:]
     current_window = last_window.copy()
     future_preds = []
+
     for _ in range(PREDICTION_PERIOD):
         pred = model.predict(current_window.reshape(1, LOOK_BACK, scaled_data.shape[1]), verbose=0)
         future_preds.append(pred[0, 0])
@@ -191,6 +189,7 @@ for count, ticker in enumerate(tickers):
     # 예측값 스케일 역변환
     future_preds_arr = np.array(future_preds).reshape(-1, 1)
     predicted_prices = close_scaler.inverse_transform(future_preds_arr).flatten()
+    future_dates = pd.date_range(start=data.index[-1] + pd.Timedelta(days=1), periods=PREDICTION_PERIOD, freq='B')
 
     last_close = data['종가'].iloc[-1]
     avg_future_return = (np.mean(predicted_prices) / last_close - 1) * 100
@@ -210,16 +209,15 @@ for count, ticker in enumerate(tickers):
 
     # 그래프 저장
     extended_prices = np.concatenate((data['종가'].values, predicted_prices))
-    extended_dates = pd.date_range(start=data.index[0], periods=len(extended_prices))
     last_price = data['종가'].iloc[-1]
 
     plt.figure(figsize=(16, 8))
     # 실제 데이터
-    plt.plot(extended_dates[:len(data['종가'].values)], data['종가'].values, label='Actual Prices')
+    plt.plot(data.index, data['종가'].values, label='Actual Prices')
 
     # 예측 데이터
     plt.plot(
-        extended_dates[len(data['종가'].values):],
+        future_dates,
         predicted_prices,
         label='Predicted Prices',
         linestyle='--', marker='o', color='orange'
@@ -227,9 +225,9 @@ for count, ticker in enumerate(tickers):
 
     # 마지막 실제값과 첫 예측값을 점선으로 연결
     plt.plot(
-        [extended_dates[len(data['종가'].values)-1], extended_dates[len(data['종가'].values)]],
+        [data.index[-1], future_dates[0]],
         [data['종가'].values[-1], predicted_prices[0]],
-        linestyle='dashed', color='gray', linewidth=1.5, label='Actual-Predicted Bridge'
+        linestyle='dashed', color='gray', linewidth=1.5
     )
 
     plt.title(f'{today_us}   {stock_name} [ {last_price} ] (Expected Return: {avg_future_return:.2f}%)')
