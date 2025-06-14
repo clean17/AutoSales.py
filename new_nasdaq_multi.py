@@ -194,7 +194,7 @@ for count, ticker in enumerate(tickers):
     # 실제 데이터
     plt.plot(data.index, actual_prices, label='실제 가격')
     # 예측 데이터
-    plt.plot(future_dates, predicted_prices, label='예측 가격', linestyle='--', marker='o', color='purple')
+    plt.plot(future_dates, predicted_prices, label='예측 가격', linestyle='--', marker='o', color='tomato')
 
     if all(x in data.columns for x in ['MA20', 'UpperBand', 'LowerBand']):
         plt.plot(data.index, data['MA20'], label='20일 이동평균선') # MA20
