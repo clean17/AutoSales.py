@@ -41,6 +41,7 @@ today = datetime.today().strftime('%Y%m%d')
 
 
 tickers = get_nasdaq_symbols()
+tickers = tickers[515:]
 # tickers=['RKLB']
 
 
@@ -51,8 +52,16 @@ for count, ticker in enumerate(tickers):
     print(f"Processing {count+1}/{len(tickers)} : [{ticker}]")
 
     data = fetch_stock_data_us(ticker, start_date_us, end_date)
+
+    if data.empty:
+        print(f"{ticker}: 데이터 없음, 건너뜀")
+        continue
+
     #컬럼명을 명시적으로 지정해서 1차원 컬럼으로 변환
-    data.columns = ['Open', 'High', 'Low', 'Close', 'Volume', 'PER', 'PBR']
+#     data.columns = ['Open', 'High', 'Low', 'Close', 'Volume', 'PER', 'PBR']
+    # 컬럼이 멀티인덱스거나 중복명이라면
+    if isinstance(data.columns, pd.MultiIndex) or (len(data.columns) == 7 and not set(data.columns) == set(['Open', 'High', 'Low', 'Close', 'Volume', 'PER', 'PBR'])):
+        data.columns = ['Open', 'High', 'Low', 'Close', 'Volume', 'PER', 'PBR']
 
     # 볼린저밴드
     data['MA20'] = data['Close'].rolling(window=window).mean()
