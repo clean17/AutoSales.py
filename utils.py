@@ -4,6 +4,7 @@ import pandas as pd
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout
 import requests
+import yfinance as yf
 
 # 시드 고정
 import numpy as np, tensorflow as tf, random
@@ -91,6 +92,8 @@ def get_russell1000_tickers():
     tickers = target_df[ticker_col].tolist()
     return tickers
 
+
+
 # 주식 데이터(시가, 고가, 저가, 종가, 거래량)와 재무 데이터(PER)를 가져온다
 def fetch_stock_data(ticker, fromdate, todate):
     ohlcv = stock.get_market_ohlcv_by_date(fromdate=fromdate, todate=todate, ticker=ticker)
@@ -106,6 +109,31 @@ def fetch_stock_data(ticker, fromdate, todate):
     # 두 컬럼 모두 DataFrame으로 합치기
     data = pd.concat([ohlcv, fundamental[['PER', 'PBR']]], axis=1)
     return data
+
+# 미국 주식 데이터를 가져오는 함수
+def fetch_stock_data_us(ticker, fromdate, todate):
+    stock_data = yf.download(ticker, start=fromdate, end=todate)
+    if stock_data.empty:
+        return pd.DataFrame()
+
+    # yfinance를 통해 주식 정보 가져오기
+    stock_info = yf.Ticker(ticker).info
+
+    # PER 값을 info에서 추출, 없는 경우 0으로 처리
+    per_value = stock_info.get('trailingPE', 0)  # trailingPE를 사용하거나 없으면 0
+
+    # PBR 값을 info에서 추출, 없는 경우 0으로 처리
+    pbr_value = stock_info.get('priceToBook', 0)
+
+    # 주식 데이터에 PER 컬럼 추가
+    stock_data['PER'] = per_value
+    stock_data['PBR'] = pbr_value
+
+    # 선택적인 컬럼 추출 및 NaN 값 처리
+    stock_data = stock_data[['Open', 'High', 'Low', 'Close', 'Volume', 'PER', 'PBR']].fillna(0)
+    return stock_data
+
+
 
 def create_dataset(dataset, look_back=30):
     X, Y = [], []
@@ -123,6 +151,8 @@ def create_multistep_dataset(dataset, look_back, n_future):
         # Y는 "종가" 인덱스만 n_future 길이로 슬라이싱!
         Y.append(dataset[i+look_back:i+look_back+n_future, 3]) # 3번 인덱스; 종가
     return np.array(X), np.array(Y)
+
+
 
 def create_model(input_shape, n_future):
     model = Sequential([
