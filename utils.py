@@ -112,7 +112,7 @@ def fetch_stock_data(ticker, fromdate, todate):
 
 # 미국 주식 데이터를 가져오는 함수
 def fetch_stock_data_us(ticker, fromdate, todate):
-    stock_data = yf.download(ticker, start=fromdate, end=todate)
+    stock_data = yf.download(ticker, start=fromdate, end=todate, auto_adjust=True, progress=False)
     if stock_data.empty:
         return pd.DataFrame()
 
