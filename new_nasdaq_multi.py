@@ -64,7 +64,11 @@ for count, ticker in enumerate(tickers):
     scaler = MinMaxScaler(feature_range=(0, 1))
     # scaled_data = scaler.fit_transform(data.values)
     feature_cols = ['Open', 'High', 'Low', 'Close', 'Volume', 'MA20', 'UpperBand', 'LowerBand', 'PER', 'PBR']
+
     X_for_model = data[feature_cols].fillna(0) # 모델 feature만 NaN을 0으로
+    X_for_model = X_for_model.apply(pd.to_numeric, errors='coerce') # float64여야 함 (object라면 먼저 float 변환 필요)
+    X_for_model = X_for_model.replace([np.inf, -np.inf], 0) # # inf/-inf 값을 0으로(또는 np.nan으로) 대체
+
     scaled_data = scaler.fit_transform(X_for_model)
     X, Y = create_multistep_dataset(scaled_data, LOOK_BACK, PREDICTION_PERIOD)
     # print("X.shape:", X.shape) # X.shape: (0,) 데이터가 부족해서 슬라이딩 윈도우로 샘플이 만들어지지 않음
