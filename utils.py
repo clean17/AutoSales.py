@@ -3,6 +3,7 @@ from pykrx import stock
 import pandas as pd
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout
+import requests
 
 # 시드 고정
 import numpy as np, tensorflow as tf, random
@@ -37,6 +38,57 @@ def get_safe_ticker_list(market="KOSPI"):
         print("영업일 데이터를 찾을 수 없습니다.")
         return []
 
+    return tickers
+
+def get_nasdaq_symbols():
+    url = "https://api.nasdaq.com/api/screener/stocks?tableonly=true&exchange=NASDAQ&limit=0"
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/json",
+        "Origin": "https://www.nasdaq.com"
+    }
+
+    resp = requests.get(url, headers=headers)
+    resp.raise_for_status()
+    data = resp.json()
+
+    # 종목 목록 추출
+    rows = data.get("data", {}).get("table", {}).get("rows", [])
+    symbols = [row["symbol"] for row in rows if "symbol" in row]
+
+    return symbols
+
+# S&P 500 종목을 가져오는 함수
+def get_sp500_tickers():
+    sp500_constituents = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")[0]  # Wikipedia에서 종목 가져오기
+    sp500_tickers = sp500_constituents['Symbol'].tolist()  # 티커 리스트 추출
+    return sp500_tickers
+
+# 나스닥 100 종목을 가져오는 함수
+def get_nasdaq100_tickers():
+    nasdaq100_constituents = pd.read_html("https://en.wikipedia.org/wiki/NASDAQ-100")[4]  # Wikipedia에서 종목 가져오기
+    nasdaq100_tickers = nasdaq100_constituents['Ticker'].tolist()  # 티커 리스트 추출
+    return nasdaq100_tickers
+
+def get_russell1000_tickers():
+    url = "https://en.wikipedia.org/wiki/Russell_1000_Index"
+    dfs = pd.read_html(url)
+
+    # 티커 테이블 찾기: 2개 이상 컬럼 포함 + Symbol/Ticker 포함
+    target_df = None
+    for df in dfs:
+        cols = [str(c) for c in df.columns]
+        if len(cols) >= 2 and any('Symbol' in c or 'Ticker' in c for c in cols):
+            target_df = df.copy()
+            target_df.columns = cols
+            break
+
+    if target_df is None:
+        raise ValueError(f"러셀1000 티커 테이블을 찾을 수 없습니다. 페이지에서 테이블 개수: {len(dfs)}")
+
+    # 티커 컬럼 자동 감지
+    ticker_col = next((c for c in target_df.columns if 'Symbol' in c or 'Ticker' in c), None)
+    tickers = target_df[ticker_col].tolist()
     return tickers
 
 # 주식 데이터(시가, 고가, 저가, 종가, 거래량)와 재무 데이터(PER)를 가져온다
