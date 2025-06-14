@@ -9,12 +9,6 @@ sys.path.append(BASE_DIR)
 
 from utils import fetch_stock_data
 
-# 시드 고정 테스트
-import numpy as np, tensorflow as tf, random
-np.random.seed(42)
-tf.random.set_seed(42)
-random.seed(42)
-
 '''
   [볼린저밴드(Bollinger Bands)]
 
@@ -59,7 +53,6 @@ data['LowerBand'] = data['MA20'] - (num_std * data['STD20'])
 last_close = data['종가'].iloc[-1]
 upper = data['UpperBand'].iloc[-1]
 lower = data['LowerBand'].iloc[-1]
-center = data['MA20'].iloc[-1]
 
 # 매수/매도 조건
 if last_close <= lower:
