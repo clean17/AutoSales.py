@@ -20,11 +20,11 @@ output_dir = 'D:\\kospi_stocks'
 os.makedirs(output_dir, exist_ok=True)
 
 PREDICTION_PERIOD = 5
-EXPECTED_GROWTH_RATE = 5
+EXPECTED_GROWTH_RATE = 6
 DATA_COLLECTION_PERIOD = 120
 LOOK_BACK = 20
-AVERAGE_VOLUME = 30000
-AVERAGE_TRADING_VALUE = 2000000 # 20억 달러쯤
+AVERAGE_VOLUME = 50000
+AVERAGE_TRADING_VALUE = 2000000 # 28억 쯤
 window = 20  # 이동평균 구간
 num_std = 2  # 표준편차 배수
 
@@ -40,8 +40,10 @@ end_date = datetime.today().strftime('%Y-%m-%d')
 today = datetime.today().strftime('%Y%m%d')
 
 
-tickers = get_nasdaq_symbols()
-tickers = tickers[515:]
+# tickers = get_nasdaq_symbols()
+# tickers = tickers[515:]
+tickers = ['CEP', 'CLPT', 'RKLB', 'PUBM', 'CBRL', 'NPCE', 'EVLV', 'NEXN', 'MBOT', 'JAMF', 'LQDA', 'SFIX', 'XMTR', 'RGC', 'TTAN', 'MNKD', 'INM', 'CERT', 'RR', 'REAL', 'LX', 'SDGR', 'UPXI', 'PPTA', 'PRTH', 'ETON', 'TOI', 'LULU', 'LOVE', 'WOOF', 'SATL', 'GRYP', 'GIII', 'CGNT', 'LTBR', 'VEON', 'BCAX', 'UTHR', 'CRWV', 'TEAM', 'SKWD', 'APLD', 'PCTY', 'DXPE', 'HLMN', 'VERX', 'MRX', 'SKYW', 'BRZE', 'ADTN', 'HNST', 'PDD', 'HNRG', 'BIGC', 'DLO', 'NIU', 'AAON', 'AMSC', 'PERI', 'MNDY', 'ATEC', 'ALKT', 'APP', 'RELY', 'TALK', 'NTGR', 'LFST', 'SNDX', 'IIIV', 'NUTX', 'UAL', 'BLFS', 'BTSG']
+
 # tickers=['RKLB']
 
 
@@ -49,7 +51,7 @@ tickers = tickers[515:]
 results = []
 
 for count, ticker in enumerate(tickers):
-    print(f"Processing {count+1}/{len(tickers)} : [{ticker}]")
+    print(f"Processing {count+1}/{len(tickers)} : {ticker}")
 
     data = fetch_stock_data_us(ticker, start_date_us, end_date)
 
@@ -87,7 +89,7 @@ for count, ticker in enumerate(tickers):
 
     # 데이터가 부족하면 건너뜀
     if data.empty or len(data) < LOOK_BACK:
-        #         print(f"                                                        데이터가 부족하여 작업을 건너뜁니다")
+        # print(f"                                                        데이터가 부족하여 작업을 건너뜁니다")
         continue
 
     if len(X) < 2 or len(Y) < 2:
@@ -97,20 +99,20 @@ for count, ticker in enumerate(tickers):
     # 종가가 0.0이거나 500원 미만이면 건너뜀
     last_row = data.iloc[-1]
     if last_row['Close'] == 0.0 or last_row['Close'] < 0.3:
-        #         print("                                                        종가가 0이거나 500원 미만이므로 작업을 건너뜁니다.")
+        # print("                                                        종가가 0이거나 500원 미만이므로 작업을 건너뜁니다.")
         continue
 
     # 일일 평균 거래량/거래대금 체크
     average_volume = data['Volume'].mean()
     if average_volume <= AVERAGE_VOLUME:
-        #         print(f"                                                        평균 거래량({average_volume:.0f}주)이 부족하여 작업을 건너뜁니다.")
+        print(f"                                                        평균 거래량({average_volume:.0f}주)이 부족하여 작업을 건너뜁니다.")
         continue
 
     trading_value = data['Volume'] * data['Close']
     average_trading_value = trading_value.mean()
     if average_trading_value <= AVERAGE_TRADING_VALUE:
-        formatted_value = f"{average_trading_value / 1400:.0f}억"
-        #         print(f"                                                        평균 거래액({formatted_value})이 부족하여 작업을 건너뜁니다.")
+        formatted_value = f"{average_trading_value / 140000:.0f}억"
+        print(f"                                                        평균 거래액({formatted_value})이 부족하여 작업을 건너뜁니다.")
         continue
 
     # 최근 한 달 거래액 체크
@@ -118,8 +120,8 @@ for count, ticker in enumerate(tickers):
     recent_trading_value = recent_data['Volume'] * recent_data['Close']
     recent_average_trading_value = recent_trading_value.mean()
     if recent_average_trading_value <= AVERAGE_TRADING_VALUE:
-        formatted_recent_value = f"{recent_average_trading_value / 1400:.0f}억"
-        #         print(f"                                                        최근 한 달 평균 거래액({formatted_recent_value})이 부족하여 작업을 건너뜁니다.")
+        formatted_recent_value = f"{recent_average_trading_value / 140000:.0f}억"
+        print(f"                                                        최근 한 달 평균 거래액({formatted_recent_value})이 부족하여 작업을 건너뜁니다.")
         continue
 
     actual_prices = data['Close'].values # 최근 종가 배열
