@@ -166,12 +166,20 @@ for count, ticker in enumerate(tickers):
 #         print("중립(관망)")
 
     # 이동평균선이 하락중이면 제외
-    data['MA_10'] = data['종가'].rolling(window=10).mean()
-    data['MA_15'] = data['종가'].rolling(window=15).mean()
-    ma_angle = data['MA_10'].iloc[-1] - data['MA_10'].iloc[-2] # 오늘의 이동평균선 방향
-    ma_angle2 = data['MA_15'].iloc[-1] - data['MA_15'].iloc[-2] # 오늘의 이동평균선 방향
+    data['MA10'] = data['종가'].rolling(window=10).mean()
+    data['MA15'] = data['종가'].rolling(window=15).mean()
+    ma_angle_10 = data['MA10'].iloc[-1] - data['MA10'].iloc[-2]
+    ma_angle_15 = data['MA15'].iloc[-1] - data['MA15'].iloc[-2]
+    ma_angle_20 = data['MA20'].iloc[-1] - data['MA20'].iloc[-2]
 
-    if ma_angle2 > 0 or ma_angle > 0:
+    ma_cnt = 0
+    if ma_angle_10 > 0:
+        ma_cnt = ma_cnt + 1
+    if ma_angle_15 > 0:
+        ma_cnt = ma_cnt + 1
+    if ma_angle_20 > 0:
+        ma_cnt = ma_cnt + 1
+    if ma_cnt >= 2:
         # 상승 중인 종목만 예측/추천
         pass
     else:
@@ -240,7 +248,7 @@ for count, ticker in enumerate(tickers):
         linestyle='dashed', color='gray', linewidth=1.5
     )
 
-    plt.title(f'{today_us}   {stock_name} [ {last_price} ] (Expected Return: {avg_future_return:.2f}%)')
+    plt.title(f'{today_us}   {stock_name} [ {ticker} ] (Expected Return: {avg_future_return:.2f}%)')
     plt.xlabel('Date')
     plt.ylabel('Price')
     plt.legend()
