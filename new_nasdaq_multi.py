@@ -26,7 +26,7 @@ EXPECTED_GROWTH_RATE = 6
 DATA_COLLECTION_PERIOD = 200
 LOOK_BACK = 25
 AVERAGE_VOLUME = 50000
-AVERAGE_TRADING_VALUE = 3000000 # 28억 쯤
+AVERAGE_TRADING_VALUE = 4000000 # 28억 쯤
 window = 20  # 이동평균 구간
 num_std = 2  # 표준편차 배수
 
@@ -146,6 +146,15 @@ for count, ticker in enumerate(tickers):
     # 40% 이상 하락한 경우 건너뜀
     if drop_pct >= 50:
         continue
+
+    current_close = data['Close'].iloc[-1]
+    close_4days_ago = data['Close'].iloc[-5]
+
+    rate = (current_close / close_4days_ago - 1) * 100
+
+    if rate <= -18:
+        print(f"                                                        4일 전 대비 {rate:.2f}% 하락 → 학습 제외")
+        continue  # 또는 return
 
     ########################################################################
 
