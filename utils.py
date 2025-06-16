@@ -5,6 +5,8 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout
 import requests
 import yfinance as yf
+import os
+import re
 
 # 시드 고정
 import numpy as np, tensorflow as tf, random
@@ -116,22 +118,23 @@ def fetch_stock_data_us(ticker, fromdate, todate):
     if stock_data.empty:
         return pd.DataFrame()
 
-    # yfinance를 통해 주식 정보 가져오기
-    stock_info = yf.Ticker(ticker).info
+    # PER/PBR 정보 try-except로 예외처리
+    per_value, pbr_value = 0, 0
+    try:
+        stock_info = yf.Ticker(ticker).info
+        per_value = stock_info.get('trailingPE', 0)
+        pbr_value = stock_info.get('priceToBook', 0)
+    except Exception as e:
+        print(f"[{ticker}] info 조회 오류: {e}")
+        # PER/PBR을 0으로 유지
 
-    # PER 값을 info에서 추출, 없는 경우 0으로 처리
-    per_value = stock_info.get('trailingPE', 0)  # trailingPE를 사용하거나 없으면 0
-
-    # PBR 값을 info에서 추출, 없는 경우 0으로 처리
-    pbr_value = stock_info.get('priceToBook', 0)
-
-    # 주식 데이터에 PER 컬럼 추가
+    # 주식 데이터에 PER/PBR 컬럼 추가
     stock_data['PER'] = per_value
     stock_data['PBR'] = pbr_value
 
-    # 선택적인 컬럼 추출 및 NaN 값 처리
     stock_data = stock_data[['Open', 'High', 'Low', 'Close', 'Volume', 'PER', 'PBR']].fillna(0)
     return stock_data
+
 
 
 
