@@ -129,7 +129,10 @@ if not os.path.exists(model_dir):
 
 def fetch_stock_data(ticker, fromdate, todate):
     ohlcv = stock.get_market_ohlcv_by_date(fromdate, todate, ticker)
-    data = ohlcv[['종가', '저가', '고가', '거래량']]
+    try:
+        data = ohlcv[['종가', '저가', '고가', '거래량']]
+    except:
+        print(ohlcv.columns)
     return data
 
 def create_dataset(dataset, look_back=60):
