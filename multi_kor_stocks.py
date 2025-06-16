@@ -141,12 +141,12 @@ for count, ticker in enumerate(tickers):
     for idx in idx_list:
         past_close = data['종가'].iloc[idx]
         change = abs(current_close / past_close - 1) * 100
-        if change >= 10:
+        if change >= 5: # 기준치
             pass_flag = False
             break
 
     if pass_flag:
-        print(f"                                                        최근 4주간 가격변동 10% 미만 → 학습 pass")
+        # print(f"                                                        최근 4주간 가격변동 10% 미만 → 학습 pass")
         continue  # 또는 return
 
 ########################################################################
@@ -176,7 +176,7 @@ for count, ticker in enumerate(tickers):
         pass
     else:
         # 하락/횡보면 건너뜀
-        print(f"                                                        이동평균선이 상승이 아니므로 건너뜁니다.")
+        # print(f"                                                        이동평균선이 상승이 아니므로 건너뜁니다.")
         continue
 
 
