@@ -4,17 +4,13 @@ import os
 import pytz
 import pandas as pd
 import numpy as np
-import yfinance as yf
 from datetime import datetime, timedelta
 from sklearn.preprocessing import MinMaxScaler
-from sklearn.model_selection import train_test_split
-from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
 import matplotlib.pyplot as plt
-import tensorflow as tf
 from send2trash import send2trash
 
 
-from utils import create_model, create_multistep_dataset, get_safe_ticker_list, fetch_stock_data_us, get_nasdaq_symbols
+from utils import create_model, create_multistep_dataset, fetch_stock_data_us, get_nasdaq_symbols, extract_stock_code_from_filenames
 
 output_dir = 'D:\\kospi_stocks'
 os.makedirs(output_dir, exist_ok=True)
@@ -42,7 +38,8 @@ today = datetime.today().strftime('%Y%m%d')
 
 # tickers = get_nasdaq_symbols()
 # tickers = tickers[515:]
-tickers = ['CEP', 'CLPT', 'RKLB', 'PUBM', 'CBRL', 'NPCE', 'EVLV', 'NEXN', 'MBOT', 'JAMF', 'LQDA', 'SFIX', 'XMTR', 'RGC', 'TTAN', 'MNKD', 'INM', 'CERT', 'RR', 'REAL', 'LX', 'SDGR', 'UPXI', 'PPTA', 'PRTH', 'ETON', 'TOI', 'LULU', 'LOVE', 'WOOF', 'SATL', 'GRYP', 'GIII', 'CGNT', 'LTBR', 'VEON', 'BCAX', 'UTHR', 'CRWV', 'TEAM', 'SKWD', 'APLD', 'PCTY', 'DXPE', 'HLMN', 'VERX', 'MRX', 'SKYW', 'BRZE', 'ADTN', 'HNST', 'PDD', 'HNRG', 'BIGC', 'DLO', 'NIU', 'AAON', 'AMSC', 'PERI', 'MNDY', 'ATEC', 'ALKT', 'APP', 'RELY', 'TALK', 'NTGR', 'LFST', 'SNDX', 'IIIV', 'NUTX', 'UAL', 'BLFS', 'BTSG']
+stocks_dir = r'D:\kospi_stocks'  # 역슬래시 r''로 표기
+tickers = extract_stock_code_from_filenames(stocks_dir)
 
 # tickers=['RKLB']
 
