@@ -7,7 +7,6 @@ from pykrx import stock
 from datetime import datetime, timedelta
 from sklearn.preprocessing import MinMaxScaler
 import matplotlib.pyplot as plt
-import tensorflow as tf
 from send2trash import send2trash
 import ast
 from utils import create_model, create_multistep_dataset, get_safe_ticker_list, fetch_stock_data
@@ -109,6 +108,15 @@ for count, ticker in enumerate(tickers):
         formatted_recent_value = f"{recent_average_trading_value / 100000000:.0f}억"
 #         print(f"                                                        최근 한 달 평균 거래액({formatted_recent_value})이 부족하여 작업을 건너뜁니다.")
         continue
+
+    # rolling window로 5일 전 대비 현재가 3배 이상 오른 지점 찾기
+    rolling_min = data['Close'].rolling(window=5).min()    # 5일 중 최소가
+    ratio = data['Close'] / rolling_min
+
+    if np.any(ratio >= 3):
+        print(f"                                                        어느 5일 구간이든 3배 급등: 제외")
+        continue
+
 
     actual_prices = data['종가'].values # 최근 종가 배열
     last_close = actual_prices[-1]
