@@ -26,7 +26,7 @@ LOOK_BACK = 15
 AVERAGE_VOLUME = 25000 # 평균거래량
 AVERAGE_TRADING_VALUE = 3000000000 # 평균거래대금
 MAX_ITERATIONS = 1
-EXPECTED_GROWTH_RATE = -10
+EXPECTED_GROWTH_RATE = 5
 DATA_COLLECTION_PERIOD = 100
 window = 20  # 이동평균 구간
 num_std = 2  # 표준편차 배수
@@ -110,8 +110,8 @@ for count, ticker in enumerate(tickers):
         continue
 
     # rolling window로 5일 전 대비 현재가 3배 이상 오른 지점 찾기
-    rolling_min = data['Close'].rolling(window=5).min()    # 5일 중 최소가
-    ratio = data['Close'] / rolling_min
+    rolling_min = data['종가'].rolling(window=5).min()    # 5일 중 최소가
+    ratio = data['종가'] / rolling_min
 
     if np.any(ratio >= 3):
         print(f"                                                        어느 5일 구간이든 3배 급등: 제외")
@@ -128,6 +128,26 @@ for count, ticker in enumerate(tickers):
     # 40% 이상 하락한 경우 건너뜀
     if drop_pct >= 40:
         continue
+
+    # 데이터가 충분한지 체크 (최소 28 영업일 필요)
+    if len(data) < 29:
+        # print(f"{ticker} 데이터가 부족하여 패스")
+        continue
+
+    current_close = data['종가'].iloc[-1]
+    idx_list = [-7, -14, -21, -28]
+    pass_flag = True
+
+    for idx in idx_list:
+        past_close = data['종가'].iloc[idx]
+        change = abs(current_close / past_close - 1) * 100
+        if change >= 10:
+            pass_flag = False
+            break
+
+    if pass_flag:
+        print(f"                                                        최근 4주간 가격변동 10% 미만 → 학습 pass")
+        continue  # 또는 return
 
 ########################################################################
 
@@ -147,15 +167,18 @@ for count, ticker in enumerate(tickers):
 
     # 이동평균선이 하락중이면 제외
     data['MA_10'] = data['종가'].rolling(window=10).mean()
+    data['MA_15'] = data['종가'].rolling(window=15).mean()
     ma_angle = data['MA_10'].iloc[-1] - data['MA_10'].iloc[-2] # 오늘의 이동평균선 방향
+    ma_angle2 = data['MA_15'].iloc[-1] - data['MA_15'].iloc[-2] # 오늘의 이동평균선 방향
 
-    if ma_angle > 0:
+    if ma_angle2 > 0 or ma_angle > 0:
         # 상승 중인 종목만 예측/추천
         pass
     else:
         # 하락/횡보면 건너뜀
         print(f"                                                        이동평균선이 상승이 아니므로 건너뜁니다.")
         continue
+
 
 ########################################################################
 
