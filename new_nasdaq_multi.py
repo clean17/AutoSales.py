@@ -11,13 +11,15 @@ from send2trash import send2trash
 
 
 from utils import create_model, create_multistep_dataset, fetch_stock_data_us, get_nasdaq_symbols, extract_stock_code_from_filenames
+from utils import create_model, create_multistep_dataset, get_safe_ticker_list, fetch_stock_data_us, get_nasdaq_symbols, compute_rsi
 
 output_dir = 'D:\\kospi_stocks'
 os.makedirs(output_dir, exist_ok=True)
+rsi_flag = 0
 
 PREDICTION_PERIOD = 5
 EXPECTED_GROWTH_RATE = 6
-DATA_COLLECTION_PERIOD = 250
+DATA_COLLECTION_PERIOD = 200
 LOOK_BACK = 25
 AVERAGE_VOLUME = 50000
 AVERAGE_TRADING_VALUE = 2000000 # 28억 쯤
@@ -129,7 +131,7 @@ for count, ticker in enumerate(tickers):
     drop_pct = ((max_close - last_close) / max_close) * 100
 
     # 40% 이상 하락한 경우 건너뜀
-    if drop_pct >= 40:
+    if drop_pct >= 50:
         continue
 
     ########################################################################
@@ -203,6 +205,8 @@ for count, ticker in enumerate(tickers):
     last_price = data['Close'].iloc[-1]
 
     plt.figure(figsize=(16, 8))
+    if rsi_flag:
+        plt.subplot(2,1,1)
     # 실제 데이터
     plt.plot(data.index, actual_prices, label='실제 가격')
     # 예측 데이터
@@ -227,6 +231,20 @@ for count, ticker in enumerate(tickers):
     plt.legend()
     plt.grid(True)
     plt.xticks(rotation=45)
+
+    if rsi_flag:
+        data['RSI'] = compute_rsi(data['Close'])
+
+        # RSI 차트 (하단)
+        plt.subplot(2,1,2)
+        plt.plot(data['RSI'], label='RSI(14)', color='purple')
+        plt.axhline(70, color='red', linestyle='--', label='Overbought (70)')
+        plt.axhline(30, color='blue', linestyle='--', label='Oversold (30)')
+        plt.title('RSI (Relative Strength Index)')
+        plt.legend()
+        plt.tight_layout()
+        plt.grid(True)
+        plt.show()
 
     final_file_name = f'{today} [ {avg_future_return:.2f}% ] {ticker}.png'
     final_file_path = os.path.join(output_dir, final_file_name)
