@@ -8,12 +8,16 @@ from datetime import datetime, timedelta
 from sklearn.preprocessing import MinMaxScaler
 import matplotlib.pyplot as plt
 from send2trash import send2trash
+from utils import create_model, create_multistep_dataset, fetch_stock_data_us, get_nasdaq_symbols, extract_stock_code_from_filenames, get_safe_ticker_list, compute_rsi
+
+# 시드 고정
+import numpy as np, tensorflow as tf, random
+np.random.seed(42)
+tf.random.set_seed(42)
+random.seed(42)
 
 
-from utils import create_model, create_multistep_dataset, fetch_stock_data_us, get_nasdaq_symbols, extract_stock_code_from_filenames
-from utils import create_model, create_multistep_dataset, get_safe_ticker_list, fetch_stock_data_us, get_nasdaq_symbols, compute_rsi
-
-output_dir = 'D:\\kospi_stocks'
+output_dir = 'D:\\sp500'
 os.makedirs(output_dir, exist_ok=True)
 rsi_flag = 0
 
@@ -22,7 +26,7 @@ EXPECTED_GROWTH_RATE = 6
 DATA_COLLECTION_PERIOD = 200
 LOOK_BACK = 25
 AVERAGE_VOLUME = 50000
-AVERAGE_TRADING_VALUE = 2000000 # 28억 쯤
+AVERAGE_TRADING_VALUE = 3000000 # 28억 쯤
 window = 20  # 이동평균 구간
 num_std = 2  # 표준편차 배수
 
@@ -40,8 +44,7 @@ today = datetime.today().strftime('%Y%m%d')
 
 # tickers = get_nasdaq_symbols()
 # tickers = tickers[515:]
-stocks_dir = r'D:\kospi_stocks'  # 역슬래시 r''로 표기
-tickers = extract_stock_code_from_filenames(stocks_dir)
+tickers = extract_stock_code_from_filenames(output_dir)
 
 # tickers=['RKLB']
 
@@ -81,7 +84,8 @@ for count, ticker in enumerate(tickers):
 
     scaled_data = scaler.fit_transform(X_for_model)
     X, Y = create_multistep_dataset(scaled_data, LOOK_BACK, PREDICTION_PERIOD)
-    # print("X.shape:", X.shape) # X.shape: (0,) 데이터가 부족해서 슬라이딩 윈도우로 샘플이 만들어지지 않음
+    if count == 0:
+        print("X.shape:", X.shape) # X.shape: (0,) 데이터가 부족해서 슬라이딩 윈도우로 샘플이 만들어지지 않음
     # print("Y.shape:", Y.shape)
 
     ########################################################################
@@ -123,6 +127,15 @@ for count, ticker in enumerate(tickers):
         print(f"                                                        최근 한 달 평균 거래액({formatted_recent_value})이 부족하여 작업을 건너뜁니다.")
         continue
 
+    # rolling window로 5일 전 대비 현재가 3배 이상 오른 지점 찾기
+    rolling_min = data['Close'].rolling(window=5).min()    # 5일 중 최소가
+    ratio = data['Close'] / rolling_min
+
+    if np.any(ratio >= 3):
+        print(f"                                                        어느 5일 구간이든 3배 급등: 제외")
+        continue
+
+
     actual_prices = data['Close'].values # 최근 종가 배열
     last_close = actual_prices[-1]
 
@@ -151,17 +164,17 @@ for count, ticker in enumerate(tickers):
     #         print("중립(관망)")
 
     # 이동평균선이 하락중이면 제외
-    # data['MA_10'] = data['Close'].rolling(window=10).mean()
-    # ma_angle = data['MA_10'].iloc[-1] - data['MA_10'].iloc[-2] # 오늘의 이동평균선 방향
-    # ma_angle = data['MA20'].iloc[-1] - data['MA20'].iloc[-2] # 오늘의 이동평균선 방향
-    #
-    # if ma_angle > 0:
-    #     # 상승 중인 종목만 예측/추천
-    #     pass
-    # else:
-    #     # 하락/횡보면 건너뜀
-    #     print(f"                                                        이동평균선이 상승이 아니므로 건너뜁니다.") # 20일선
-    #     continue
+    data['MA30'] = data['Close'].rolling(window=30).mean()
+    ma_angle = data['MA30'].iloc[-1] - data['MA30'].iloc[-2] # 오늘의 이동평균선 방향
+#     ma_angle = data['MA20'].iloc[-1] - data['MA20'].iloc[-2] # 오늘의 이동평균선 방향
+
+    if ma_angle > 0:
+        # 상승 중인 종목만 예측/추천
+        pass
+    else:
+        # 하락/횡보면 건너뜀
+        print(f"                                                        이동평균선이 상승이 아니므로 건너뜁니다.") # 20일선
+        continue
 
     ########################################################################
 
@@ -196,9 +209,12 @@ for count, ticker in enumerate(tickers):
 
     # 기존 파일 삭제
     for file_name in os.listdir(output_dir):
+        file_path = os.path.join(output_dir, file_name)
+        if os.path.isdir(file_path):
+            continue
         if file_name.startswith(f"{today}") and ticker in file_name:
             print(f"Deleting existing file: {file_name}")
-            os.remove(os.path.join(output_dir, file_name))
+            send2trash(os.path.join(output_dir, file_name))
 
     # 그래프 저장
     extended_prices = np.concatenate((data['Close'].values, predicted_prices))
