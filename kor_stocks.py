@@ -6,10 +6,8 @@ from pykrx import stock
 from datetime import datetime, timedelta
 from sklearn.preprocessing import MinMaxScaler
 import matplotlib.pyplot as plt
-import tensorflow as tf
 from send2trash import send2trash
-import ast
-from utils import create_dataset, create_multistep_dataset, get_safe_ticker_list, fetch_stock_data
+from utils import create_dataset, get_safe_ticker_list, fetch_stock_data
 
 # 시드 고정
 import numpy as np, tensorflow as tf, random
