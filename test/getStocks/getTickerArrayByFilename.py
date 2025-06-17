@@ -33,7 +33,7 @@ def extract_stock_code_from_filenames(directory):
     return stock_codes
 
 
-directory = r'D:\kospi_stocks'  # 역슬래시 r''로 표기
+directory = r'D:\sp500'  # 역슬래시 r''로 표기
 
 
 # extracted_numbers = extract_numbers_from_filenames(directory)

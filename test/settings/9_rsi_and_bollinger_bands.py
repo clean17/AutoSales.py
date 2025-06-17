@@ -1,6 +1,7 @@
 import yfinance as yf
 from datetime import datetime, timedelta
 import pytz
+import sys
 
 window=20
 num_std=2
@@ -17,6 +18,7 @@ print('dataset', len(df))
 # 데이터가 비어 있으면 안내
 if df.empty:
     print("데이터가 없습니다! (티커 혹은 날짜, 네트워크 문제일 수 있습니다)")
+    sys.exit(0)
 else:
     # 필요시 주요 컬럼만 뽑아서 사용
     df = df[['Open', 'High', 'Low', 'Close', 'Volume']]

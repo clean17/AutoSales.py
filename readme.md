@@ -230,3 +230,14 @@ $ pip show tensorflow
 CUDA 설치 후에 다시 TensorFlow를 설치하는 것이 버전 호환에 유리함
 
 
+## yfinace upgrade 이후 protobuf 버전 이슈
+
+```bash
+TypeError: Descriptors cannot be created directly.
+If this call came from a _pb2.py file, your generated code is out of date and must be regenerated with protoc >= 3.19.0.
+If you cannot immediately regenerate your protos, some other possible workarounds are:
+ 1. Downgrade the protobuf package to 3.20.x or lower.
+ 2. Set PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python (but this will use pure-Python parsing and will be much slower).
+ 
+$ pip install "protobuf<=3.20.3"
+```
