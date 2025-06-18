@@ -24,7 +24,7 @@ os.makedirs(output_dir, exist_ok=True)
 PREDICTION_PERIOD = 3
 LOOK_BACK = 15
 AVERAGE_VOLUME = 25000 # 평균거래량
-AVERAGE_TRADING_VALUE = 3000000000 # 평균거래대금
+AVERAGE_TRADING_VALUE = 3_000_000_000 # 평균거래대금
 MAX_ITERATIONS = 1
 EXPECTED_GROWTH_RATE = 5
 DATA_COLLECTION_PERIOD = 100
@@ -87,6 +87,17 @@ for count, ticker in enumerate(tickers):
 #         print("                                                        종가가 0이거나 500원 미만이므로 작업을 건너뜁니다.")
         continue
 
+    # 데이터가 충분한지 체크
+    if len(data) < 10:
+        continue
+
+    recent_data = data.tail(10)
+    recent_trading_value = recent_data['거래량'] * recent_data['종가']     # 최근 10일 거래대금 리스트
+    # 하루라도 5억 미만이 있으면 제외
+    if (recent_trading_value < 500_000_000).any():
+#         print(f"                                                        최근 10일 중 거래대금 15억 미만 발생 → 제외")
+        continue
+
     # 일일 평균 거래량/거래대금 체크
     average_volume = data['거래량'].mean()
     if average_volume <= AVERAGE_VOLUME:
@@ -130,7 +141,7 @@ for count, ticker in enumerate(tickers):
         continue
 
     # 데이터가 충분한지 체크 (최소 28 영업일 필요)
-    if len(data) < 29:
+    if len(data) < 28:
         # print(f"{ticker} 데이터가 부족하여 패스")
         continue
 
@@ -166,14 +177,14 @@ for count, ticker in enumerate(tickers):
 #         print("중립(관망)")
 
     # 이동평균선이 하락중이면 제외
-    data['MA10'] = data['종가'].rolling(window=10).mean()
+    data['MA5'] = data['종가'].rolling(window=5).mean()
     data['MA15'] = data['종가'].rolling(window=15).mean()
-    ma_angle_10 = data['MA10'].iloc[-1] - data['MA10'].iloc[-2]
+    ma_angle_5 = data['MA5'].iloc[-1] - data['MA5'].iloc[-2]
     ma_angle_15 = data['MA15'].iloc[-1] - data['MA15'].iloc[-2]
     ma_angle_20 = data['MA20'].iloc[-1] - data['MA20'].iloc[-2]
 
     ma_cnt = 0
-    if ma_angle_10 > 0:
+    if ma_angle_5 > 0:
         ma_cnt = ma_cnt + 1
     if ma_angle_15 > 0:
         ma_cnt = ma_cnt + 1
@@ -236,7 +247,8 @@ for count, ticker in enumerate(tickers):
     plt.plot(future_dates, predicted_prices, label='예측 가격', linestyle='--', marker='o', color='tomato')
 
     if all(x in data.columns for x in ['MA20', 'UpperBand', 'LowerBand']):
-        plt.plot(data.index, data['MA20'], label='20일 이동평균선') # MA20
+        plt.plot(data.index, data['MA20'], label='20일 이동평균선')
+        plt.plot(data.index, data['MA5'], label='5일 이동평균선')
         plt.plot(data.index, data['UpperBand'], label='볼린저밴드 상한선', linestyle='--') # Upper Band (2σ)
         plt.plot(data.index, data['LowerBand'], label='볼린저밴드 하한선', linestyle='--') # Lower Band (2σ)
         plt.fill_between(data.index, data['UpperBand'], data['LowerBand'], color='gray', alpha=0.2)
