@@ -139,18 +139,27 @@ for count, ticker in enumerate(tickers):
     if drop_pct >= 40:
         continue
 
+#     last_close = data['종가'].iloc[-1]
+    close_4days_ago = data['종가'].iloc[-5]
+
+    rate = (last_close / close_4days_ago - 1) * 100
+
+    if rate <= -18:
+        print(f"                                                        4일 전 대비 {rate:.2f}% 하락 → 학습 제외")
+        continue  # 또는 return
+
     # 데이터가 충분한지 체크 (최소 28 영업일 필요)
     if len(data) < 28:
         # print(f"{ticker} 데이터가 부족하여 패스")
         continue
 
-    current_close = data['종가'].iloc[-1]
+#     last_close = data['종가'].iloc[-1]
     idx_list = [-7, -14, -21, -28]
     pass_flag = True
 
     for idx in idx_list:
         past_close = data['종가'].iloc[idx]
-        change = abs(current_close / past_close - 1) * 100
+        change = abs(last_close / past_close - 1) * 100
         if change >= 5: # 기준치
             pass_flag = False
             break
@@ -162,7 +171,7 @@ for count, ticker in enumerate(tickers):
 ########################################################################
 
     # 현재가
-    last_close = data['종가'].iloc[-1]
+#     last_close = data['종가'].iloc[-1]
     upper = data['UpperBand'].iloc[-1]
     lower = data['LowerBand'].iloc[-1]
     center = data['MA20'].iloc[-1]
@@ -237,7 +246,6 @@ for count, ticker in enumerate(tickers):
 
     # 그래프 저장
     extended_prices = np.concatenate((data['종가'].values, predicted_prices))
-    last_price = data['종가'].iloc[-1]
 
     plt.figure(figsize=(16, 8))
     if rsi_flag:
