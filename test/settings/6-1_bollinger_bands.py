@@ -35,14 +35,15 @@ num_std = 2  # 표준편차 배수
 
 # 데이터 수집
 # today = datetime.today().strftime('%Y%m%d')
-today = (datetime.today() - timedelta(days=1)).strftime('%Y%m%d')
+today = (datetime.today() - timedelta(days=3)).strftime('%Y%m%d')
 last_year = (datetime.today() - timedelta(days=100)).strftime('%Y%m%d')
-ticker = "041910"
+ticker = "007860"
 
 
 data = fetch_stock_data(ticker, last_year, today)
 # data.to_pickle(f'{ticker}.pkl')
 # data = pd.read_pickle(f'{ticker}.pkl')
+print(data.tail(1))
 
 data['MA20'] = data['종가'].rolling(window=window).mean()
 data['STD20'] = data['종가'].rolling(window=window).std()
@@ -63,23 +64,26 @@ else:
     print("중립(관망)")
 
 
+data['MA5'] = data['종가'].rolling(window=5).mean()
 data['MA10'] = data['종가'].rolling(window=10).mean()
 data['MA15'] = data['종가'].rolling(window=15).mean()
 
+ma_angle_5 = data['MA5'].iloc[-1] - data['MA5'].iloc[-2]
 ma_angle_10 = data['MA10'].iloc[-1] - data['MA10'].iloc[-2]
 ma_angle_15 = data['MA15'].iloc[-1] - data['MA15'].iloc[-2]
 ma_angle_20 = data['MA20'].iloc[-1] - data['MA20'].iloc[-2]
 
-print(ma_angle_10)
+print(ma_angle_5)
+# print(ma_angle_10)
 print(ma_angle_15)
 print(ma_angle_20)
-
 
 plt.figure(figsize=(12,6))
 plt.plot(data['종가'], label='Close Price')
 plt.plot(data['MA20'], label='MA20')
 plt.plot(data['MA15'], label='MA15')
-plt.plot(data['MA10'], label='MA10')
+# plt.plot(data['MA10'], label='MA10')
+plt.plot(data['MA5'], label='MA5')
 plt.plot(data['UpperBand'], label='Upper Band (2σ)', linestyle='--')
 plt.plot(data['LowerBand'], label='Lower Band (2σ)', linestyle='--')
 plt.fill_between(data.index, data['UpperBand'], data['LowerBand'], color='gray', alpha=0.2)
