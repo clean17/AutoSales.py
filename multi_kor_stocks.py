@@ -20,12 +20,12 @@ random.seed(42)
 
 output_dir = 'D:\\kospi_stocks'
 os.makedirs(output_dir, exist_ok=True)
+rsi_flag = 1
 
 PREDICTION_PERIOD = 3
 LOOK_BACK = 15
 AVERAGE_VOLUME = 25000 # 평균거래량
-AVERAGE_TRADING_VALUE = 3_000_000_000 # 평균거래대금
-MAX_ITERATIONS = 1
+AVERAGE_TRADING_VALUE = 2_500_000_000 # 평균거래대금
 EXPECTED_GROWTH_RATE = 5
 DATA_COLLECTION_PERIOD = 100
 window = 20  # 이동평균 구간
@@ -91,11 +91,12 @@ for count, ticker in enumerate(tickers):
     if len(data) < 10:
         continue
 
+    # 최근 2 주
     recent_data = data.tail(10)
-    recent_trading_value = recent_data['거래량'] * recent_data['종가']     # 최근 10일 거래대금 리스트
-    # 하루라도 5억 미만이 있으면 제외
-    if (recent_trading_value < 500_000_000).any():
-#         print(f"                                                        최근 10일 중 거래대금 15억 미만 발생 → 제외")
+    recent_trading_value = recent_data['거래량'] * recent_data['종가']     # 최근 2주 거래대금 리스트
+    # 하루라도 4억 미만이 있으면 제외
+    if (recent_trading_value < 400_000_000).any():
+#         print(f"                                                        최근 2주 중 거래대금 4억 미만 발생 → 제외")
         continue
 
     # 일일 평균 거래량/거래대금 체크
@@ -107,25 +108,23 @@ for count, ticker in enumerate(tickers):
     trading_value = data['거래량'] * data['종가']
     average_trading_value = trading_value.mean()
     if average_trading_value <= AVERAGE_TRADING_VALUE:
-        formatted_value = f"{average_trading_value / 100000000:.0f}억"
+        formatted_value = f"{average_trading_value / 100_000_000:.0f}억"
 #         print(f"                                                        평균 거래액({formatted_value})이 부족하여 작업을 건너뜁니다.")
         continue
 
-    # 최근 한 달 거래액 체크
-    recent_data = data.tail(20)
     recent_trading_value = recent_data['거래량'] * recent_data['종가']
     recent_average_trading_value = recent_trading_value.mean()
     if recent_average_trading_value <= AVERAGE_TRADING_VALUE:
-        formatted_recent_value = f"{recent_average_trading_value / 100000000:.0f}억"
-#         print(f"                                                        최근 한 달 평균 거래액({formatted_recent_value})이 부족하여 작업을 건너뜁니다.")
+        formatted_recent_value = f"{recent_average_trading_value / 100_000_000:.0f}억"
+#         print(f"                                                        최근 2주 평균 거래액({formatted_recent_value})이 부족하여 작업을 건너뜁니다.")
         continue
 
     # rolling window로 5일 전 대비 현재가 3배 이상 오른 지점 찾기
     rolling_min = data['종가'].rolling(window=5).min()    # 5일 중 최소가
     ratio = data['종가'] / rolling_min
 
-    if np.any(ratio >= 3):
-        print(f"                                                        어느 5일 구간이든 3배 급등: 제외")
+    if np.any(ratio >= 2.8):
+        print(f"                                                        어느 5일 구간이든 2.8배 급등: 제외")
         continue
 
 
@@ -136,7 +135,7 @@ for count, ticker in enumerate(tickers):
     max_close = np.max(actual_prices)
     drop_pct = ((max_close - last_close) / max_close) * 100
 
-    # 40% 이상 하락한 경우 건너뜀
+    # 최고가 대비 현재가가 40% 이상 하락한 경우 건너뜀
     if drop_pct >= 40:
         continue
 
@@ -157,7 +156,7 @@ for count, ticker in enumerate(tickers):
             break
 
     if pass_flag:
-        # print(f"                                                        최근 4주간 가격변동 10% 미만 → 학습 pass")
+        # print(f"                                                        최근 4주간 가격변동 5% 미만 → 학습 pass")
         continue  # 또는 return
 
 ########################################################################
@@ -241,6 +240,8 @@ for count, ticker in enumerate(tickers):
     last_price = data['종가'].iloc[-1]
 
     plt.figure(figsize=(16, 8))
+    if rsi_flag:
+        plt.subplot(2,1,1)
     # 실제 데이터
     plt.plot(data.index, actual_prices, label='실제 가격')
     # 예측 데이터
@@ -266,6 +267,18 @@ for count, ticker in enumerate(tickers):
     plt.legend()
     plt.grid(True)
     plt.xticks(rotation=45)
+
+    if rsi_flag:
+        data['RSI'] = compute_rsi(data['종가'])
+
+        # RSI 차트 (하단)
+        plt.subplot(2,1,2)
+        plt.plot(data['RSI'], label='RSI(14)', color='purple')
+        plt.axhline(70, color='red', linestyle='--', label='Overbought (70)')
+        plt.axhline(30, color='blue', linestyle='--', label='Oversold (30)')
+        plt.legend()
+        plt.tight_layout()
+        plt.grid(True)
 
     final_file_name = f'{today} [ {avg_future_return:.2f}% ] {stock_name} [{ticker}].png'
     final_file_path = os.path.join(output_dir, final_file_name)
