@@ -25,8 +25,8 @@ PREDICTION_PERIOD = 5
 EXPECTED_GROWTH_RATE = 6
 DATA_COLLECTION_PERIOD = 200
 LOOK_BACK = 25
-AVERAGE_VOLUME = 50000
-AVERAGE_TRADING_VALUE = 4000000 # 28억 쯤
+AVERAGE_VOLUME = 30000
+AVERAGE_TRADING_VALUE = 4_000_000 # 28억 쯤
 window = 20  # 이동평균 구간
 num_std = 2  # 표준편차 배수
 
@@ -108,7 +108,7 @@ for count, ticker in enumerate(tickers):
     # 일일 평균 거래량/거래대금 체크
     average_volume = data['Volume'].mean()
     if average_volume <= AVERAGE_VOLUME:
-        print(f"                                                        평균 거래량({average_volume:.0f}주)이 부족하여 작업을 건너뜁니다.")
+#         print(f"                                                        평균 거래량({average_volume:.0f}주)이 부족하여 작업을 건너뜁니다.")
         continue
 
     trading_value = data['Volume'] * data['Close']
