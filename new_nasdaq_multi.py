@@ -42,9 +42,9 @@ end_date = datetime.today().strftime('%Y-%m-%d')
 today = datetime.today().strftime('%Y%m%d')
 
 
-# tickers = get_nasdaq_symbols()
+tickers = get_nasdaq_symbols()
 # tickers = tickers[515:]
-tickers = extract_stock_code_from_filenames(output_dir)
+# tickers = extract_stock_code_from_filenames(output_dir)
 
 # tickers=['RKLB']
 
