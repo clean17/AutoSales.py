@@ -6,12 +6,13 @@ def get_usd_krw_rate():
     headers = {"User-Agent": "Mozilla/5.0"}
     res = requests.get(url, headers=headers)
     soup = BeautifulSoup(res.text, "html.parser")
-    # 환율 값은 <span class="value">1380.50</span> 이런 식으로 나옴
-    em_tag = soup.find('em', class_='no_down')
-    # 모든 span 태그의 텍스트를 이어붙임
-    rate_str = ''.join([span.get_text() for span in em_tag.find_all('span')])
-    return float(rate_str.replace(',', ''))
+    target_em = soup.select_one('p.no_today em.no_up em.no_up')
+    if target_em:
+        rate_str = ''.join([span.get_text() for span in target_em.find_all('span')])
+        # 쉼표 제거, float 변환
+        return float(rate_str.replace(',', ''))
+    else:
+        print('em.no_up em.no_up이 없습니다.')
 
 rate = get_usd_krw_rate()
 print("현재 원/달러 환율:", rate)
-
