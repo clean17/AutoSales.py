@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from sklearn.preprocessing import MinMaxScaler
 import matplotlib.pyplot as plt
 from send2trash import send2trash
-from utils import create_model, create_multistep_dataset, fetch_stock_data_us, get_nasdaq_symbols, extract_stock_code_from_filenames, get_safe_ticker_list, compute_rsi
+from utils import create_model, create_multistep_dataset, fetch_stock_data_us, get_nasdaq_symbols, extract_stock_code_from_filenames, get_safe_ticker_list, compute_rsi, get_usd_krw_rate
 
 # 시드 고정
 import numpy as np, tensorflow as tf, random
@@ -16,7 +16,7 @@ np.random.seed(42)
 tf.random.set_seed(42)
 random.seed(42)
 
-
+exchangeRate = get_usd_krw_rate()
 output_dir = 'D:\\sp500'
 os.makedirs(output_dir, exist_ok=True)
 rsi_flag = 0
@@ -26,7 +26,7 @@ EXPECTED_GROWTH_RATE = 6
 DATA_COLLECTION_PERIOD = 200
 LOOK_BACK = 25
 AVERAGE_VOLUME = 30000
-AVERAGE_TRADING_VALUE = 4_000_000 # 28억 쯤
+AVERAGE_TRADING_VALUE = 2_000_000 # 28억 쯤
 window = 20  # 이동평균 구간
 num_std = 2  # 표준편차 배수
 
@@ -101,8 +101,20 @@ for count, ticker in enumerate(tickers):
 
     # 종가가 0.0이거나 500원 미만이면 건너뜀
     last_row = data.iloc[-1]
-    if last_row['Close'] == 0.0 or last_row['Close'] < 0.3:
+    if last_row['Close'] == 0.0 or last_row['Close'] < 0.4:
         # print("                                                        종가가 0이거나 500원 미만이므로 작업을 건너뜁니다.")
+        continue
+
+    # 데이터가 충분한지 체크
+    if len(data) < 10:
+        continue
+
+    # 최근 2 주
+    recent_data = data.tail(10)
+    recent_trading_value = recent_data['Volume'] * recent_data['Close']     # 최근 2주 거래대금 리스트
+    # 하루라도 4억 미만이 있으면 제외
+    if (recent_trading_value < 300_000).any(): # 30만 달러 === 4억
+#         print(f"                                                        최근 2주 중 거래대금 4억 미만 발생 → 제외")
         continue
 
     # 일일 평균 거래량/거래대금 체크
@@ -114,25 +126,23 @@ for count, ticker in enumerate(tickers):
     trading_value = data['Volume'] * data['Close']
     average_trading_value = trading_value.mean()
     if average_trading_value <= AVERAGE_TRADING_VALUE:
-        formatted_value = f"{average_trading_value / 140000:.0f}억"
-        print(f"                                                        평균 거래액({formatted_value})이 부족하여 작업을 건너뜁니다.")
+        formatted_value = f"{(average_trading_value * exchangeRate) / 100_000_000:.0f}억"
+#         print(f"                                                        평균 거래액({formatted_value})이 부족하여 작업을 건너뜁니다.")
         continue
 
-    # 최근 한 달 거래액 체크
-    recent_data = data.tail(20)
     recent_trading_value = recent_data['Volume'] * recent_data['Close']
     recent_average_trading_value = recent_trading_value.mean()
     if recent_average_trading_value <= AVERAGE_TRADING_VALUE:
-        formatted_recent_value = f"{recent_average_trading_value / 140000:.0f}억"
-        print(f"                                                        최근 한 달 평균 거래액({formatted_recent_value})이 부족하여 작업을 건너뜁니다.")
+        formatted_recent_value = f"{(recent_average_trading_value * exchangeRate)/ 100_000_000:.0f}억"
+        print(f"                                                        최근 2주 평균 거래액({formatted_recent_value})이 부족하여 작업을 건너뜁니다.")
         continue
 
     # rolling window로 5일 전 대비 현재가 3배 이상 오른 지점 찾기
     rolling_min = data['Close'].rolling(window=5).min()    # 5일 중 최소가
     ratio = data['Close'] / rolling_min
 
-    if np.any(ratio >= 3):
-        print(f"                                                        어느 5일 구간이든 3배 급등: 제외")
+    if np.any(ratio >= 2.8):
+        print(f"                                                        어느 5일 구간이든 2.8배 급등: 제외")
         continue
 
 
@@ -147,19 +157,38 @@ for count, ticker in enumerate(tickers):
     if drop_pct >= 50:
         continue
 
-    current_close = data['Close'].iloc[-1]
+    last_close = data['Close'].iloc[-1]
     close_4days_ago = data['Close'].iloc[-5]
 
-    rate = (current_close / close_4days_ago - 1) * 100
+    rate = (last_close / close_4days_ago - 1) * 100
 
     if rate <= -18:
         print(f"                                                        4일 전 대비 {rate:.2f}% 하락 → 학습 제외")
         continue  # 또는 return
 
+    # 데이터가 충분한지 체크 (최소 28 영업일 필요)
+    if len(data) < 28:
+        # print(f"{ticker} 데이터가 부족하여 패스")
+        continue
+
+    idx_list = [-7, -14, -21, -28]
+    pass_flag = True
+
+    for idx in idx_list:
+        past_close = data['Close'].iloc[idx]
+        change = abs(last_close / past_close - 1) * 100
+        if change >= 5: # 기준치
+            pass_flag = False
+            break
+
+    if pass_flag:
+        # print(f"                                                        최근 4주간 가격변동 5% 미만 → 학습 pass")
+        continue  # 또는 return
+
     ########################################################################
 
     # 현재가
-    last_close = data['Close'].iloc[-1]
+#     last_close = data['Close'].iloc[-1]
     upper = data['UpperBand'].iloc[-1]
     lower = data['LowerBand'].iloc[-1]
     center = data['MA20'].iloc[-1]
@@ -172,17 +201,42 @@ for count, ticker in enumerate(tickers):
     #     else:
     #         print("중립(관망)")
 
-    # 이동평균선이 하락중이면 제외
-    data['MA30'] = data['Close'].rolling(window=30).mean()
-    ma_angle = data['MA30'].iloc[-1] - data['MA30'].iloc[-2] # 오늘의 이동평균선 방향
-#     ma_angle = data['MA20'].iloc[-1] - data['MA20'].iloc[-2] # 오늘의 이동평균선 방향
 
-    if ma_angle > 0:
+#     # 이동평균선이 하락중이면 제외 (2가지 조건 비교)
+#     data['MA30'] = data['Close'].rolling(window=30).mean()
+#     ma_angle = data['MA30'].iloc[-1] - data['MA30'].iloc[-2] # 오늘의 이동평균선 방향
+# #     ma_angle = data['MA20'].iloc[-1] - data['MA20'].iloc[-2] # 오늘의 이동평균선 방향
+#
+#     if ma_angle > 0:
+#         # 상승 중인 종목만 예측/추천
+#         pass
+#     else:
+#         # 하락/횡보면 건너뜀
+#         print(f"                                                        이동평균선이 상승이 아니므로 건너뜁니다.")
+#         continue
+
+
+
+    # 이동평균선이 하락중이면 제외
+    data['MA5'] = data['Close'].rolling(window=5).mean()
+    data['MA15'] = data['Close'].rolling(window=15).mean()
+    ma_angle_5 = data['MA5'].iloc[-1] - data['MA5'].iloc[-2]
+    ma_angle_15 = data['MA15'].iloc[-1] - data['MA15'].iloc[-2]
+    ma_angle_20 = data['MA20'].iloc[-1] - data['MA20'].iloc[-2]
+
+    ma_cnt = 0
+    if ma_angle_5 > 0:
+        ma_cnt = ma_cnt + 1
+    if ma_angle_15 > 0:
+        ma_cnt = ma_cnt + 1
+    if ma_angle_20 > 0:
+        ma_cnt = ma_cnt + 1
+    if ma_cnt >= 2:
         # 상승 중인 종목만 예측/추천
         pass
     else:
         # 하락/횡보면 건너뜀
-        print(f"                                                        이동평균선이 상승이 아니므로 건너뜁니다.") # 20일선
+        # print(f"                                                        이동평균선이 상승이 아니므로 건너뜁니다.")
         continue
 
     ########################################################################
@@ -227,7 +281,6 @@ for count, ticker in enumerate(tickers):
 
     # 그래프 저장
     extended_prices = np.concatenate((data['Close'].values, predicted_prices))
-    last_price = data['Close'].iloc[-1]
 
     plt.figure(figsize=(16, 8))
     if rsi_flag:
@@ -265,11 +318,9 @@ for count, ticker in enumerate(tickers):
         plt.plot(data['RSI'], label='RSI(14)', color='purple')
         plt.axhline(70, color='red', linestyle='--', label='Overbought (70)')
         plt.axhline(30, color='blue', linestyle='--', label='Oversold (30)')
-        plt.title('RSI (Relative Strength Index)')
         plt.legend()
         plt.tight_layout()
         plt.grid(True)
-        plt.show()
 
     final_file_name = f'{today} [ {avg_future_return:.2f}% ] {ticker}.png'
     final_file_path = os.path.join(output_dir, final_file_name)
