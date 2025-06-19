@@ -20,7 +20,7 @@ random.seed(42)
 
 output_dir = 'D:\\kospi_stocks'
 os.makedirs(output_dir, exist_ok=True)
-rsi_flag = 1
+rsi_flag = 0
 
 PREDICTION_PERIOD = 3
 LOOK_BACK = 15
@@ -247,9 +247,11 @@ for count, ticker in enumerate(tickers):
     # 그래프 저장
     extended_prices = np.concatenate((data['종가'].values, predicted_prices))
 
-    plt.figure(figsize=(16, 8))
     if rsi_flag:
+        plt.figure(figsize=(16, 12))
         plt.subplot(2,1,1)
+    else:
+        plt.figure(figsize=(16, 8))
     # 실제 데이터
     plt.plot(data.index, actual_prices, label='실제 가격')
     # 예측 데이터
