@@ -202,42 +202,42 @@ for count, ticker in enumerate(tickers):
     #         print("중립(관망)")
 
 
-#     # 이동평균선이 하락중이면 제외 (2가지 조건 비교)
-#     data['MA30'] = data['Close'].rolling(window=30).mean()
-#     ma_angle = data['MA30'].iloc[-1] - data['MA30'].iloc[-2] # 오늘의 이동평균선 방향
-# #     ma_angle = data['MA20'].iloc[-1] - data['MA20'].iloc[-2] # 오늘의 이동평균선 방향
-#
-#     if ma_angle > 0:
-#         # 상승 중인 종목만 예측/추천
-#         pass
-#     else:
-#         # 하락/횡보면 건너뜀
-#         print(f"                                                        이동평균선이 상승이 아니므로 건너뜁니다.")
-#         continue
+    # 이동평균선이 하락중이면 제외 (2가지 조건 비교)
+    data['MA30'] = data['Close'].rolling(window=30).mean()
+    ma_angle = data['MA30'].iloc[-1] - data['MA30'].iloc[-2] # 오늘의 이동평균선 방향
+#     ma_angle = data['MA20'].iloc[-1] - data['MA20'].iloc[-2] # 오늘의 이동평균선 방향
 
-
-
-    # 이동평균선이 하락중이면 제외
-    data['MA5'] = data['Close'].rolling(window=5).mean()
-    data['MA15'] = data['Close'].rolling(window=15).mean()
-    ma_angle_5 = data['MA5'].iloc[-1] - data['MA5'].iloc[-2]
-    ma_angle_15 = data['MA15'].iloc[-1] - data['MA15'].iloc[-2]
-    ma_angle_20 = data['MA20'].iloc[-1] - data['MA20'].iloc[-2]
-
-    ma_cnt = 0
-    if ma_angle_5 > 0:
-        ma_cnt = ma_cnt + 1
-    if ma_angle_15 > 0:
-        ma_cnt = ma_cnt + 1
-    if ma_angle_20 > 0:
-        ma_cnt = ma_cnt + 1
-    if ma_cnt >= 2:
+    if ma_angle > 0:
         # 상승 중인 종목만 예측/추천
         pass
     else:
         # 하락/횡보면 건너뜀
-        # print(f"                                                        이동평균선이 상승이 아니므로 건너뜁니다.")
+        print(f"                                                        이동평균선이 상승이 아니므로 건너뜁니다.")
         continue
+
+
+
+#     # 이동평균선이 하락중이면 제외
+#     data['MA5'] = data['Close'].rolling(window=5).mean()
+#     data['MA15'] = data['Close'].rolling(window=15).mean()
+#     ma_angle_5 = data['MA5'].iloc[-1] - data['MA5'].iloc[-2]
+#     ma_angle_15 = data['MA15'].iloc[-1] - data['MA15'].iloc[-2]
+#     ma_angle_20 = data['MA20'].iloc[-1] - data['MA20'].iloc[-2]
+#
+#     ma_cnt = 0
+#     if ma_angle_5 > 0:
+#         ma_cnt = ma_cnt + 1
+#     if ma_angle_15 > 0:
+#         ma_cnt = ma_cnt + 1
+#     if ma_angle_20 > 0:
+#         ma_cnt = ma_cnt + 1
+#     if ma_cnt >= 2:
+#         # 상승 중인 종목만 예측/추천
+#         pass
+#     else:
+#         # 하락/횡보면 건너뜀
+#         # print(f"                                                        이동평균선이 상승이 아니므로 건너뜁니다.")
+#         continue
 
     ########################################################################
 
@@ -265,6 +265,7 @@ for count, ticker in enumerate(tickers):
 
     # 기대 성장률 미만이면 건너뜀
     if avg_future_return < EXPECTED_GROWTH_RATE:
+        print(f"예상 : {avg_future_return:.2f}%")
         continue
 
     # 결과 저장
