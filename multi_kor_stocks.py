@@ -26,7 +26,7 @@ PREDICTION_PERIOD = 3
 LOOK_BACK = 15
 AVERAGE_VOLUME = 25000 # 평균거래량
 AVERAGE_TRADING_VALUE = 2_500_000_000 # 평균거래대금
-EXPECTED_GROWTH_RATE = 5
+EXPECTED_GROWTH_RATE = 4
 DATA_COLLECTION_PERIOD = 100
 window = 20  # 이동평균 구간
 num_std = 2  # 표준편차 배수
@@ -44,7 +44,6 @@ ticker_to_name = {ticker: stock.get_market_ticker_name(ticker) for ticker in tic
 # for file_name in os.listdir(output_dir):
 #     if file_name.startswith(today):
 #         send2trash(os.path.join(output_dir, file_name))
-
 
 
 # 결과를 저장할 배열
@@ -74,7 +73,7 @@ for count, ticker in enumerate(tickers):
 
     # 데이터가 부족하면 건너뜀
     if data.empty or len(data) < LOOK_BACK:
-#         print(f"                                                        데이터가 부족하여 작업을 건너뜁니다")
+        # print(f"                                                        데이터가 부족하여 작업을 건너뜁니다")
         continue
 
     if len(X) < 2 or len(Y) < 2:
@@ -84,86 +83,76 @@ for count, ticker in enumerate(tickers):
     # 종가가 0.0이거나 500원 미만이면 건너뜀
     last_row = data.iloc[-1]
     if last_row['종가'] == 0.0 or last_row['종가'] < 500:
-#         print("                                                        종가가 0이거나 500원 미만이므로 작업을 건너뜁니다.")
+        # print("                                                        종가가 0이거나 500원 미만이므로 작업을 건너뜁니다.")
         continue
 
     # 데이터가 충분한지 체크
     if len(data) < 10:
         continue
-
-    # 최근 2 주
     recent_data = data.tail(10)
     recent_trading_value = recent_data['거래량'] * recent_data['종가']     # 최근 2주 거래대금 리스트
     # 하루라도 4억 미만이 있으면 제외
     if (recent_trading_value < 400_000_000).any():
-#         print(f"                                                        최근 2주 중 거래대금 4억 미만 발생 → 제외")
+        # print(f"                                                        최근 2주 중 거래대금 4억 미만 발생 → 제외")
         continue
 
     # 일일 평균 거래량/거래대금 체크
     average_volume = data['거래량'].mean()
     if average_volume <= AVERAGE_VOLUME:
-#         print(f"                                                        평균 거래량({average_volume:.0f}주)이 부족하여 작업을 건너뜁니다.")
+        # print(f"                                                        평균 거래량({average_volume:.0f}주)이 부족하여 작업을 건너뜁니다.")
         continue
 
     trading_value = data['거래량'] * data['종가']
     average_trading_value = trading_value.mean()
     if average_trading_value <= AVERAGE_TRADING_VALUE:
         formatted_value = f"{average_trading_value / 100_000_000:.0f}억"
-#         print(f"                                                        평균 거래액({formatted_value})이 부족하여 작업을 건너뜁니다.")
+        # print(f"                                                        평균 거래액({formatted_value})이 부족하여 작업을 건너뜁니다.")
         continue
 
     recent_trading_value = recent_data['거래량'] * recent_data['종가']
     recent_average_trading_value = recent_trading_value.mean()
     if recent_average_trading_value <= AVERAGE_TRADING_VALUE:
         formatted_recent_value = f"{recent_average_trading_value / 100_000_000:.0f}억"
-#         print(f"                                                        최근 2주 평균 거래액({formatted_recent_value})이 부족하여 작업을 건너뜁니다.")
+        # print(f"                                                        최근 2주 평균 거래액({formatted_recent_value})이 부족하여 작업을 건너뜁니다.")
         continue
-
-    # rolling window로 5일 전 대비 현재가 3배 이상 오른 지점 찾기
-    rolling_min = data['종가'].rolling(window=5).min()    # 5일 중 최소가
-    ratio = data['종가'] / rolling_min
-
-    if np.any(ratio >= 2.8):
-        print(f"                                                        어느 5일 구간이든 2.8배 급등: 제외")
-        continue
-
-
-    actual_prices = data['종가'].values # 최근 종가 배열
-    last_close = actual_prices[-1]
 
     # 최고가 대비 현재가 하락률 계산
+    actual_prices = data['종가'].values # 최근 종가 배열
+    last_close = actual_prices[-1]
     max_close = np.max(actual_prices)
     drop_pct = ((max_close - last_close) / max_close) * 100
-
     # 최고가 대비 현재가가 40% 이상 하락한 경우 건너뜀
     if drop_pct >= 40:
         continue
 
-#     last_close = data['종가'].iloc[-1]
+    # 모든 4일 연속 구간에서 첫날 대비 마지막날 xx% 이상 급등
+    window_start = actual_prices[:-3]   # 0 ~ N-4
+    window_end = actual_prices[3:]      # 3 ~ N-1
+    ratio = window_end / window_start   # numpy, pandas Series/DataFrame만 벡터화 연산 지원, ratio는 결과 리스트
+    if np.any(ratio >= 1.6):
+        print(f"                                                        어떤 4일 연속 구간에서 첫날 대비 60% 이상 상승: 제외")
+        continue
+
+    # 현재 종가가 4일 전에 비해서 크게 하락하면 패스
+    # last_close = data['종가'].iloc[-1]
     close_4days_ago = data['종가'].iloc[-5]
-
     rate = (last_close / close_4days_ago - 1) * 100
-
     if rate <= -18:
         print(f"                                                        4일 전 대비 {rate:.2f}% 하락 → 학습 제외")
         continue  # 또는 return
 
     # 데이터가 충분한지 체크 (최소 28 영업일 필요)
     if len(data) < 28:
-        # print(f"{ticker} 데이터가 부족하여 패스")
         continue
-
-#     last_close = data['종가'].iloc[-1]
+    # last_close = data['종가'].iloc[-1]
     idx_list = [-7, -14, -21, -28]
     pass_flag = True
-
     for idx in idx_list:
         past_close = data['종가'].iloc[idx]
         change = abs(last_close / past_close - 1) * 100
         if change >= 5: # 기준치
             pass_flag = False
             break
-
     if pass_flag:
         # print(f"                                                        최근 4주간 가격변동 5% 미만 → 학습 pass")
         continue  # 또는 return
@@ -171,18 +160,20 @@ for count, ticker in enumerate(tickers):
 ########################################################################
 
     # 현재가
-#     last_close = data['종가'].iloc[-1]
-    upper = data['UpperBand'].iloc[-1]
-    lower = data['LowerBand'].iloc[-1]
-    center = data['MA20'].iloc[-1]
+    # last_close = data['종가'].iloc[-1]
+    # upper = data['UpperBand'].iloc[-1]
+    # lower = data['LowerBand'].iloc[-1]
+    # center = data['MA20'].iloc[-1]
 
     # 매수/매도 조건
-    if last_close <= lower:
-        print("                                                        과매도, 매수 신호!")
-#     elif last_close >= upper:
-#         print("과매수, 매도 신호!")
-#     else:
-#         print("중립(관망)")
+    # if last_close <= lower:
+    #     print("                                                        과매도, 매수 신호!")
+    # elif last_close >= upper:
+    #     print("과매수, 매도 신호!")
+    # else:
+    #     print("중립(관망)")
+
+
 
     # 이동평균선이 하락중이면 제외
     data['MA5'] = data['종가'].rolling(window=5).mean()
@@ -198,15 +189,24 @@ for count, ticker in enumerate(tickers):
         ma_cnt = ma_cnt + 1
     if ma_angle_20 > 0:
         ma_cnt = ma_cnt + 1
+
     if ma_cnt >= 2:
-        # 상승 중인 종목만 예측/추천
         pass
     else:
         # 하락/횡보면 건너뜀
         # print(f"                                                        이동평균선이 상승이 아니므로 건너뜁니다.")
         continue
 
-
+    # # 이동평균선이 하락중이면 제외 (2가지 조건 비교)
+    # data['MA30'] = data['종가'].rolling(window=30).mean()
+    # ma_angle = data['MA30'].iloc[-1] - data['MA30'].iloc[-2] # 오늘의 이동평균선 방향
+    #
+    # if ma_angle > 0:
+    #     pass
+    # else:
+    #     # print(f"                                                        이동평균선이 상승이 아니므로 건너뜁니다.")
+    #     continue
+        
 ########################################################################
 
     # 모델 생성 및 학습
