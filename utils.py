@@ -97,7 +97,7 @@ def get_russell1000_tickers():
 
 
 
-# 주식 데이터(시가, 고가, 저가, 종가, 거래량)와 재무 데이터(PER)를 가져온다
+# 주식 데이터(시가, 고가, 저가, 종가, 거래량)와 재무 데이터(PER)를 가져온다 > pandas.DataFrame 객체
 def fetch_stock_data(ticker, fromdate, todate):
     ohlcv = stock.get_market_ohlcv_by_date(fromdate=fromdate, todate=todate, ticker=ticker)
     fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker)

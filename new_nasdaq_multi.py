@@ -22,7 +22,7 @@ os.makedirs(output_dir, exist_ok=True)
 rsi_flag = 0
 
 PREDICTION_PERIOD = 5
-EXPECTED_GROWTH_RATE = 6
+EXPECTED_GROWTH_RATE = 5
 DATA_COLLECTION_PERIOD = 200
 LOOK_BACK = 25
 AVERAGE_VOLUME = 30000
@@ -157,6 +157,15 @@ for count, ticker in enumerate(tickers):
     if drop_pct >= 50:
         continue
 
+    # 모든 4일 연속 구간에서 첫날 대비 마지막날 xx% 이상 급등
+    window_start = actual_prices[:-3]   # 0 ~ N-4
+    window_end = actual_prices[3:]      # 3 ~ N-1
+    ratio = window_end / window_start   # numpy, pandas Series/DataFrame만 벡터화 연산 지원, ratio는 결과 리스트
+
+    if np.any(ratio >= 1.6):
+        print(f"                                                        어떤 4일 연속 구간에서 첫날 대비 60% 이상 상승: 제외")
+        continue
+
     last_close = data['Close'].iloc[-1]
     close_4days_ago = data['Close'].iloc[-5]
 
@@ -189,13 +198,13 @@ for count, ticker in enumerate(tickers):
 
     # 현재가
 #     last_close = data['Close'].iloc[-1]
-    upper = data['UpperBand'].iloc[-1]
-    lower = data['LowerBand'].iloc[-1]
-    center = data['MA20'].iloc[-1]
+#     upper = data['UpperBand'].iloc[-1]
+#     lower = data['LowerBand'].iloc[-1]
+#     center = data['MA20'].iloc[-1]
 
     # 매수/매도 조건
-    if last_close <= lower:
-        print("                                                        과매도, 매수 신호!")
+    # if last_close <= lower:
+    #     print("                                                        과매도, 매수 신호!")
     #     elif last_close >= upper:
     #         print("과매수, 매도 신호!")
     #     else:
@@ -212,7 +221,7 @@ for count, ticker in enumerate(tickers):
         pass
     else:
         # 하락/횡보면 건너뜀
-        print(f"                                                        이동평균선이 상승이 아니므로 건너뜁니다.")
+        # print(f"                                                        이동평균선이 상승이 아니므로 건너뜁니다.")
         continue
 
 
