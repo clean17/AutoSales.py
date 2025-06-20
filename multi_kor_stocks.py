@@ -57,6 +57,9 @@ for count, ticker in enumerate(tickers):
 
     # 볼린저밴드
     data['MA20'] = data['종가'].rolling(window=window).mean()
+    data['MA5'] = data['종가'].rolling(window=5).mean()
+    data['MA15'] = data['종가'].rolling(window=15).mean()
+    data['MA30'] = data['종가'].rolling(window=30).mean()
     data['STD20'] = data['종가'].rolling(window=window).std()
     data['UpperBand'] = data['MA20'] + (num_std * data['STD20'])
     data['LowerBand'] = data['MA20'] - (num_std * data['STD20'])
@@ -176,8 +179,6 @@ for count, ticker in enumerate(tickers):
 
 
     # 이동평균선이 하락중이면 제외
-    data['MA5'] = data['종가'].rolling(window=5).mean()
-    data['MA15'] = data['종가'].rolling(window=15).mean()
     ma_angle_5 = data['MA5'].iloc[-1] - data['MA5'].iloc[-2]
     ma_angle_15 = data['MA15'].iloc[-1] - data['MA15'].iloc[-2]
     ma_angle_20 = data['MA20'].iloc[-1] - data['MA20'].iloc[-2]
@@ -198,7 +199,6 @@ for count, ticker in enumerate(tickers):
         continue
 
     # # 이동평균선이 하락중이면 제외 (2가지 조건 비교)
-    # data['MA30'] = data['종가'].rolling(window=30).mean()
     # ma_angle = data['MA30'].iloc[-1] - data['MA30'].iloc[-2] # 오늘의 이동평균선 방향
     #
     # if ma_angle > 0:
