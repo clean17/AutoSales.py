@@ -302,6 +302,7 @@ for count, ticker in enumerate(tickers):
 
     if all(x in data.columns for x in ['MA20', 'UpperBand', 'LowerBand']):
         plt.plot(data.index, data['MA20'], label='20일 이동평균선') # MA20
+        plt.plot(data.index, data['MA5'], label='5일 이동평균선')
         plt.plot(data.index, data['UpperBand'], label='볼린저밴드 상한선', linestyle='--') # Upper Band (2σ)
         plt.plot(data.index, data['LowerBand'], label='볼린저밴드 하한선', linestyle='--') # Lower Band (2σ)
         plt.fill_between(data.index, data['UpperBand'], data['LowerBand'], color='gray', alpha=0.2)
