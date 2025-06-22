@@ -26,7 +26,7 @@ PREDICTION_PERIOD = 3
 LOOK_BACK = 15
 AVERAGE_VOLUME = 25000 # 평균거래량
 AVERAGE_TRADING_VALUE = 2_500_000_000 # 평균거래대금
-EXPECTED_GROWTH_RATE = 4
+EXPECTED_GROWTH_RATE = 5
 DATA_COLLECTION_PERIOD = 100
 window = 20  # 이동평균 구간
 num_std = 2  # 표준편차 배수
@@ -51,7 +51,6 @@ results = []
 
 for count, ticker in enumerate(tickers):
     stock_name = ticker_to_name.get(ticker, 'Unknown Stock')
-    print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
 
     data = fetch_stock_data(ticker, start_date, today)
 
@@ -92,11 +91,12 @@ for count, ticker in enumerate(tickers):
     # 데이터가 충분한지 체크
     if len(data) < 10:
         continue
-    recent_data = data.tail(10)
-    recent_trading_value = recent_data['거래량'] * recent_data['종가']     # 최근 2주 거래대금 리스트
+
+    month_data = data.tail(20)
+    month_trading_value = month_data['거래량'] * month_data['종가']        # 최근 4주 거래대금 리스트
     # 하루라도 4억 미만이 있으면 제외
-    if (recent_trading_value < 400_000_000).any():
-        # print(f"                                                        최근 2주 중 거래대금 4억 미만 발생 → 제외")
+    if (month_trading_value < 400_000_000).any():
+        # print(f"                                                        최근 4주 중 거래대금 4억 미만 발생 → 제외")
         continue
 
     # 일일 평균 거래량/거래대금 체크
@@ -112,6 +112,7 @@ for count, ticker in enumerate(tickers):
         # print(f"                                                        평균 거래액({formatted_value})이 부족하여 작업을 건너뜁니다.")
         continue
 
+    recent_data = data.tail(10)
     recent_trading_value = recent_data['거래량'] * recent_data['종가']
     recent_average_trading_value = recent_trading_value.mean()
     if recent_average_trading_value <= AVERAGE_TRADING_VALUE:
@@ -129,11 +130,11 @@ for count, ticker in enumerate(tickers):
         continue
 
     # 모든 4일 연속 구간에서 첫날 대비 마지막날 xx% 이상 급등
-    window_start = actual_prices[:-3]   # 0 ~ N-4
-    window_end = actual_prices[3:]      # 3 ~ N-1
+    window_start = actual_prices[-10:-3]   # 0 ~ N-4
+    window_end = actual_prices[-7:]      # 3 ~ N-1
     ratio = window_end / window_start   # numpy, pandas Series/DataFrame만 벡터화 연산 지원, ratio는 결과 리스트
     if np.any(ratio >= 1.6):
-        print(f"                                                        어떤 4일 연속 구간에서 첫날 대비 60% 이상 상승: 제외")
+        print(f"                                                        최근 4일 연속 구간에서 첫날 대비 60% 이상 상승: 제외")
         continue
 
     # 현재 종가가 4일 전에 비해서 크게 하락하면 패스
@@ -179,24 +180,24 @@ for count, ticker in enumerate(tickers):
 
 
     # 이동평균선이 하락중이면 제외
-    ma_angle_5 = data['MA5'].iloc[-1] - data['MA5'].iloc[-2]
-    ma_angle_15 = data['MA15'].iloc[-1] - data['MA15'].iloc[-2]
-    ma_angle_20 = data['MA20'].iloc[-1] - data['MA20'].iloc[-2]
-
-    ma_cnt = 0
-    if ma_angle_5 > 0:
-        ma_cnt = ma_cnt + 1
-    if ma_angle_15 > 0:
-        ma_cnt = ma_cnt + 1
-    if ma_angle_20 > 0:
-        ma_cnt = ma_cnt + 1
-
-    if ma_cnt >= 2:
-        pass
-    else:
-        # 하락/횡보면 건너뜀
-        # print(f"                                                        이동평균선이 상승이 아니므로 건너뜁니다.")
-        continue
+    # ma_angle_5 = data['MA5'].iloc[-1] - data['MA5'].iloc[-2]
+    # ma_angle_15 = data['MA15'].iloc[-1] - data['MA15'].iloc[-2]
+    # ma_angle_20 = data['MA20'].iloc[-1] - data['MA20'].iloc[-2]
+    #
+    # ma_cnt = 0
+    # if ma_angle_5 > 0:
+    #     ma_cnt = ma_cnt + 1
+    # if ma_angle_15 > 0:
+    #     ma_cnt = ma_cnt + 1
+    # if ma_angle_20 > 0:
+    #     ma_cnt = ma_cnt + 1
+    #
+    # if ma_cnt >= 2:
+    #     pass
+    # else:
+    #     # 하락/횡보면 건너뜀
+    #     # print(f"                                                        이동평균선이 상승이 아니므로 건너뜁니다.")
+    #     continue
 
     # # 이동평균선이 하락중이면 제외 (2가지 조건 비교)
     # ma_angle = data['MA30'].iloc[-1] - data['MA30'].iloc[-2] # 오늘의 이동평균선 방향
@@ -206,8 +207,15 @@ for count, ticker in enumerate(tickers):
     # else:
     #     # print(f"                                                        이동평균선이 상승이 아니므로 건너뜁니다.")
     #     continue
+
+    # 마지막 값의 5일선이 20일선보다 높은가?
+    if data['MA5'].iloc[-1] <= data['MA20'].iloc[-1]:
+        # print(f"                                                        5일선이 20일선 보다 낮을 경우 : 제외")
+        continue  # 조건에 맞지 않으면 건너뜀
         
 ########################################################################
+
+    print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
 
     # 모델 생성 및 학습
     model = create_model((X.shape[1], X.shape[2]), PREDICTION_PERIOD)
