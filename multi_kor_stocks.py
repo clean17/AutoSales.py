@@ -209,7 +209,7 @@ for count, ticker in enumerate(tickers):
     #     continue
 
     # 마지막 값의 5일선이 20일선보다 높은가?
-    if data['MA5'].iloc[-1] <= data['MA20'].iloc[-1]:
+    if data['MA5'].iloc[-1] < data['MA20'].iloc[-1]:
         # print(f"                                                        5일선이 20일선 보다 낮을 경우 : 제외")
         continue  # 조건에 맞지 않으면 건너뜀
         
@@ -252,14 +252,12 @@ for count, ticker in enumerate(tickers):
             print(f"Deleting existing file: {file_name}")
             os.remove(os.path.join(output_dir, file_name))
 
-    # 그래프 저장
-    extended_prices = np.concatenate((data['종가'].values, predicted_prices))
 
-    if rsi_flag:
-        plt.figure(figsize=(16, 12))
-        plt.subplot(2,1,1)
-    else:
-        plt.figure(figsize=(16, 8))
+
+
+    #######################################################################
+
+    plt.figure(figsize=(16, 8))
     # 실제 데이터
     plt.plot(data.index, actual_prices, label='실제 가격')
     # 예측 데이터
@@ -285,18 +283,6 @@ for count, ticker in enumerate(tickers):
     plt.legend()
     plt.grid(True)
     plt.xticks(rotation=45)
-
-    if rsi_flag:
-        data['RSI'] = compute_rsi(data['종가'])
-
-        # RSI 차트 (하단)
-        plt.subplot(2,1,2)
-        plt.plot(data['RSI'], label='RSI(14)', color='purple')
-        plt.axhline(70, color='red', linestyle='--', label='Overbought (70)')
-        plt.axhline(30, color='blue', linestyle='--', label='Oversold (30)')
-        plt.legend()
-        plt.tight_layout()
-        plt.grid(True)
 
     final_file_name = f'{today} [ {avg_future_return:.2f}% ] {stock_name} [{ticker}].png'
     final_file_path = os.path.join(output_dir, final_file_name)
