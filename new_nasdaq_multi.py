@@ -248,15 +248,12 @@ for count, ticker in enumerate(tickers):
 #         # print(f"                                                        이동평균선이 상승이 아니므로 건너뜁니다.")
 #         continue
 
-    # 2달 전(40거래일 전)의 20일선과 현재 20일선 비교
-    if len(data) < 44:
-        continue  # 데이터가 부족하면 건너뜀
-
-    if data['MA20'].iloc[-1] <= data['MA20'].iloc[-44]:
+    # (xx거래일 전)의 20일선과 현재 20일선 비교
+    if data['MA20'].iloc[-1] < data['MA20'].iloc[-20]:
         # print(f"                                                        2달 전보다 20일선이 하락해 있으면 건너뜁니다.")
         continue
 
-    if data['MA5'].iloc[-1] <= data['MA20'].iloc[-1]:
+    if data['MA5'].iloc[-1] < data['MA20'].iloc[-1]:
         # print(f"                                                        5일선이 20일선 보다 낮을 경우 : 제외")
         # continue  # 조건에 맞지 않으면 건너뜀
         pass
