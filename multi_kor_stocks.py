@@ -277,7 +277,7 @@ for count, ticker in enumerate(tickers):
     ax1.plot(data_plot['date_str'], actual_prices, label='실제 가격', marker='s', markersize=6, markeredgecolor='white')
 
     # 예측 가격 (미래 날짜)
-    ax1.plot(future_dates_str, predicted_prices, label='예측 가격', linestyle='--', marker='s', markersize=6, markeredgecolor='white', color='tomato')
+    ax1.plot(future_dates_str, predicted_prices, label='예측 가격', linestyle='--', marker='s', markersize=7, markeredgecolor='white', color='tomato')
 
     # 이동평균, 볼린저밴드, 영역 채우기
     if all(x in data_plot.columns for x in ['MA20', 'UpperBand', 'LowerBand']):
