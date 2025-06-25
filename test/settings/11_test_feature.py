@@ -8,9 +8,14 @@ from sklearn.preprocessing import MinMaxScaler
 import matplotlib.pyplot as plt
 from send2trash import send2trash
 import ast
-from utils import create_model, create_multistep_dataset, get_safe_ticker_list, fetch_stock_data, compute_rsi
 import numpy as np
 from sklearn.model_selection import train_test_split
+
+# 현재 파일에서 2단계 위 폴더 경로 구하기
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
+sys.path.append(BASE_DIR)
+
+from utils import create_model, create_multistep_dataset, get_safe_ticker_list, fetch_stock_data, compute_rsi
 
 PREDICTION_PERIOD = 4
 LOOK_BACK = 20 # validation loss 값 테스트 필요
@@ -21,7 +26,7 @@ num_std = 2  # 표준편차 배수
 today = datetime.today().strftime('%Y%m%d')
 start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y%m%d')
 
-ticker = '457550'
+ticker = '103140'
 
 
 data = fetch_stock_data(ticker, start_date, today)
@@ -83,8 +88,7 @@ print("Drop candidates:", cols_to_drop)
 scaler = MinMaxScaler(feature_range=(0, 1))
 # feature_cols = ['시가', '고가', '저가', '종가', '거래량', 'MA20', 'UpperBand', 'LowerBand', 'PER', 'PBR']
 feature_cols = [
-    '시가', '고가', '저가', '종가', '거래량',
-    'MA15_slope', 'MA5_slope', 'RSI14', 'BB_perc', 'PBR'
+    '종가', 'MA15_slope', 'RSI14', 'BB_perc', 'Volume_change'
 ]
 
 flattened_feature_names = []
