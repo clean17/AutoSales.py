@@ -177,12 +177,10 @@ def compute_rsi(prices, period=14):
     delta = prices.diff()
     up = delta.clip(lower=0)
     down = -delta.clip(upper=0)
-    ma_up = up.rolling(window=period, min_periods=1).mean()
-    ma_down = down.rolling(window=period, min_periods=1).mean()
-    rs = ma_up / ma_down
-    rsi = 100 - (100 / (1 + rs))
-    return rsi
-
+    gain = up.rolling(window=period, min_periods=1).mean()
+    loss = down.rolling(window=period, min_periods=1).mean()
+    rs = gain / (loss + 1e-9)
+    return 100 - (100 / (1 + rs))
 
 def extract_stock_code_from_filenames(directory):
     stock_codes = []
