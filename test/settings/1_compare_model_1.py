@@ -8,7 +8,17 @@ from tensorflow.keras.layers import LSTM, Dense, Dropout
 import matplotlib.pyplot as plt
 from tensorflow.keras.callbacks import ModelCheckpoint
 import os
+import sys
 import pickle
+from pykrx import stock
+from datetime import datetime, timedelta
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+
+# 현재 파일에서 2단계 위 폴더 경로 구하기
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
+sys.path.append(BASE_DIR)
+
+from utils import create_model, create_multistep_dataset, get_safe_ticker_list, fetch_stock_data, compute_rsi, create_model_32, create_model_64,create_model_128, invert_scale
 
 # 시드 고정 테스트
 import numpy as np, tensorflow as tf, random
@@ -16,95 +26,193 @@ np.random.seed(42)
 tf.random.set_seed(42)
 random.seed(42)
 
-# 예측 결과를 실제 값(주가)으로 복원
-def invert_scale(scaled_preds, scaler, feature_index=3):
-    """
-    scaled_preds: (샘플수, forecast_horizon) - 스케일된 종가 예측 결과
-    scaler: 학습에 사용된 MinMaxScaler 객체
-    feature_index: 종가 컬럼 인덱스(보통 3)
-    """
-    inv_preds = []
-    for row in scaled_preds:
-        temp = np.zeros((len(row), scaler.n_features_in_))
-        temp[:, feature_index] = row  # 종가 위치에 예측값 할당
-        inv = scaler.inverse_transform(temp)[:, feature_index]  # 역변환 후 종가만 추출
-        inv_preds.append(inv)
-    return np.array(inv_preds)
 
+DATA_COLLECTION_PERIOD = 400
+PREDICTION_PERIOD = 3
+LOOK_BACK = 15
+window = 20  # 이동평균 구간
+num_std = 2  # 표준편차 배수
 
 # 데이터 수집
+ticker = '443060' # 마린솔루션
+ticker = '005690' # 파미셀
 ticker = '000660' # 하이닉스
-data = fdr.DataReader(ticker, '2025-01-01', '2025-06-03')
+today = datetime.today().strftime('%Y%m%d')
+start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y%m%d')
+data = fetch_stock_data(ticker, start_date, today)
 
-# 필요한 컬럼 선택 및 NaN 값 처리
-data = data[['Open', 'High', 'Low', 'Close', 'Volume']].fillna(0)
+data['MA5'] = data['종가'].rolling(window=5).mean()
+data['MA10'] = data['종가'].rolling(window=10).mean()
+data['MA5_slope'] = data['MA5'].diff() # diff() 차이르 계산하는 함수
+data['MA10_slope'] = data['MA10'].diff()
+data['MA15'] = data['종가'].rolling(window=15).mean()
+data['MA20'] = data['종가'].rolling(window=window).mean()
+data['STD20'] = data['종가'].rolling(window=window).std()
+data['UpperBand'] = data['MA20'] + (num_std * data['STD20'])
+data['LowerBand'] = data['MA20'] - (num_std * data['STD20'])
+# 이동평균 기울기(변화량)
+data['MA5_slope'] = data['MA5'].diff() # diff() 차이르 계산하는 함수
+data['MA15_slope'] = data['MA15'].diff()
+# 볼린저밴드 위치 (현재가가 상단/하단 어디쯤?)
+data['BB_perc'] = (data['종가'] - data['LowerBand']) / (data['UpperBand'] - data['LowerBand'] + 1e-9) # # 0~1 사이. 1이면 상단, 0이면 하단, 0.5면 중앙
+# 거래량 증감률 >> 거래량이 0이거나, 직전 거래량이 0일 때 문제 발생
+data['Volume_change'] = data['거래량'].pct_change().replace([np.inf, -np.inf], 0).fillna(0)
+# RSI (14일)
+data['RSI14'] = compute_rsi(data['종가'])
+
 
 # 데이터 스케일링
-scaler = MinMaxScaler()
-scaled_data = scaler.fit_transform(data)
+scaler = MinMaxScaler(feature_range=(0, 1))
+# feature_cols = [
+# #     '시가', '고가', '저가',
+# #      '거래량',
+#     '종가', 'MA15_slope', 'RSI14', 'BB_perc',
+#     'Volume_change'
+# ]
+# feature_cols = [
+#     '종가', '시가', '고가', '저가', '거래량'
+# ]
+# feature_cols = [
+#     '고가', '저가', '종가', 'RSI14', 'BB_perc', 'Volume_change', 'MA15_slope'
+# ]
+feature_cols = [
+    '종가', 'RSI14', 'BB_perc',
+    'MA5_slope',
+    '거래량',
+#     'Volume_change'
+#     'MA10_slope',
+]
+X_for_model = data[feature_cols].fillna(0) # 모델 feature NaN을 0으로
+scaled_data = scaler.fit_transform(X_for_model)
+# scaled_data = scaler.fit_transform(data)
 
 # 시계열 데이터를 윈도우로 나누기
-sequence_length = 20  # 거래일 기준 약 60일 (3개월)
-forecast_horizon = 1  # 앞으로 5일 예측 (영업일 기준 일주일)
-
-# 시계열 데이터에서, 최근 N일 데이터를 가지고 미래 M일치를 예측하는 딥러닝 구조에 맞는 방식으로 변환
-X = [] # 과거 60일의 모든 특성
-y = [] # 미래 7일의 예측 종가
-# for i in range(len(scaled_data) - sequence_length):
-#     X.append(scaled_data[i:i+sequence_length])
-#     y.append(scaled_data[i+sequence_length, 3])  # 종가(Close) 예측
-for i in range(len(scaled_data) - sequence_length - forecast_horizon + 1):
-    X.append(scaled_data[i:i+sequence_length])
-    # 7일치 종가 [D+1 ~ D+7] > Dense(7)로 만들려면 y값도 (샘플수, 7) 로 만들어야 한다
-    y.append(scaled_data[i+sequence_length:i+sequence_length+forecast_horizon, 3]) # 종가 예측
-
-X = np.array(X)
-Y = np.array(y)
+X, Y = create_multistep_dataset(scaled_data, LOOK_BACK, PREDICTION_PERIOD, 0)
 
 # 학습 데이터와 검증 데이터 분리
 # random_state; 데이터를 랜덤하게 분할할 때의 랜덤 시드(seed) 값 > 항상 같은 방식으로 데이터를 나눔 (재현성 보장)
-X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=0.2, random_state=42)
+# val(test) set은 10%
+X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=0.1, random_state=42)
+print(X_train.shape)
+# print(Y_train.shape)
 
-model = Sequential()
 
-model.add(LSTM(128, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])))
-model.add(Dropout(0.3))
-model.add(LSTM(64, return_sequences=False))
-model.add(Dropout(0.3))
-
-model.add(Dense(32, activation='relu'))
-model.add(Dense(16, activation='relu'))
-model.add(Dense(forecast_horizon))
-
-model.compile(optimizer='adam', loss='mean_squared_error')
-
+model = create_model_128((X.shape[1], X.shape[2]), PREDICTION_PERIOD)
 
 # 콜백 설정
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
-
 early_stop = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True) # 10회 동안 개선없으면 종료, 최적의 가중치를 복원
-checkpoint = ModelCheckpoint('best_model.h5', monitor='val_loss', save_best_only=True, mode='min') # 학습(fit()) 도중 검증 손실(val_loss)이 가장 낮은 시점의 모델을 자동 저장
 
-history2 = model.fit(
+model.fit(
     X_train, Y_train,
     epochs=200,
-    batch_size=16,
+    batch_size=8,
     verbose=0,
     validation_data=(X_val, Y_val),
     shuffle=False,
-#     callbacks=[early_stop, checkpoint]
     callbacks=[early_stop]
 )
 
-# 실제 값과 예측 값의 비교, 7 일치 평균 비교, 실제 값으로 복원
+
+# 예측 값 (predictions)과 실제 값 (y_val)
+# print('x-val', len(X_val))
+# print('y-val', len(Y_val))
 predictions = model.predict(X_val)
-predictions_inv = invert_scale(predictions, scaler)
-Y_val_inv = invert_scale(Y_val, scaler)
+# print("Y_val NaN 개수:", np.isnan(Y_val).sum())
+# print("predictions NaN 개수:", np.isnan(predictions).sum())
+
+# MSE
+mse = mean_squared_error(Y_val, predictions)
+print("Mean Squared Error:", mse)
+
+# MAE
+# mae = mean_absolute_error(Y_val, predictions)
+# print("Mean Absolute Error:", mae)
+
+# RMSE
+# rmse = np.sqrt(mse)
+# print("Root Mean Squared Error:", rmse)
+
+# R-squared; (0=엉망, 1=완벽)
+r2 = r2_score(Y_val, predictions)
+print("R-squared:", r2)
+
+'''
+훈련용/검증용 loss
+
+0.01~0.02 이하:
+  → 매우 우수 (1~2% 미만 평균 오차)
+0.02~0.05:
+  → 실전 충분, 대부분의 실전 예측에서 이 정도면 OK
+0.05~0.08:
+  → 크다고 느껴질 수 있음, 신호가 “정확히 맞는지” 확인 필요
+0.1 이상:
+  → 오버피팅/과소적합/샘플 부족 가능성.
+  실전에서는 예측 신호 품질 직접 확인 필요
+'''
+
+'''
+LSTM/수집일/학습데이터/예측일/샘플수/배치/레이어/mse/squared
+
+'종가', 'MA15_slope', 'RSI14', 'BB_perc', 'Volume_change'
+32 / 100 / 15 / 3 / 45 / 16 - 0.007 0.65
+32 / 120 / 15 / 3 / 57 / 16 - 0.021 0.71
+32 / 140 / 15 / 3 / 70 / 16 - 0.018 0.64
+32 / 160 / 15 / 3 / 79 / 16 - 0.023 0.65
+32 / 200 / 15 / 3 / 102 / 16 - 0.021 0.60
+32 / 400 / 15 / 3 / 224 / 16 - 0.022 0.59
+
+32 / 120 / 15 / 3 / 57 / 8 - 0.020 0.73
+32 / 130 / 15 / 3 / 63 / 8 - 0.012 0.78
+32 / 135 / 15 / 3 / 67 / 8 - 0.012 0.84
+32 / 140 / 15 / 3 / 70 / 8 - 0.003 0.92 ##########
+32 / 150 / 15 / 3 / 73 / 8 - 0.020 0.73
+32 / 160 / 15 / 3 / 79 / 8 - 0.020 0.69
+
+32 / 120 / 15 / 3 / 57 / 4 - 0.020 0.72
+32 / 140 / 15 / 3 / 70 / 4 - 0.003 0.92 ###########
+32 / 160 / 15 / 3 / 79 / 4 - 0.020 0.69
+32 / 200 / 15 / 3 / 102 / 4 - 0.021 0.60
+32 / 400 / 15 / 3 / 224 / 4 - 0.012 0.77
+
+64 / 140 / 15 / 3 / 70 / 8 - 0.004 0.90
+128 / 140 / 15 / 3 / 70 / 4 - 0.002 0.94 ##########
+128 / 140 / 15 / 3 / 70 / 8 - 0.002 0.95 ##########
+128 / 140 / 15 / 3 / 70 / 16 - 0.002 0.95 ##########
+
+32 / 140 / 15 / 3 / 70 / 8
+'시가', '고가', '저가', '종가', '거래량'
+  - 0.006 0.90
+'시가', '고가', '저가', '종가', '거래량', 'RSI14'
+  - 0.006 0.90
+'시가', '고가', '저가', '종가', '거래량', 'RSI14', 'BB_perc'
+  - 0.005 0.91
+'시가', '고가', '저가', '종가', '거래량', 'RSI14', 'BB_perc', 'Volume_change'
+  - 0.005 0.91
+'시가', '고가', '저가', '종가', 'RSI14', 'BB_perc', 'Volume_change'
+  - 0.004 0.93
+'고가', '저가', '종가', 'RSI14', 'BB_perc', 'Volume_change'
+  - 0.003 0.91
+'고가', '저가', '종가', 'RSI14', 'BB_perc', 'Volume_change', 'MA15_slope'
+  - 0.002 0.94
+'종가', '고가', '저가', 'RSI14', 'BB_perc', 'Volume_change', 'MA15_slope'
+  - 0.003 0.95
+'''
+
+
+
+"""
+combined_loss = list(history2.history['loss'])
+combined_val_loss = list(history2.history['val_loss'])
+
+# loss 그래프 그리기
+# 0에 수렴하면 학습이 정상, 다시 오르면 과적합
 plt.figure(figsize=(10, 5))
-plt.title(f'{ticker} Stock Price Prediction')
-plt.plot(Y_val_inv.mean(axis=1), label='Actual Mean')
-plt.plot(predictions_inv.mean(axis=1), label='Predicted Mean')
-plt.xlabel(f'Next {forecast_horizon} days')
-plt.ylabel('Price')
+plt.plot(combined_loss, label='Train Loss')
+plt.plot(combined_val_loss, label='Validation Loss')
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
 plt.legend()
+plt.title('Training and Validation Loss')
 plt.show()
+"""
