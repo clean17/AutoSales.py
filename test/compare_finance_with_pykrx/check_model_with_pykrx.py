@@ -5,12 +5,15 @@ import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense
+from tensorflow.keras.layers import LSTM, Dense, Dropout
 import matplotlib.pyplot as plt
 
+DATA_COLLECTION_PERIOD = 300
 # 데이터 수집
 ticker = '000150'  # 예시: 000150 종목 코드
-data = stock.get_market_ohlcv_by_date("2020-01-01", "2023-09-20", ticker)
+today = datetime.today().strftime('%Y%m%d')
+start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y%m%d')
+data = stock.get_market_ohlcv_by_date(start_date, today, ticker)
 
 # 필요한 컬럼 선택 및 NaN 값 처리
 data = data[['시가', '고가', '저가', '종가', '거래량']].fillna(0)
@@ -20,7 +23,7 @@ scaler = MinMaxScaler()
 scaled_data = scaler.fit_transform(data)
 
 # 시계열 데이터를 윈도우로 나누기
-sequence_length = 60  # 예: 최근 60일 데이터를 기반으로 예측
+sequence_length = 30
 X = []
 y = []
 for i in range(len(scaled_data) - sequence_length):
@@ -35,16 +38,19 @@ X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_st
 
 # 모델 정의 및 학습
 model = Sequential([
-    LSTM(256, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])),
-    LSTM(128, return_sequences=True),
-    LSTM(64, return_sequences=False),
-    Dense(128),
-    Dense(64),
-    Dense(32),
+    LSTM(32, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])),
+    Dropout(0.2),
+    LSTM(16, return_sequences=False),
+    Dropout(0.2),
+    Dense(16, activation='relu'),
+    Dense(8, activation='relu'),
     Dense(1)
 ])
 model.compile(optimizer='adam', loss='mean_squared_error')
-model.fit(X_train, y_train, batch_size=32, epochs=50, validation_split=0.1)
+
+from tensorflow.keras.callbacks import EarlyStopping
+early_stop = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
+model.fit(X_train, y_train, batch_size=16, epochs=200, validation_split=0.1, shuffle=False, verbose=0, callbacks=[early_stop])
 
 '''
 Mean Squared Error: 0.0011627674458137632
@@ -53,6 +59,13 @@ Root Mean Squared Error: 0.034099376032616244
 R-squared: 0.9717399660816601
 
 오차 범위 내 거의 유효.. pykrx가 미세하게 더 정확
+--------------------------
+
+모델의 전체적인 설명력/좋고 나쁨 >> R-squared
+1에 가까우면 거의 완벽,
+0이면 무작위와 다름없음
+
+실제 손실(=얼마나 틀렸나)이 중요한 경우 >> RMSE
 '''
 
 # 예측 값 (predictions)과 실제 값 (y_val)
