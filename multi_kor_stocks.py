@@ -230,8 +230,8 @@ for count, ticker in enumerate(tickers):
     # print(np.where(~np.isfinite(X_for_model)))  # 문제 있는 위치 확인
     scaled_data = scaler.fit_transform(X_for_model)
     X, Y = create_multistep_dataset(scaled_data, LOOK_BACK, PREDICTION_PERIOD)
-    print("X.shape:", X.shape) # X.shape: (0,) 데이터가 부족해서 슬라이딩 윈도우로 샘플이 만들어지지 않음
-    print("Y.shape:", Y.shape)
+    # print("X.shape:", X.shape) # X.shape: (0,) 데이터가 부족해서 슬라이딩 윈도우로 샘플이 만들어지지 않음
+    # print("Y.shape:", Y.shape)
 
     # 모델 생성 및 학습
     model = create_model((X.shape[1], X.shape[2]), PREDICTION_PERIOD)
@@ -257,7 +257,7 @@ for count, ticker in enumerate(tickers):
 
     # 기대 성장률 미만이면 건너뜀
     if avg_future_return < EXPECTED_GROWTH_RATE:
-        print(f"예상 : {avg_future_return:.2f}%")
+        # print(f"예상 : {avg_future_return:.2f}%")
         continue
 
     # 결과 저장
@@ -286,6 +286,7 @@ for count, ticker in enumerate(tickers):
     # data_plot.index가 DatetimeIndex라고 가정
     three_months_ago = data_plot.index.max() - pd.DateOffset(months=3)
     data_plot_recent = data_plot[data_plot.index >= three_months_ago].copy()
+    recent_n = len(data_plot_recent)
 
     # 3. 미래 날짜도 문자열로 변환
     future_dates_str = pd.to_datetime(future_dates).strftime('%Y-%m-%d')
@@ -295,7 +296,7 @@ for count, ticker in enumerate(tickers):
 
     # --- 상단: 가격 + 볼린저밴드 + 예측 ---
     # 실제 가격
-    ax1.plot(data_plot_recent['date_str'], actual_prices, label='실제 가격', marker='s', markersize=6, markeredgecolor='white')
+    ax1.plot(data_plot_recent['date_str'], actual_prices[-recent_n:], label='실제 가격', marker='s', markersize=6, markeredgecolor='white')
 
     # 예측 가격 (미래 날짜)
     ax1.plot(future_dates_str, predicted_prices, label='예측 가격', linestyle='--', marker='s', markersize=7, markeredgecolor='white', color='tomato')
@@ -312,7 +313,7 @@ for count, ticker in enumerate(tickers):
     # 마지막 실제값과 첫 번째 예측값을 점선으로 연결
     ax1.plot(
         [data_plot_recent['date_str'].iloc[-1], future_dates_str[0]],
-        [actual_prices[-1], predicted_prices[0]],
+        [actual_prices[-recent_n:][-1], predicted_prices[0]],
         linestyle='dashed', color='tomato', linewidth=1.5
     )
 
