@@ -17,15 +17,17 @@ sys.path.append(BASE_DIR)
 
 from utils import create_model, create_multistep_dataset, get_safe_ticker_list, fetch_stock_data, compute_rsi
 
-PREDICTION_PERIOD = 4
-LOOK_BACK = 20 # validation loss 값 테스트 필요
-DATA_COLLECTION_PERIOD = 300
+PREDICTION_PERIOD = 3
+LOOK_BACK = 15 # validation loss 값 테스트 필요
+DATA_COLLECTION_PERIOD = 400
 window = 20  # 이동평균 구간
 num_std = 2  # 표준편차 배수
 
 today = datetime.today().strftime('%Y%m%d')
 start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y%m%d')
 
+ticker = '005690'
+ticker = '000660'
 ticker = '103140'
 
 
@@ -34,20 +36,24 @@ print(len(data))
 
 
 data['MA5'] = data['종가'].rolling(window=5).mean()
-data['MA15'] = data['종가'].rolling(window=15).mean()
-data['MA20'] = data['종가'].rolling(window=window).mean()
-data['STD20'] = data['종가'].rolling(window=window).std()
-data['UpperBand'] = data['MA20'] + (num_std * data['STD20'])
-data['LowerBand'] = data['MA20'] - (num_std * data['STD20'])
+data['MA10'] = data['종가'].rolling(window=10).mean()
+# data['MA15'] = data['종가'].rolling(window=15).mean()
 # 이동평균 기울기(변화량)
 data['MA5_slope'] = data['MA5'].diff() # diff() 차이르 계산하는 함수
-data['MA15_slope'] = data['MA15'].diff()
-# 볼린저밴드 위치 (현재가가 상단/하단 어디쯤?)
-data['BB_perc'] = (data['종가'] - data['LowerBand']) / (data['UpperBand'] - data['LowerBand'] + 1e-9) # # 0~1 사이. 1이면 상단, 0이면 하단, 0.5면 중앙
+data['MA10_slope'] = data['MA10'].diff()
+# data['MA15_slope'] = data['MA15'].diff()
 # 거래량 증감률 >> 거래량이 0이거나, 직전 거래량이 0일 때 문제 발생
 data['Volume_change'] = data['거래량'].pct_change().replace([np.inf, -np.inf], 0).fillna(0)
 # RSI (14일)
 data['RSI14'] = compute_rsi(data['종가'])
+
+data['MA20'] = data['종가'].rolling(window=window).mean()
+data['STD20'] = data['종가'].rolling(window=window).std()
+data['UpperBand'] = data['MA20'] + (num_std * data['STD20'])
+data['LowerBand'] = data['MA20'] - (num_std * data['STD20'])
+# 볼린저밴드 위치 (현재가가 상단/하단 어디쯤?)
+data['BB_perc'] = (data['종가'] - data['LowerBand']) / (data['UpperBand'] - data['LowerBand'] + 1e-9) # # 0~1 사이. 1이면 상단, 0이면 하단, 0.5면 중앙
+
 # 캔들패턴 (양봉/음봉, 장대양봉 등)
 # data['is_bullish'] = (data['종가'] > data['시가']).astype(int) # 양봉이면 1, 음봉이면 0
 # 장대양봉(시가보다 종가가 2% 이상 상승)
@@ -84,11 +90,12 @@ cols_to_drop = [
 ]
 print("Drop candidates:", cols_to_drop)
 
+
 # 데이터셋 생성
 scaler = MinMaxScaler(feature_range=(0, 1))
 # feature_cols = ['시가', '고가', '저가', '종가', '거래량', 'MA20', 'UpperBand', 'LowerBand', 'PER', 'PBR']
 feature_cols = [
-    '종가', 'MA15_slope', 'RSI14', 'BB_perc', 'Volume_change'
+    '종가', '거래량', 'MA10_slope', 'RSI14', 'BB_perc',
 ]
 
 flattened_feature_names = []
@@ -100,7 +107,7 @@ X_for_model = data[feature_cols].fillna(0) # 모델 feature만 NaN을 0으로
 # print(np.isfinite(X_for_model).all())  # True면 정상, False면 비정상
 # print(np.where(~np.isfinite(X_for_model)))  # 문제 있는 위치 확인
 scaled_data = scaler.fit_transform(X_for_model)
-X, Y = create_multistep_dataset(scaled_data, LOOK_BACK, PREDICTION_PERIOD)
+X, Y = create_multistep_dataset(scaled_data, LOOK_BACK, PREDICTION_PERIOD, 0)
 
 
 
@@ -122,7 +129,7 @@ X_rf = X.reshape(n_samples, look_back * n_features)
 Y_rf = Y[:, 0]   # 또는 Y_rf = Y.reshape(-1)
 
 X_train, X_val, y_train, y_val = train_test_split(
-    X_rf, Y_rf, test_size=0.2, shuffle=False
+    X_rf, Y_rf, test_size=0.1, shuffle=False
 )
 
 rf = RandomForestRegressor()
@@ -174,7 +181,7 @@ RFE는 feature가 수십~수백개일 때 특히 효과적
 '''
 from sklearn.feature_selection import RFE
 
-selector = RFE(estimator=RandomForestRegressor(), n_features_to_select=20)
+selector = RFE(estimator=RandomForestRegressor(), n_features_to_select=8)
 selector = selector.fit(X_train, y_train)
 selected_features = np.array(flattened_feature_names)[selector.support_]
 print(selected_features)
