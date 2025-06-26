@@ -26,7 +26,7 @@ LOOK_BACK = 15
 AVERAGE_VOLUME = 25000 # 평균거래량
 AVERAGE_TRADING_VALUE = 2_500_000_000 # 평균거래대금 25억
 EXPECTED_GROWTH_RATE = 5
-DATA_COLLECTION_PERIOD = 300 # 샘플 수 = 68(100일 기준) - 20 - 4 + 1 = 45
+DATA_COLLECTION_PERIOD = 400 # 샘플 수 = 68(100일 기준) - 20 - 4 + 1 = 45
 # DATA_COLLECTION_PERIOD = 120 # 샘플 수 = 81(100일 기준) - 20 - 4 + 1 = 58
 window = 20  # 이동평균 구간
 num_std = 2  # 표준편차 배수
@@ -38,6 +38,7 @@ start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftim
 tickers_kospi = get_safe_ticker_list(market="KOSPI")
 tickers_kosdaq = get_safe_ticker_list(market="KOSDAQ")
 tickers = tickers_kospi + tickers_kosdaq # 전체
+# tickers = ['077970', '079160', '112610', '025540', '003530', '357880', '131970', '009450', '310210', '353200', '136150', '064350', '066575', '005880', '272290', '204270', '066570', '456040', '373220', '096770', '005490', '006650', '042700', '068240', '003280', '067160', '397030', '480370', '085660', '328130', '476040', '241710', '357780', '232140', '011170', '020180', '074600', '042000', '003350', '065350', '004490', '482630', '005420', '033100', '018880', '417200', '332570', '058970', '011790', '053800', '338220', '195870', '010950', '455900', '082740', '225570', '445090', '068760', '007070', '361610', '443060', '089850', '413640', '005850', '141080', '005380', '098460', '277810', '011780', '005810', '075580', '112040', '012510', '240810', '403870', '376900', '001740', '035420', '103140', '068270', '013990', '001450', '457190', '293580', '475150', '280360', '097950', '058820', '034220', '084370', '178320']
 
 ticker_to_name = {ticker: stock.get_market_ticker_name(ticker) for ticker in tickers}
 
@@ -139,30 +140,27 @@ for count, ticker in enumerate(tickers):
 
     # 볼린저밴드
     data['MA5'] = data['종가'].rolling(window=5).mean()
-    data['MA15'] = data['종가'].rolling(window=15).mean()
     data['MA20'] = data['종가'].rolling(window=window).mean()
-    data['MA30'] = data['종가'].rolling(window=30).mean()
-    data['MA60'] = data['종가'].rolling(window=60).mean()
+#     data['MA60'] = data['종가'].rolling(window=60).mean()
     data['STD20'] = data['종가'].rolling(window=window).std()
     data['UpperBand'] = data['MA20'] + (num_std * data['STD20'])
     data['LowerBand'] = data['MA20'] - (num_std * data['STD20'])
     # 이동평균 기울기(변화량)
     data['MA5_slope'] = data['MA5'].diff() # diff() 차이르 계산하는 함수
-    data['MA15_slope'] = data['MA15'].diff()
     data['MA20_slope'] = data['MA20'].diff()
-    data['MA60_slope'] = data['MA60'].diff()
+#     data['MA60_slope'] = data['MA60'].diff()
     # 볼린저밴드 위치 (현재가가 상단/하단 어디쯤?)
     data['BB_perc'] = (data['종가'] - data['LowerBand']) / (data['UpperBand'] - data['LowerBand'] + 1e-9) # # 0~1 사이. 1이면 상단, 0이면 하단, 0.5면 중앙
     # 거래량 증감률 >> 거래량이 0이거나, 직전 거래량이 0일 때 문제 발생
-    data['Volume_change'] = data['거래량'].pct_change().replace([np.inf, -np.inf], 0).fillna(0)
+#     data['Volume_change'] = data['거래량'].pct_change().replace([np.inf, -np.inf], 0).fillna(0)
     # RSI (14일)
     data['RSI14'] = compute_rsi(data['종가'])
     # 캔들패턴 (양봉/음봉, 장대양봉 등)
-    data['is_bullish'] = (data['종가'] > data['시가']).astype(int) # 양봉이면 1, 음봉이면 0
+#     data['is_bullish'] = (data['종가'] > data['시가']).astype(int) # 양봉이면 1, 음봉이면 0
     # 장대양봉(시가보다 종가가 2% 이상 상승)
     # data['long_bullish'] = ((data['종가'] - data['시가']) / data['시가'] > 0.02).astype(int)
     # 당일 변동폭 (고가-저가 비율)
-    data['day_range_pct'] = (data['고가'] - data['저가']) / data['저가']
+#     data['day_range_pct'] = (data['고가'] - data['저가']) / data['저가']
 
     # 볼린저밴드
     # last_close = data['종가'].iloc[-1]
@@ -211,8 +209,9 @@ for count, ticker in enumerate(tickers):
     # 현재 5일선이 20일선보다 낮으면서 하락중이면 패스
     if data['MA5'].iloc[-1] < data['MA20'].iloc[-1] and ma_angle_5 < 0:
         # print(f"                                                        5일선이 20일선 보다 낮을 경우 : 제외")
-        continue
-        
+        # continue
+        pass
+
 ########################################################################
 
     print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
@@ -222,14 +221,14 @@ for count, ticker in enumerate(tickers):
     # scaled_data = scaler.fit_transform(data.values)
     # feature_cols = ['시가', '고가', '저가', '종가', '거래량', 'MA20', 'UpperBand', 'LowerBand', 'PER', 'PBR']
     feature_cols = [
-       '종가', '거래량', 'MA15_slope', 'RSI14', 'BB_perc'
+        '종가', 'RSI14', 'BB_perc', 'MA5_slope', '거래량',
     ]
 
     X_for_model = data[feature_cols].fillna(0) # 모델 feature만 NaN을 0으로
     # print(np.isfinite(X_for_model).all())  # True면 정상, False면 비정상
     # print(np.where(~np.isfinite(X_for_model)))  # 문제 있는 위치 확인
     scaled_data = scaler.fit_transform(X_for_model)
-    X, Y = create_multistep_dataset(scaled_data, LOOK_BACK, PREDICTION_PERIOD)
+    X, Y = create_multistep_dataset(scaled_data, LOOK_BACK, PREDICTION_PERIOD, 0)
     # print("X.shape:", X.shape) # X.shape: (0,) 데이터가 부족해서 슬라이딩 윈도우로 샘플이 만들어지지 않음
     # print("Y.shape:", Y.shape)
 
@@ -239,7 +238,7 @@ for count, ticker in enumerate(tickers):
     # 콜백 설정
     from tensorflow.keras.callbacks import EarlyStopping
     early_stop = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
-    history = model.fit(X, Y, batch_size=16, epochs=200, validation_split=0.1, shuffle=False, verbose=0, callbacks=[early_stop])
+    history = model.fit(X, Y, batch_size=8, epochs=200, validation_split=0.1, shuffle=False, verbose=0, callbacks=[early_stop])
 
     # 종가 scaler fit (실제 데이터로)
     close_scaler = MinMaxScaler()
