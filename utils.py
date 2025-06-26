@@ -139,24 +139,70 @@ def fetch_stock_data_us(ticker, fromdate, todate):
 
 
 
-def create_dataset(dataset, look_back=30):
+def create_dataset(dataset, look_back=30, idx=3):
     X, Y = [], []
     if len(dataset) < look_back:
         return np.array(X), np.array(Y)  # 빈 배열 반환
     for i in range(len(dataset) - look_back):
         X.append(dataset[i:i+look_back, :])
-        Y.append(dataset[i+look_back, 3])  # 종가(Close) 예측
+        Y.append(dataset[i+look_back, idx])  # 종가(Close) 예측
     return np.array(X), np.array(Y)
 
-def create_multistep_dataset(dataset, look_back, n_future):
+# 시계열 데이터에서 딥러닝 모델 학습용 X, Y(입력, 정답) 세트를 만드는 전형적인 패턴
+'''
+- `dataset`: 2차원 numpy 배열 (shape: [전체 시점, 피처 수])
+- `look_back`: 입력 구간 길이 (예: 15 → 과거 15일 데이터 사용)
+- `n_future`: 예측할 미래 구간 길이 (예: 3 → 미래 3일 연속 예측)
+- `X.shape`: [샘플 수, look_back, 피처 수]
+- `Y.shape`: [샘플 수, n_future]
+'''
+def create_multistep_dataset(dataset, look_back, n_future, idx=3):
     X, Y = [], []
     for i in range(len(dataset) - look_back - n_future + 1):
         X.append(dataset[i:i+look_back])
         # Y는 "종가" 인덱스만 n_future 길이로 슬라이싱!
-        Y.append(dataset[i+look_back:i+look_back+n_future, 3]) # 3번 인덱스; 종가
+        Y.append(dataset[i+look_back:i+look_back+n_future, idx]) # 3번 인덱스; 종가
     return np.array(X), np.array(Y)
 
 
+def create_model_32(input_shape, n_future):
+    model = Sequential([
+        LSTM(32, return_sequences=True, input_shape=input_shape),
+        Dropout(0.2),
+        LSTM(16, return_sequences=False),
+        Dropout(0.2),
+        Dense(16, activation='relu'),
+        Dense(8, activation='relu'),
+        Dense(n_future)
+    ])
+    model.compile(optimizer='adam', loss='mean_squared_error')
+    return model
+
+def create_model_64(input_shape, n_future):
+    model = Sequential([
+        LSTM(64, return_sequences=True, input_shape=input_shape),
+        Dropout(0.2),
+        LSTM(32, return_sequences=False),
+        Dropout(0.2),
+        Dense(32, activation='relu'),
+        Dense(16, activation='relu'),
+        Dense(n_future)
+    ])
+    model.compile(optimizer='adam', loss='mean_squared_error')
+    return model
+
+def create_model_128(input_shape, n_future):
+    model = Sequential([
+        LSTM(128, return_sequences=True, input_shape=input_shape),
+        Dropout(0.2),
+        LSTM(64, return_sequences=False),
+        Dropout(0.2),
+        Dense(64, activation='relu'),
+        Dense(32, activation='relu'),
+        Dense(n_future)
+    ])
+    model.compile(optimizer='adam', loss='mean_squared_error')
+    return model
 
 def create_model(input_shape, n_future):
     model = Sequential([
@@ -211,3 +257,18 @@ def get_usd_krw_rate():
         return float(rate_str.replace(',', ''))
     else:
         print('em.no_up em.no_up이 없습니다.')
+
+# 예측 결과를 실제 값(주가)으로 복원
+def invert_scale(scaled_preds, scaler, feature_index=3):
+    """
+    scaled_preds: (샘플수, forecast_horizon) - 스케일된 종가 예측 결과
+    scaler: 학습에 사용된 MinMaxScaler 객체
+    feature_index: 종가 컬럼 인덱스(보통 3)
+    """
+    inv_preds = []
+    for row in scaled_preds:
+        temp = np.zeros((len(row), scaler.n_features_in_))
+        temp[:, feature_index] = row  # 종가 위치에 예측값 할당
+        inv = scaler.inverse_transform(temp)[:, feature_index]  # 역변환 후 종가만 추출
+        inv_preds.append(inv)
+    return np.array(inv_preds)
