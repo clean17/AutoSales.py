@@ -1,18 +1,22 @@
 import os
 import re
+from datetime import datetime
 
 def extract_numbers_from_filenames(directory):
     numbers = []
+    today = datetime.today().strftime('%Y%m%d')
 
     for filename in os.listdir(directory):
-        # .png 파일만 처리
-        if filename.endswith('.png'):
-            # 정규식을 사용하여 두 번째 [ 앞의 6자리 숫자 추출
-            match = re.search(r'\s(\d{6})\s*\[', filename)
-            if match:
-                numbers.append(match.group(1))
+        if filename.startswith(today) and filename.endswith('.png'):
+            # [ 앞의 6자리 숫자 추출
+            # match = re.search(r'\s(\d{6})\s*\[', filename)
 
+            # 마지막 대괄호 안의 6자리 숫자 추출
+            match = re.search(r'\[(\d{6})\]\.png$', filename)
+            if match:
+                    numbers.append(match.group(1))
     return numbers
+
 
 
 def extract_stock_code_from_filenames(directory):
@@ -33,12 +37,13 @@ def extract_stock_code_from_filenames(directory):
     return stock_codes
 
 
-directory = r'D:\sp500'  # 역슬래시 r''로 표기
 
 
-# extracted_numbers = extract_numbers_from_filenames(directory)
-# print("Extracted numbers:", extracted_numbers)
+directory = r'D:\kospi_stocks'  # 역슬래시 r''로 표기
+extracted_numbers = extract_numbers_from_filenames(directory)
+print("Extracted numbers:", extracted_numbers)
 
 
-extracted_last_chars = extract_stock_code_from_filenames(directory)
-print("Extracted last chars:", extracted_last_chars)
+# directory = r'D:\sp500'  # 역슬래시 r''로 표기
+# extracted_last_chars = extract_stock_code_from_filenames(directory)
+# print("Extracted last chars:", extracted_last_chars)
