@@ -18,7 +18,7 @@ sys.path.append(BASE_DIR)
 from utils import create_model, create_multistep_dataset, get_safe_ticker_list, fetch_stock_data, compute_rsi
 
 PREDICTION_PERIOD = 3
-LOOK_BACK = 15 # validation loss 값 테스트 필요
+LOOK_BACK = 18 # validation loss 값 테스트 필요
 DATA_COLLECTION_PERIOD = 400
 window = 20  # 이동평균 구간
 num_std = 2  # 표준편차 배수

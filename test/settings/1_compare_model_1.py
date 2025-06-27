@@ -27,9 +27,9 @@ tf.random.set_seed(42)
 random.seed(42)
 
 
-DATA_COLLECTION_PERIOD = 400
+DATA_COLLECTION_PERIOD = 350
 PREDICTION_PERIOD = 3
-LOOK_BACK = 15
+LOOK_BACK = 18
 window = 20  # 이동평균 구간
 num_std = 2  # 표준편차 배수
 
@@ -97,7 +97,7 @@ print(X_train.shape)
 # print(Y_train.shape)
 
 
-model = create_model_128((X.shape[1], X.shape[2]), PREDICTION_PERIOD)
+model = create_model_32((X.shape[1], X.shape[2]), PREDICTION_PERIOD)
 
 # 콜백 설정
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
