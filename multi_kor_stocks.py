@@ -136,6 +136,12 @@ for count, ticker in enumerate(tickers):
         # print(f"                                                        최근 4주간 가격변동 5% 미만 → 학습 pass")
         continue
 
+    # 최근 3일, 2달 평균 거래량 계산, 최근 3일 거래량이 최근 2달 거래량의 80% 안되면 패스
+    recent_3_avg = data['거래량'][-3:].mean()
+    recent_2months_avg = data['거래량'][-40:].mean()
+    if recent_3_avg < recent_2months_avg * 0.8:
+        continue
+
 ########################################################################
 
     # 볼린저밴드
