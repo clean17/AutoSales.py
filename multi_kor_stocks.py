@@ -22,9 +22,9 @@ output_dir = 'D:\\kospi_stocks'
 os.makedirs(output_dir, exist_ok=True)
 
 PREDICTION_PERIOD = 3
-LOOK_BACK = 15
+LOOK_BACK = 18
 AVERAGE_VOLUME = 25000 # 평균거래량
-AVERAGE_TRADING_VALUE = 2_500_000_000 # 평균거래대금 25억
+AVERAGE_TRADING_VALUE = 3_000_000_000 # 평균거래대금 30억
 EXPECTED_GROWTH_RATE = 5
 DATA_COLLECTION_PERIOD = 400 # 샘플 수 = 68(100일 기준) - 20 - 4 + 1 = 45
 # DATA_COLLECTION_PERIOD = 120 # 샘플 수 = 81(100일 기준) - 20 - 4 + 1 = 58
@@ -289,7 +289,7 @@ for count, ticker in enumerate(tickers):
     data_plot['date_str'] = data_plot.index.strftime('%Y-%m-%d')
 
     # data_plot.index가 DatetimeIndex라고 가정
-    three_months_ago = data_plot.index.max() - pd.DateOffset(months=3)
+    three_months_ago = data_plot.index.max() - pd.DateOffset(months=4)
     data_plot_recent = data_plot[data_plot.index >= three_months_ago].copy()
     recent_n = len(data_plot_recent)
 
@@ -327,7 +327,7 @@ for count, ticker in enumerate(tickers):
     ax1.set_title(f'{today_us}   {stock_name} [ {ticker} ] (Expected Return: {avg_future_return:.2f}%)')
 
     # --- 하단: 거래량 (양/음/동색 구분) ---
-    ax2.bar(data_plot_recent['date_str'], data_plot_recent['거래량'], color=bar_colors, alpha=0.7)
+    ax2.bar(data_plot_recent['date_str'], data_plot_recent['거래량'], color=bar_colors, alpha=0.65)
     ax2.set_ylabel('Volume')
     ax2.grid(True)
 
