@@ -15,6 +15,12 @@ np.random.seed(42)
 tf.random.set_seed(42)
 random.seed(42)
 
+def get_kor_ticker_list():
+    tickers_kospi = get_safe_ticker_list(market="KOSPI")
+    tickers_kosdaq = get_safe_ticker_list(market="KOSDAQ")
+    tickers = tickers_kospi + tickers_kosdaq
+    return tickers
+
 def get_safe_ticker_list(market="KOSPI"):
     def fetch_tickers_for_date(date):
         try:
@@ -204,6 +210,12 @@ def create_model_128(input_shape, n_future):
     model.compile(optimizer='adam', loss='mean_squared_error')
     return model
 
+'''
+LOOK_BACK = 18   # 과거 시점 수 (timesteps)
+N_FEATURES = 10  # 입력 변수(피처) 수
+
+input_shape = (LOOK_BACK, N_FEATURES)
+'''
 def create_model(input_shape, n_future):
     model = Sequential([
         LSTM(32, return_sequences=True, input_shape=(input_shape)),
@@ -272,3 +284,70 @@ def invert_scale(scaled_preds, scaler, feature_index=3):
         inv = scaler.inverse_transform(temp)[:, feature_index]  # 역변환 후 종가만 추출
         inv_preds.append(inv)
     return np.array(inv_preds)
+
+
+def add_technical_features(data, window=20, num_std=2):
+
+    # RSI (14일)
+    data['RSI14'] = compute_rsi(data['종가'])  # 사전에 정의 필요
+
+    # 볼린저밴드 (MA20, STD20, 상단/하단 밴드)
+    data['MA20'] = data['종가'].rolling(window=window).mean()
+    data['STD20'] = data['종가'].rolling(window=window).std()
+    data['UpperBand'] = data['MA20'] + (num_std * data['STD20'])
+    data['LowerBand'] = data['MA20'] - (num_std * data['STD20'])
+    # 볼린저밴드 위치 (0~1)
+    data['BB_perc'] = (data['종가'] - data['LowerBand']) / (data['UpperBand'] - data['LowerBand'] + 1e-9)
+
+    # 이동평균선
+    data['MA5'] = data['종가'].rolling(window=5).mean()
+    data['MA10'] = data['종가'].rolling(window=10).mean()
+    data['MA5_slope'] = data['MA5'].diff()
+    data['MA10_slope'] = data['MA10'].diff()
+    data['MA20_slope'] = data['MA10'].diff()
+
+    # 거래량 증감률
+    data['Volume_change'] = data['거래량'].pct_change().replace([np.inf, -np.inf], 0).fillna(0)
+
+    # 당일 변동폭 (고가-저가 비율)
+    data['day_range_pct'] = (data['고가'] - data['저가']) / (data['저가'] + 1e-9)
+
+    # 캔들패턴 (양봉/음봉, 장대양봉 등)
+    # data['is_bullish'] = (data['종가'] > data['시가']).astype(int) # 양봉이면 1, 음봉이면 0
+    # 장대양봉(시가보다 종가가 2% 이상 상승)
+    # data['long_bullish'] = ((data['종가'] - data['시가']) / data['시가'] > 0.02).astype(int)
+
+    return data
+
+def add_technical_features_us(data, window=20, num_std=2):
+
+    # RSI (14일)
+    data['RSI14'] = compute_rsi(data['Close'])  # 사전에 정의 필요
+
+    # 볼린저밴드 (MA20, STD20, 상단/하단 밴드)
+    data['MA20'] = data['Close'].rolling(window=window).mean()
+    data['STD20'] = data['Close'].rolling(window=window).std()
+    data['UpperBand'] = data['MA20'] + (num_std * data['STD20'])
+    data['LowerBand'] = data['MA20'] - (num_std * data['STD20'])
+    # 볼린저밴드 위치 (0~1)
+    data['BB_perc'] = (data['Close'] - data['LowerBand']) / (data['UpperBand'] - data['LowerBand'] + 1e-9)
+
+    # 이동평균선
+    data['MA5'] = data['Close'].rolling(window=5).mean()
+    data['MA10'] = data['Close'].rolling(window=10).mean()
+    data['MA5_slope'] = data['MA5'].diff()
+    data['MA10_slope'] = data['MA10'].diff()
+    data['MA20_slope'] = data['MA10'].diff()
+
+    # 거래량 증감률
+    data['Volume_change'] = data['Volumne'].pct_change().replace([np.inf, -np.inf], 0).fillna(0)
+
+    # 당일 변동폭 (고가-저가 비율)
+    data['day_range_pct'] = (data['High'] - data['Low']) / (data['Low'] + 1e-9)
+
+    # 캔들패턴 (양봉/음봉, 장대양봉 등)
+    # data['is_bullish'] = (data['Close'] > data['Open']).astype(int) # 양봉이면 1, 음봉이면 0
+    # 장대양봉(시가보다 종가가 2% 이상 상승)
+    # data['long_bullish'] = ((data['Close'] - data['Open']) / data['Open'] > 0.02).astype(int)
+
+    return data
