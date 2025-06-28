@@ -19,16 +19,16 @@ from utils import create_model, create_multistep_dataset, get_safe_ticker_list, 
 
 PREDICTION_PERIOD = 3
 LOOK_BACK = 18 # validation loss 값 테스트 필요
-DATA_COLLECTION_PERIOD = 400
+DATA_COLLECTION_PERIOD = 300
 window = 20  # 이동평균 구간
 num_std = 2  # 표준편차 배수
 
 today = datetime.today().strftime('%Y%m%d')
 start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y%m%d')
 
-ticker = '005690'
-ticker = '000660'
 ticker = '103140'
+ticker = '000660'
+ticker = '005690'
 
 
 data = fetch_stock_data(ticker, start_date, today)
@@ -59,7 +59,7 @@ data['BB_perc'] = (data['종가'] - data['LowerBand']) / (data['UpperBand'] - da
 # 장대양봉(시가보다 종가가 2% 이상 상승)
 # data['long_bullish'] = ((data['종가'] - data['시가']) / data['시가'] > 0.02).astype(int)
 # 당일 변동폭 (고가-저가 비율)
-# data['day_range_pct'] = (data['고가'] - data['저가']) / data['저가']
+data['day_range_pct'] = (data['고가'] - data['저가']) / data['저가']
 
 
 # NaN 개수
@@ -71,8 +71,8 @@ data['BB_perc'] = (data['종가'] - data['LowerBand']) / (data['UpperBand'] - da
 # print(np.isinf(data).sum())
 
 total = len(data)
-print("NaN 비율(%)")
-print((data.isna().sum() / total * 100).round(2))
+# print("NaN 비율(%)")
+# print((data.isna().sum() / total * 100).round(2))
 
 # print("\ninf/-inf 비율(%)")
 # print((np.isinf(data).sum() / total * 100).round(2))
@@ -95,9 +95,8 @@ print("Drop candidates:", cols_to_drop)
 scaler = MinMaxScaler(feature_range=(0, 1))
 # feature_cols = ['시가', '고가', '저가', '종가', '거래량', 'MA20', 'UpperBand', 'LowerBand', 'PER', 'PBR']
 feature_cols = [
-    '종가', '거래량', 'MA10_slope', 'RSI14', 'BB_perc',
+    '종가', '거래량', 'MA10_slope', 'RSI14', 'BB_perc', 'Volume_change', 'MA5_slope', 'day_range_pct'
 ]
-
 flattened_feature_names = []
 for t in range(LOOK_BACK):
     for f in feature_cols:
@@ -134,54 +133,74 @@ X_train, X_val, y_train, y_val = train_test_split(
 
 rf = RandomForestRegressor()
 rf.fit(X_train, y_train)  # X_train: (샘플, feature), y_train: (샘플, )
-# importances = rf.feature_importances_
-
-# # 중요도 순으로 정렬
-# for i in np.argsort(importances)[::-1]:
-#     print(f"{flattened_feature_names[i]}: {importances[i]:.4f}")
+importances = rf.feature_importances_
 
 
+# 중요도 순으로 정렬
+for i in np.argsort(importances)[::-1][:10]:
+    print(f"{flattened_feature_names[i]}: {importances[i]:.4f}")
 
-'''
-Permutation Importance (모델 agnostic, 대부분 모델에 가능) (셔플 중요도, 모델-불문 실제 평가)
-
-모델의 예측이 특정 feature에 얼마나 의존하는지
-→ feature의 값만 무작위로 섞어(셔플해서)
-모델 성능이 얼마나 떨어지는지를 관찰 (실험적 검증)
-
-X_val, y_val 등 “학습에 쓰지 않은 데이터”에서 평가
-(실제 성능 하락폭으로 평가 → 일반화 성능 기준)
-
-feature 간 상호작용까지 반영
-
-실전에서 더 신뢰받는 평가
-(특히, feature가 서로 의존적일 때)
-
->> 실전에서 이 feature가 망가지면(섞이면) 진짜 성능이 떨어지는가?
-실전(운영)에서 진짜 영향력 있는 feature가 궁금할 때
-
-n_repeats=10: 각 feature를 10번씩 셔플해서 평균냄
-'''
-from sklearn.inspection import permutation_importance
-
-result = permutation_importance(rf, X_val, y_val, n_repeats=10)
-for i in result.importances_mean.argsort()[::-1]: # 가장 중요한 feature부터 내림차순 정렬
-    print(f"{flattened_feature_names[i]}: {result.importances_mean[i]:.4f}")
-
-
-
-'''
-반복적 특징 제거 (Recursive Feature Elimination, RFE)
-자동으로 덜 중요한 feature를 제거해서,
-중요한 feature만 남기는 대표적인 방법
-
-n_features_to_select: 최종적으로 남길 feature 개수 
-
-RFE는 feature가 수십~수백개일 때 특히 효과적
-'''
-from sklearn.feature_selection import RFE
-
-selector = RFE(estimator=RandomForestRegressor(), n_features_to_select=8)
-selector = selector.fit(X_train, y_train)
-selected_features = np.array(flattened_feature_names)[selector.support_]
-print(selected_features)
+print('                                ')
+#
+# '''
+# Permutation Importance (모델 agnostic, 대부분 모델에 가능) (셔플 중요도, 모델-불문 실제 평가)
+#
+# 모델의 예측이 특정 feature에 얼마나 의존하는지
+# → feature의 값만 무작위로 섞어(셔플해서)
+# 모델 성능이 얼마나 떨어지는지를 관찰 (실험적 검증)
+#
+# X_val, y_val 등 “학습에 쓰지 않은 데이터”에서 평가
+# (실제 성능 하락폭으로 평가 → 일반화 성능 기준)
+#
+# feature 간 상호작용까지 반영
+#
+# 실전에서 더 신뢰받는 평가
+# (특히, feature가 서로 의존적일 때)
+#
+# >> 실전에서 이 feature가 망가지면(섞이면) 진짜 성능이 떨어지는가?
+# 실전(운영)에서 진짜 영향력 있는 feature가 궁금할 때
+#
+# n_repeats=10: 각 feature를 10번씩 셔플해서 평균냄
+# '''
+# from sklearn.inspection import permutation_importance
+#
+# result = permutation_importance(rf, X_val, y_val, n_repeats=10)
+# for i in result.importances_mean.argsort()[::-1]: # 가장 중요한 feature부터 내림차순 정렬
+#     print(f"{flattened_feature_names[i]}: {result.importances_mean[i]:.4f}")
+#
+#
+#
+# '''
+# 반복적 특징 제거 (Recursive Feature Elimination, RFE)
+# 자동으로 덜 중요한 feature를 제거해서,
+# 중요한 feature만 남기는 대표적인 방법
+#
+# n_features_to_select: 최종적으로 남길 feature 개수
+#
+# RFE는 feature가 수십~수백개일 때 특히 효과적
+# '''
+# from sklearn.feature_selection import RFE
+#
+# selector = RFE(estimator=RandomForestRegressor(), n_features_to_select=8)
+# selector = selector.fit(X_train, y_train)
+# selected_features = np.array(flattened_feature_names)[selector.support_]
+# print(selected_features)
+#
+# feature_importances = selector.estimator_.feature_importances_
+# selected_mask = selector.support_
+# feature_info = pd.DataFrame({
+#     'Feature': flattened_feature_names,
+#     'Selected': selected_mask,
+#     'Importance': feature_importances,
+#     'Ranking': selector.ranking_
+# })
+#
+# # 선택된 feature만 보기
+# print(feature_info[feature_info['Selected']].sort_values('Importance', ascending=False))
+#
+# selected = feature_info[feature_info['Selected']]
+# selected = selected.sort_values('Importance', ascending=True)
+# plt.barh(selected['Feature'], selected['Importance'])
+# plt.xlabel('Importance')
+# plt.title('Selected Feature Importances')
+# plt.show()
