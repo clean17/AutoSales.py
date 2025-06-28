@@ -171,6 +171,37 @@ def create_multistep_dataset(dataset, look_back, n_future, idx=3):
     return np.array(X), np.array(Y)
 
 
+'''
+LOOK_BACK = 18   # 과거 시점 수 (timesteps)
+N_FEATURES = 10  # 입력 변수(피처) 수
+
+input_shape = (LOOK_BACK, N_FEATURES)
+'''
+def create_model(input_shape, n_future):
+    model = Sequential([
+        LSTM(32, return_sequences=True, input_shape=(input_shape)),
+        Dropout(0.2),
+        LSTM(16, return_sequences=False),
+        Dropout(0.2),
+        Dense(16, activation='relu'),
+        Dense(8, activation='relu'),
+        Dense(n_future)
+    ])
+    model.compile(optimizer='adam', loss='mean_squared_error')
+    return model
+
+def create_model_16(input_shape, n_future):
+    model = Sequential([
+        LSTM(16, return_sequences=True, input_shape=(input_shape)),
+        Dropout(0.2),
+        LSTM(8, return_sequences=False),
+        Dropout(0.2),
+        Dense(8, activation='relu'),
+        Dense(n_future)
+    ])
+    model.compile(optimizer='adam', loss='mean_squared_error')
+    return model
+
 def create_model_32(input_shape, n_future):
     model = Sequential([
         LSTM(32, return_sequences=True, input_shape=input_shape),
@@ -210,24 +241,6 @@ def create_model_128(input_shape, n_future):
     model.compile(optimizer='adam', loss='mean_squared_error')
     return model
 
-'''
-LOOK_BACK = 18   # 과거 시점 수 (timesteps)
-N_FEATURES = 10  # 입력 변수(피처) 수
-
-input_shape = (LOOK_BACK, N_FEATURES)
-'''
-def create_model(input_shape, n_future):
-    model = Sequential([
-        LSTM(32, return_sequences=True, input_shape=(input_shape)),
-        Dropout(0.2),
-        LSTM(16, return_sequences=False),
-        Dropout(0.2),
-        Dense(16, activation='relu'),
-        Dense(8, activation='relu'),
-        Dense(n_future)
-    ])
-    model.compile(optimizer='adam', loss='mean_squared_error')
-    return model
 
 
 
@@ -317,6 +330,15 @@ def add_technical_features(data, window=20, num_std=2):
     # 장대양봉(시가보다 종가가 2% 이상 상승)
     # data['long_bullish'] = ((data['종가'] - data['시가']) / data['시가'] > 0.02).astype(int)
 
+    # 최근 N일간 등락률
+    data['chg_5d'] = (data['종가'] / data['종가'].shift(5)) - 1
+    # 현재가 vs 이동평균(MA) 괴리율
+    data['ma5_gap'] = (data['종가'] - data['MA5']) / data['MA5']
+    data['ma10_gap'] = (data['종가'] - data['MA10']) / data['MA10']
+    data['ma20_gap'] = (data['종가'] - data['MA20']) / data['MA20']
+    # 거래량 급증 신호
+    data['volume_ratio'] = data['거래량'] / data['거래량'].rolling(20).mean()
+
     return data
 
 def add_technical_features_us(data, window=20, num_std=2):
@@ -349,5 +371,8 @@ def add_technical_features_us(data, window=20, num_std=2):
     # data['is_bullish'] = (data['Close'] > data['Open']).astype(int) # 양봉이면 1, 음봉이면 0
     # 장대양봉(시가보다 종가가 2% 이상 상승)
     # data['long_bullish'] = ((data['Close'] - data['Open']) / data['Open'] > 0.02).astype(int)
+
+    # 현재가 vs 이동평균(MA) 괴리율
+    data['ma10_gap'] = (data['Close'] - data['MA10']) / data['MA10']
 
     return data
