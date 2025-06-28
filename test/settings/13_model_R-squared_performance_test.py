@@ -27,25 +27,26 @@ random.seed(42)
 
 '''
 15/3이 예측 좋다?
+400~410 정도가 좋아
 '''
 DATA_COLLECTION_PERIOD = 400
 PREDICTION_PERIOD = 3
-LOOK_BACK = 9
+LOOK_BACK = 15
 
 # 데이터 수집
-tickers = ['006490', '042670', '023160', '032350', '006800', '323410', '009540', '058970', '034020', '079550', '358570', '000155', '035720', '00680K', '035420', '012510']
+tickers = ['006490', '042670', '023160', '006800', '323410', '009540', '034020', '358570', '000155', '035720', '00680K', '035420', '012510']
 
 ticker_to_name = {ticker: stock.get_market_ticker_name(ticker) for ticker in tickers}
 
 today = datetime.today().strftime('%Y%m%d')
 # start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y%m%d')
 
-for i in range(10):
+for i in range(4):
     # period = DATA_COLLECTION_PERIOD + (10*i)
     # print('period : ', period)
-    print('LOOK_BACK : ', (LOOK_BACK + i*1))
     start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y%m%d')
     # start_date = (datetime.today() - timedelta(days=period)).strftime('%Y%m%d')
+    # print('LOOK_BACK : ', (LOOK_BACK + i))
 
     total_mse = 0
     total_r2 = 0
@@ -54,7 +55,6 @@ for i in range(10):
     for count, ticker in enumerate(tickers):
         stock_name = ticker_to_name.get(ticker, 'Unknown Stock')
         data = add_technical_features(fetch_stock_data(ticker, start_date, today))
-        # print(data)
 
         threshold = 0.1  # 10%
         cols_to_drop = [
@@ -70,17 +70,18 @@ for i in range(10):
         # 데이터 스케일링
         scaler = MinMaxScaler(feature_range=(0, 1))
         feature_cols = [
-            # '종가', '고가', 'PBR', '저가',
-            # '거래량', 'RSI14', 'ma10_gap',
+            '종가', '고가', 'PBR', '저가',
+            '거래량', 'RSI14',
+            'ma10_gap',
         ]
-        feature_cols = [
-            '종가', '고가', '저가', '거래량'
-        ]
+        # feature_cols = [
+        #     '종가', '고가', '저가', '거래량'
+        # ]
         X_for_model = data[feature_cols].fillna(0) # 모델 feature NaN을 0으로
         scaled_data = scaler.fit_transform(X_for_model)
 
         # 시계열 데이터를 윈도우로 나누기
-        X, Y = create_multistep_dataset(scaled_data, (LOOK_BACK + i*1), PREDICTION_PERIOD, 0)
+        X, Y = create_multistep_dataset(scaled_data, (LOOK_BACK + i), PREDICTION_PERIOD, 0)
 
         # 학습 데이터와 검증 데이터 분리
         X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=0.1, shuffle=False)
@@ -88,7 +89,7 @@ for i in range(10):
             print('샘플 부족 : ', X_train.shape)
             continue
 
-        model = create_model_32((X_train.shape[1], X_train.shape[2]), PREDICTION_PERIOD)
+        model = create_model_64((X_train.shape[1], X_train.shape[2]), PREDICTION_PERIOD)
 
         # 콜백 설정
         from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
@@ -101,17 +102,17 @@ for i in range(10):
         # X_val : 검증에 쓸 여러 시계열 구간의 집합
         # predictions : 검증셋 각 구간(윈도우)에 대해 미래 PREDICTION_PERIOD만큼의 예측치 반환
         # shape: (검증샘플수, 예측일수)
-        predictions = model.predict(X_val)
+        predictions = model.predict(X_val, verbose=0)
         # print('predictions (샘플, 예측일)', predictions.shape)
 
         # MSE
         mse = mean_squared_error(Y_val, predictions)
-        print("MSE:", mse)
+        # print("MSE:", mse)
         total_mse += mse
 
         # R-squared; (0=엉망, 1=완벽)
         r2 = r2_score(Y_val, predictions)
-        print("R-2:", r2)
+        # print("R-2:", r2)
         total_r2 += r2
         total_cnt += 1
 
@@ -147,54 +148,6 @@ R2
 0.9 이상: 거의 완벽 (실전에서는 드물며, 오버피팅 의심도)
 0.5~0.7: “적당히 쓸만한” 모델
 0.5 이하: 실전 활용도 낮음 (정확도 개선 필요)
-'''
-
-'''
-LSTM/수집일/학습데이터/예측일/샘플수/배치/레이어/mse/squared
-
-'종가', 'MA15_slope', 'RSI14', 'BB_perc', 'Volume_change'
-32 / 100 / 15 / 3 / 45 / 16 - 0.007 0.65
-32 / 120 / 15 / 3 / 57 / 16 - 0.021 0.71
-32 / 140 / 15 / 3 / 70 / 16 - 0.018 0.64
-32 / 160 / 15 / 3 / 79 / 16 - 0.023 0.65
-32 / 200 / 15 / 3 / 102 / 16 - 0.021 0.60
-32 / 400 / 15 / 3 / 224 / 16 - 0.022 0.59
-
-32 / 120 / 15 / 3 / 57 / 8 - 0.020 0.73
-32 / 130 / 15 / 3 / 63 / 8 - 0.012 0.78
-32 / 135 / 15 / 3 / 67 / 8 - 0.012 0.84
-32 / 140 / 15 / 3 / 70 / 8 - 0.003 0.92 ##########
-32 / 150 / 15 / 3 / 73 / 8 - 0.020 0.73
-32 / 160 / 15 / 3 / 79 / 8 - 0.020 0.69
-
-32 / 120 / 15 / 3 / 57 / 4 - 0.020 0.72
-32 / 140 / 15 / 3 / 70 / 4 - 0.003 0.92 ###########
-32 / 160 / 15 / 3 / 79 / 4 - 0.020 0.69
-32 / 200 / 15 / 3 / 102 / 4 - 0.021 0.60
-32 / 400 / 15 / 3 / 224 / 4 - 0.012 0.77
-
-64 / 140 / 15 / 3 / 70 / 8 - 0.004 0.90
-128 / 140 / 15 / 3 / 70 / 4 - 0.002 0.94 ##########
-128 / 140 / 15 / 3 / 70 / 8 - 0.002 0.95 ##########
-128 / 140 / 15 / 3 / 70 / 16 - 0.002 0.95 ##########
-
-32 / 140 / 15 / 3 / 70 / 8
-'시가', '고가', '저가', '종가', '거래량'
-  - 0.006 0.90
-'시가', '고가', '저가', '종가', '거래량', 'RSI14'
-  - 0.006 0.90
-'시가', '고가', '저가', '종가', '거래량', 'RSI14', 'BB_perc'
-  - 0.005 0.91
-'시가', '고가', '저가', '종가', '거래량', 'RSI14', 'BB_perc', 'Volume_change'
-  - 0.005 0.91
-'시가', '고가', '저가', '종가', 'RSI14', 'BB_perc', 'Volume_change'
-  - 0.004 0.93
-'고가', '저가', '종가', 'RSI14', 'BB_perc', 'Volume_change'
-  - 0.003 0.91
-'고가', '저가', '종가', 'RSI14', 'BB_perc', 'Volume_change', 'MA15_slope'
-  - 0.002 0.94
-'종가', '고가', '저가', 'RSI14', 'BB_perc', 'Volume_change', 'MA15_slope'
-  - 0.003 0.95
 '''
 
 
