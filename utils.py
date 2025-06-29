@@ -172,76 +172,54 @@ def create_multistep_dataset(dataset, look_back, n_future, idx=3):
 
 
 '''
+model_32 = create_lstm_model(input_shape, n_future, lstm_units=[32,16], dense_units=[16,8])
+model_64 = create_lstm_model(input_shape, n_future, lstm_units=[64,32], dense_units=[32,16])
+model_128 = create_lstm_model(input_shape, n_future, lstm_units=[128,64], dense_units=[64,32])
+model_256 = create_lstm_model(input_shape, n_future, lstm_units=[256,128,64], dense_units=[128,64,32])
+
 LOOK_BACK = 18   # 과거 시점 수 (timesteps)
 N_FEATURES = 10  # 입력 변수(피처) 수
-
 input_shape = (LOOK_BACK, N_FEATURES)
 '''
-def create_model(input_shape, n_future):
-    model = Sequential([
-        LSTM(32, return_sequences=True, input_shape=(input_shape)),
-        Dropout(0.2),
-        LSTM(16, return_sequences=False),
-        Dropout(0.2),
-        Dense(16, activation='relu'),
-        Dense(8, activation='relu'),
-        Dense(n_future)
-    ])
-    model.compile(optimizer='adam', loss='mean_squared_error')
-    return model
-
-def create_model_16(input_shape, n_future):
-    model = Sequential([
-        LSTM(16, return_sequences=True, input_shape=(input_shape)),
-        Dropout(0.2),
-        LSTM(8, return_sequences=False),
-        Dropout(0.2),
-        Dense(8, activation='relu'),
-        Dense(n_future)
-    ])
-    model.compile(optimizer='adam', loss='mean_squared_error')
-    return model
-
-def create_model_32(input_shape, n_future):
-    model = Sequential([
-        LSTM(32, return_sequences=True, input_shape=input_shape),
-        Dropout(0.2),
-        LSTM(16, return_sequences=False),
-        Dropout(0.2),
-        Dense(16, activation='relu'),
-        Dense(8, activation='relu'),
-        Dense(n_future)
-    ])
-    model.compile(optimizer='adam', loss='mean_squared_error')
-    return model
-
-def create_model_64(input_shape, n_future):
-    model = Sequential([
-        LSTM(64, return_sequences=True, input_shape=input_shape),
-        Dropout(0.2),
-        LSTM(32, return_sequences=False),
-        Dropout(0.2),
-        Dense(32, activation='relu'),
-        Dense(16, activation='relu'),
-        Dense(n_future)
-    ])
-    model.compile(optimizer='adam', loss='mean_squared_error')
-    return model
-
-def create_model_128(input_shape, n_future):
-    model = Sequential([
-        LSTM(128, return_sequences=True, input_shape=input_shape),
-        Dropout(0.2),
-        LSTM(64, return_sequences=False),
-        Dropout(0.2),
-        Dense(64, activation='relu'),
-        Dense(32, activation='relu'),
-        Dense(n_future)
-    ])
+def create_lstm_model(input_shape, n_future,
+                      lstm_units=[64, 32], dropout=0.2,
+                      dense_units=[16, 8]):
+    """
+    input_shape: (look_back, feature 수)
+    n_future: 예측할 값 개수
+    lstm_units: LSTM 레이어별 유닛 리스트 (예: [128, 64]면 LSTM 128, LSTM 64)
+    dropout: 각 LSTM 뒤에 붙일 Dropout 비율(리스트로 주면 각각 다르게도 가능)
+    dense_units: Dense 레이어별 유닛 리스트
+    """
+    model = Sequential()
+    for i, units in enumerate(lstm_units):
+        return_seq = (i < len(lstm_units) - 1)
+        if i == 0:
+            model.add(LSTM(units, return_sequences=return_seq, input_shape=input_shape))
+        else:
+            model.add(LSTM(units, return_sequences=return_seq))
+        # Dropout 리스트를 받을 수도 있고, 고정값을 쓸 수도 있음
+        if dropout:
+            model.add(Dropout(dropout if isinstance(dropout, float) else dropout[i]))
+    for units in dense_units:
+        model.add(Dense(units, activation='relu'))
+    model.add(Dense(n_future))
     model.compile(optimizer='adam', loss='mean_squared_error')
     return model
 
 
+# def create_model(input_shape, n_future):
+#     model = Sequential([
+#         LSTM(32, return_sequences=True, input_shape=(input_shape)),
+#         Dropout(0.2),
+#         LSTM(16, return_sequences=False),
+#         Dropout(0.2),
+#         Dense(16, activation='relu'),
+#         Dense(8, activation='relu'),
+#         Dense(n_future)
+#     ])
+#     model.compile(optimizer='adam', loss='mean_squared_error')
+#     return model
 
 
 def compute_rsi(prices, period=14):
