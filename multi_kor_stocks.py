@@ -50,6 +50,7 @@ results = []
 
 for count, ticker in enumerate(tickers):
     stock_name = ticker_to_name.get(ticker, 'Unknown Stock')
+    print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
 
     data = add_technical_features(fetch_stock_data(ticker, start_date, today))
 
@@ -57,13 +58,13 @@ for count, ticker in enumerate(tickers):
 
     # 데이터가 부족하면 패스
     if data.empty or len(data) < 30:
-        # print(f"                                                        데이터가 부족하여 작업을 건너뜁니다")
+        # print(f"                                                        데이터 부족 → pass")
         continue
 
     # 500원 미만이면 패스
     last_row = data.iloc[-1]
     if last_row['종가'] < 500:
-        # print("                                                        종가가 0이거나 500원 미만이므로 작업을 건너뜁니다.")
+        # print("                                                        종가가 0이거나 500원 미만 → pass")
         continue
 
     # 최근 한달 거래대금 중 4억 미만이 있으면 패스
@@ -71,13 +72,13 @@ for count, ticker in enumerate(tickers):
     month_trading_value = month_data['거래량'] * month_data['종가']
     # 하루라도 거래대금이 4억 미만이 있으면 제외
     if (month_trading_value < 400_000_000).any():
-        # print(f"                                                        최근 4주 중 거래대금 4억 미만 발생 → 제외")
+        # print(f"                                                        최근 4주 중 거래대금 4억 미만 발생 → pass")
         continue
 
     # 일일 평균 거래량이 부족하면 패스
     # average_volume = data['거래량'].mean()
     # if average_volume <= AVERAGE_VOLUME:
-    #     # print(f"                                                        평균 거래량({average_volume:.0f}주)이 부족하여 작업을 건너뜁니다.")
+    #     # print(f"                                                        평균 거래량({average_volume:.0f}주)이 부족 → pass")
     #     continue
 
     # 전체 평균 거래대금이 기준치 이하면 패스
@@ -85,7 +86,7 @@ for count, ticker in enumerate(tickers):
     # average_trading_value = trading_value.mean()
     # if average_trading_value <= AVERAGE_TRADING_VALUE:
     #     formatted_value = f"{average_trading_value / 100_000_000:.0f}억"
-    #     # print(f"                                                        평균 거래대금({formatted_value})이 부족하여 작업을 건너뜁니다.")
+    #     # print(f"                                                        평균 거래대금({formatted_value})이 부족 → pass")
     #     continue
 
     # 최근 2주 거래대금이 기준치 이하면 패스
@@ -94,61 +95,62 @@ for count, ticker in enumerate(tickers):
     recent_average_trading_value = recent_trading_value.mean()
     if recent_average_trading_value <= AVERAGE_TRADING_VALUE:
         formatted_recent_value = f"{recent_average_trading_value / 100_000_000:.0f}억"
-        # print(f"                                                        최근 2주 평균 거래대금({formatted_recent_value})이 부족하여 작업을 건너뜁니다.")
+        # print(f"                                                        최근 2주 평균 거래대금({formatted_recent_value})이 부족 → pass")
         continue
 
-    # 최고가 대비 현재가가 40% 이상 하락한 경우 건너뜀
-    actual_prices = data['종가'].values # 종가 배열
-    last_close = actual_prices[-1]
-    max_close = np.max(actual_prices)
-    drop_pct = ((max_close - last_close) / max_close) * 100
-    if drop_pct >= 50:
-        print(f"                                                        최고가 대비 현재가가 50% 이상 하락한 경우 > pass")
-        # continue
-        pass
+    # 최고가 대비 현재가가 50% 이상 하락한 경우 건너뜀
+    # actual_prices = data['종가'].values # 종가 배열
+    # last_close = actual_prices[-1]
+    # max_close = np.max(actual_prices)
+    # drop_pct = ((max_close - last_close) / max_close) * 100
+    # if drop_pct >= 50:
+    #     # print(f"                                                        최고가 대비 현재가가 50% 이상 하락한 경우 → pass : {drop_pct:.2f} %")
+    #     # continue
+    #     pass
 
     # 모든 4일 연속 구간에서 첫날 대비 마지막날 xx% 이상 급등하면 패스
     window_start = actual_prices[-10:-3]   # 0 ~ N-4
     window_end = actual_prices[-7:]      # 3 ~ N-1
     ratio = window_end / window_start   # numpy, pandas Series/DataFrame만 벡터화 연산 지원, ratio는 결과 리스트
     if np.any(ratio >= 1.6):
-        print(f"                                                        최근 4일 연속 구간에서 첫날 대비 60% 이상 상승: 제외")
+        print(f"                                                        최근 4일 연속 구간에서 첫날 대비 60% 이상 상승 → pass")
         continue
 
     # 현재 종가가 4일 전에 비해서 크게 하락하면 패스
     close_4days_ago = data['종가'].iloc[-5]
     rate = (last_close / close_4days_ago - 1) * 100
     if rate <= -18:
-        print(f"                                                        4일 전 대비 {rate:.2f}% 하락 → 학습 제외")
+        print(f"                                                        4일 전 대비 {rate:.2f}% 하락 → pass")
         continue  # 또는 return
 
-    # 최근 한달 동안의 변동률이 5%가 한번도 안되면 패스
-    idx_list = [-5, -10, -15, -20]
-    pass_flag = True
-    for idx in idx_list:
-        past_close = data['종가'].iloc[idx]
-        change = abs(last_close / past_close - 1) * 100
-        if change >= 5: # 기준치
-            pass_flag = False
-            break
-    if pass_flag:
-        print(f"                                                        최근 4주간 가격변동 5% 미만 → 학습 pass")
-        # continue
-        pass
+    # # 최근 한달 동안의 변동률이 5%가 한번도 안되면 패스
+    # idx_list = [-5, -10, -15, -20]
+    # pass_flag = True
+    # for idx in idx_list:
+    #     past_close = data['종가'].iloc[idx]
+    #     change = abs(last_close / past_close - 1) * 100
+    #     if change >= 3: # 기준치
+    #         pass_flag = False
+    #         break
+    # if pass_flag:
+    #     print(f"                                                        최근 4주간 가격변동 3% 미만 → pass")
+    #     # continue
+    #     pass
 
     # 최근 3일, 2달 평균 거래량 계산, 최근 3일 거래량이 최근 2달 거래량의 80% 안되면 패스
     recent_3_avg = data['거래량'][-3:].mean()
     recent_2months_avg = data['거래량'][-40:].mean()
-    if recent_3_avg < recent_2months_avg * 0.5:
-        print(f"                                                        최근 3일의 평균거래량이 최근 2달 평균거래량의 50%가 안되므로 pass")
-        # continue
-        pass
+    if recent_3_avg < recent_2months_avg * 0.25:
+        temp = (recent_3_avg/recent_2months_avg * 100)
+        print(f"                                                        최근 3일의 평균거래량이 최근 2달 평균거래량의 25% 미만 → pass : {temp:.2f} %")
+        continue
+        # pass
 
 
     # # 현재 5일선이 20일선보다 낮으면서 하락중이면 패스
     # ma_angle_5 = data['MA5'].iloc[-1] - data['MA5'].iloc[-2]
     # if data['MA5'].iloc[-1] < data['MA20'].iloc[-1] and ma_angle_5 < 0:
-    #     # print(f"                                                        5일선이 20일선 보다 낮을 경우 : 제외")
+    #     # print(f"                                                        5일선이 20일선 보다 낮을 경우 → pass")
     #     # continue
     #     pass
 
@@ -206,10 +208,9 @@ for count, ticker in enumerate(tickers):
     # R-squared; (0=엉망, 1=완벽)
     r2 = r2_score(y_val, predictions)
     if r2 < 0.7:
-        # print("                                                        R-squared 0.5 미만이면 패스 : ", r2)
+        # print(f"                                                        R-squared 0.7 미만이면 패스 : ", {r2:.2f})
         continue
 
-    print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
 
     # X_input 생성 (마지막 구간)
     X_input = X[-1:]
@@ -231,7 +232,7 @@ for count, ticker in enumerate(tickers):
 
     # 기대 성장률 미만이면 건너뜀
     if avg_future_return < EXPECTED_GROWTH_RATE:
-        print(f"  예상 : {avg_future_return:.2f}%")
+        # print(f"  예상 : {avg_future_return:.2f}%")
         continue
 
     # 결과 저장
