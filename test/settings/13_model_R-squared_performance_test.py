@@ -17,7 +17,7 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
 sys.path.append(BASE_DIR)
 
-from utils import create_multistep_dataset, fetch_stock_data, create_model_16, create_model_32, create_model_64,create_model_128, add_technical_features
+from utils import create_multistep_dataset, fetch_stock_data, add_technical_features, create_lstm_model
 
 # 시드 고정 테스트
 import numpy as np, tensorflow as tf, random
@@ -41,7 +41,7 @@ ticker_to_name = {ticker: stock.get_market_ticker_name(ticker) for ticker in tic
 today = datetime.today().strftime('%Y%m%d')
 # start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y%m%d')
 
-for i in range(4):
+for i in range(1):
     # period = DATA_COLLECTION_PERIOD + (10*i)
     # print('period : ', period)
     start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y%m%d')
@@ -89,7 +89,8 @@ for i in range(4):
             print('샘플 부족 : ', X_train.shape)
             continue
 
-        model = create_model_64((X_train.shape[1], X_train.shape[2]), PREDICTION_PERIOD)
+        model = create_lstm_model((X_train.shape[1], X_train.shape[2]), PREDICTION_PERIOD,
+                                      lstm_units=[128,64], dense_units=[64,32])
 
         # 콜백 설정
         from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
