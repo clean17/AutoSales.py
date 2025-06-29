@@ -56,6 +56,9 @@ for count, ticker in enumerate(tickers):
 
 ########################################################################
 
+    actual_prices = data['종가'].values # 종가 배열
+    last_close = actual_prices[-1]
+
     # 데이터가 부족하면 패스
     if data.empty or len(data) < 30:
         # print(f"                                                        데이터 부족 → pass")
@@ -99,8 +102,6 @@ for count, ticker in enumerate(tickers):
         continue
 
     # 최고가 대비 현재가가 50% 이상 하락한 경우 건너뜀
-    # actual_prices = data['종가'].values # 종가 배열
-    # last_close = actual_prices[-1]
     # max_close = np.max(actual_prices)
     # drop_pct = ((max_close - last_close) / max_close) * 100
     # if drop_pct >= 50:
