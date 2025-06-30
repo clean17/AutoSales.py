@@ -9,7 +9,7 @@ from sklearn.preprocessing import MinMaxScaler
 import matplotlib.pyplot as plt
 from send2trash import send2trash
 import ast
-from utils import create_lstm_model, create_multistep_dataset, fetch_stock_data, add_technical_features, get_kor_ticker_list
+from utils import create_lstm_model, create_multistep_dataset, fetch_stock_data, add_technical_features, get_kor_ticker_list, check_column_types
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.model_selection import train_test_split
 
@@ -35,8 +35,8 @@ today_us = datetime.today().strftime('%Y-%m-%d')
 start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y%m%d')
 
 # tickers = ['077970', '079160', '112610', '025540', '003530', '357880', '131970', '009450', '310210', '353200', '136150', '064350', '066575', '005880', '272290', '204270', '066570', '456040', '373220', '096770', '005490', '006650', '042700', '068240', '003280', '067160', '397030', '480370', '085660', '328130', '476040', '241710', '357780', '232140', '011170', '020180', '074600', '042000', '003350', '065350', '004490', '482630', '005420', '033100', '018880', '417200', '332570', '058970', '011790', '053800', '338220', '195870', '010950', '455900', '082740', '225570', '445090', '068760', '007070', '361610', '443060', '089850', '413640', '005850', '141080', '005380', '098460', '277810', '011780', '005810', '075580', '112040', '012510', '240810', '403870', '376900', '001740', '035420', '103140', '068270', '013990', '001450', '457190', '293580', '475150', '280360', '097950', '058820', '034220', '084370', '178320']
-# tickers = ['480370']
 tickers = get_kor_ticker_list()
+# tickers = ['480370']
 
 ticker_to_name = {ticker: stock.get_market_ticker_name(ticker) for ticker in tickers}
 
@@ -53,7 +53,8 @@ for count, ticker in enumerate(tickers):
     print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
 
     data = add_technical_features(fetch_stock_data(ticker, start_date, today))
-
+#     check_column_types(fetch_stock_data(ticker, start_date, today), ['종가', '고가', '저가', '거래량', 'PER', 'PBR']) # 타입과 shape 확인 > Series 가 나와야 한다
+#     continue
 ########################################################################
 
     actual_prices = data['종가'].values # 종가 배열
@@ -138,7 +139,7 @@ for count, ticker in enumerate(tickers):
     #     # continue
     #     pass
 
-    # 최근 3일, 2달 평균 거래량 계산, 최근 3일 거래량이 최근 2달 거래량의 80% 안되면 패스
+    # 최근 3일, 2달 평균 거래량 계산, 최근 3일 거래량이 최근 2달 거래량의 25% 안되면 패스
     recent_3_avg = data['거래량'][-3:].mean()
     recent_2months_avg = data['거래량'][-40:].mean()
     if recent_3_avg < recent_2months_avg * 0.25:
