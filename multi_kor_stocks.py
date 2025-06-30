@@ -210,7 +210,7 @@ for count, ticker in enumerate(tickers):
     # R-squared; (0=엉망, 1=완벽)
     r2 = r2_score(y_val, predictions)
     if r2 < 0.7:
-        # print(f"                                                        R-squared 0.7 미만이면 패스 : ", {r2:.2f})
+        # print(f"                                                        R-squared 0.7 미만이면 패스 : {r2:.2f}%")
         continue
 
 
@@ -222,7 +222,6 @@ for count, ticker in enumerate(tickers):
     # 종가 scaler fit (실제 데이터로)
     close_scaler = MinMaxScaler(feature_range=(0, 1))
     close_prices = data['종가'].values.reshape(-1, 1) # DataFrame에서 ‘종가’(Close Price) 컬럼의 값을 1차원 배열로 꺼냄
-    # print(close_prices)
     close_scaler.fit(close_prices) # close_prices 데이터에서 최소값/최대값을 학습(기억)함 >>  예측값(정규화된 상태)을 실제 가격 단위로 되돌릴 때 필요
 
     # 모델 예측값(future_preds)은 정규화된 값임 >> scaler로 실제 가격 단위(원래 스케일)로 되돌림 (역정규화)

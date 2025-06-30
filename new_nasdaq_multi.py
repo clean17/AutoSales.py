@@ -8,7 +8,9 @@ from datetime import datetime, timedelta
 from sklearn.preprocessing import MinMaxScaler
 import matplotlib.pyplot as plt
 from send2trash import send2trash
-from utils import create_model, create_multistep_dataset, fetch_stock_data_us, get_nasdaq_symbols, extract_stock_code_from_filenames, get_safe_ticker_list, compute_rsi, get_usd_krw_rate
+from utils import create_lstm_model, create_multistep_dataset, fetch_stock_data_us, get_nasdaq_symbols, extract_stock_code_from_filenames, get_usd_krw_rate, add_technical_features_us, check_column_types
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+from sklearn.model_selection import train_test_split
 
 # 시드 고정
 import numpy as np, tensorflow as tf, random
@@ -23,12 +25,10 @@ rsi_flag = 0
 
 PREDICTION_PERIOD = 5
 EXPECTED_GROWTH_RATE = 5
-DATA_COLLECTION_PERIOD = 200
+DATA_COLLECTION_PERIOD = 400
 LOOK_BACK = 25
 AVERAGE_VOLUME = 30000
 AVERAGE_TRADING_VALUE = 2_000_000 # 28억 쯤
-window = 20  # 이동평균 구간
-num_std = 2  # 표준편차 배수
 
 # 미국 동부 시간대 설정
 now_us = datetime.now(pytz.timezone('America/New_York'))
@@ -42,11 +42,9 @@ end_date = datetime.today().strftime('%Y-%m-%d')
 today = datetime.today().strftime('%Y%m%d')
 
 
-tickers = get_nasdaq_symbols()
-# tickers = tickers[515:]
+# tickers = get_nasdaq_symbols()
 # tickers = extract_stock_code_from_filenames(output_dir)
-
-# tickers=['RKLB']
+tickers=['RKLB']
 
 
 # 결과를 저장할 배열
@@ -55,61 +53,23 @@ results = []
 for count, ticker in enumerate(tickers):
     print(f"Processing {count+1}/{len(tickers)} : {ticker}")
 
-    data = fetch_stock_data_us(ticker, start_date_us, end_date)
-
-    if data.empty:
-        print(f"{ticker}: 데이터 없음, 건너뜀")
-        continue
-
-    #컬럼명을 명시적으로 지정해서 1차원 컬럼으로 변환
-#     data.columns = ['Open', 'High', 'Low', 'Close', 'Volume', 'PER', 'PBR']
-    # 컬럼이 멀티인덱스거나 중복명이라면
-    if isinstance(data.columns, pd.MultiIndex) or (len(data.columns) == 7 and not set(data.columns) == set(['Open', 'High', 'Low', 'Close', 'Volume', 'PER', 'PBR'])):
-        data.columns = ['Open', 'High', 'Low', 'Close', 'Volume', 'PER', 'PBR']
-
-    # 볼린저밴드
-    data['MA20'] = data['Close'].rolling(window=window).mean()
-    data['MA5'] = data['Close'].rolling(window=5).mean()
-    data['MA15'] = data['Close'].rolling(window=15).mean()
-    data['MA30'] = data['Close'].rolling(window=30).mean()
-    data['STD20'] = data['Close'].rolling(window=window).std()
-    data['UpperBand'] = data['MA20'] + (num_std * data['STD20'])
-    data['LowerBand'] = data['MA20'] - (num_std * data['STD20'])
-
-    # 데이터셋 생성
-    scaler = MinMaxScaler(feature_range=(0, 1))
-    # scaled_data = scaler.fit_transform(data.values)
-    feature_cols = ['Open', 'High', 'Low', 'Close', 'Volume', 'MA20', 'UpperBand', 'LowerBand', 'PER', 'PBR']
-
-    X_for_model = data[feature_cols].fillna(0) # 모델 feature만 NaN을 0으로
-    X_for_model = X_for_model.apply(pd.to_numeric, errors='coerce') # float64여야 함 (object라면 먼저 float 변환 필요)
-    X_for_model = X_for_model.replace([np.inf, -np.inf], 0) # # inf/-inf 값을 0으로(또는 np.nan으로) 대체
-
-    scaled_data = scaler.fit_transform(X_for_model)
-    X, Y = create_multistep_dataset(scaled_data, LOOK_BACK, PREDICTION_PERIOD)
-    if count == 0:
-        print("X.shape:", X.shape) # X.shape: (0,) 데이터가 부족해서 슬라이딩 윈도우로 샘플이 만들어지지 않음
-    # print("Y.shape:", Y.shape)
+    data = add_technical_features_us(fetch_stock_data_us(ticker, start_date_us, end_date))
+#     check_column_types(fetch_stock_data_us(ticker, start_date_us, end_date), ['Close', 'Open', 'High', 'Low', 'Volume', 'PER', 'PBR']) # 타입과 shape 확인 > Series 가 나와야 한다
+#     continue
 
     ########################################################################
 
-    # 데이터가 부족하면 건너뜀
-    if data.empty or len(data) < LOOK_BACK:
-        # print(f"                                                        데이터가 부족하여 작업을 건너뜁니다")
-        continue
+    actual_prices = data['Close'].values # 최근 종가 배열
+    last_close = actual_prices[-1]
 
-    if len(X) < 2 or len(Y) < 2:
-        print(f"                                                        데이터셋이 부족하여 작업을 건너뜁니다 (신규 상장).")
+    if data.empty or len(data) < 30:
+        # print(f"                                                        데이터 부족 → pass")
         continue
 
     # 종가가 0.0이거나 500원 미만이면 건너뜀
     last_row = data.iloc[-1]
     if last_row['Close'] == 0.0 or last_row['Close'] < 0.4:
         # print("                                                        종가가 0이거나 500원 미만이므로 작업을 건너뜁니다.")
-        continue
-
-    # 데이터가 충분한지 체크
-    if len(data) < 10:
         continue
 
     # 최근 2 주
@@ -120,18 +80,18 @@ for count, ticker in enumerate(tickers):
 #         print(f"                                                        최근 2주 중 거래대금 4억 미만 발생 → 제외")
         continue
 
-    # 일일 평균 거래량/거래대금 체크
-    average_volume = data['Volume'].mean()
-    if average_volume <= AVERAGE_VOLUME:
-#         print(f"                                                        평균 거래량({average_volume:.0f}주)이 부족하여 작업을 건너뜁니다.")
-        continue
+#     # 일일 평균 거래량/거래대금 체크
+#     average_volume = data['Volume'].mean()
+#     if average_volume <= AVERAGE_VOLUME:
+# #         print(f"                                                        평균 거래량({average_volume:.0f}주)이 부족하여 작업을 건너뜁니다.")
+#         continue
 
-    trading_value = data['Volume'] * data['Close']
-    average_trading_value = trading_value.mean()
-    if average_trading_value <= AVERAGE_TRADING_VALUE:
-        formatted_value = f"{(average_trading_value * exchangeRate) / 100_000_000:.0f}억"
-#         print(f"                                                        평균 거래액({formatted_value})이 부족하여 작업을 건너뜁니다.")
-        continue
+#     trading_value = data['Volume'] * data['Close']
+#     average_trading_value = trading_value.mean()
+#     if average_trading_value <= AVERAGE_TRADING_VALUE:
+#         formatted_value = f"{(average_trading_value * exchangeRate) / 100_000_000:.0f}억"
+# #         print(f"                                                        평균 거래액({formatted_value})이 부족하여 작업을 건너뜁니다.")
+#         continue
 
     recent_trading_value = recent_data['Volume'] * recent_data['Close']
     recent_average_trading_value = recent_trading_value.mean()
@@ -148,9 +108,6 @@ for count, ticker in enumerate(tickers):
         print(f"                                                        어느 5일 구간이든 2.8배 급등: 제외")
         continue
 
-
-    actual_prices = data['Close'].values # 최근 종가 배열
-    last_close = actual_prices[-1]
 
     # 최고가 대비 현재가 하락률 계산
     max_close = np.max(actual_prices)
@@ -178,24 +135,28 @@ for count, ticker in enumerate(tickers):
         print(f"                                                        4일 전 대비 {rate:.2f}% 하락 → 학습 제외")
         continue  # 또는 return
 
-    # 데이터가 충분한지 체크 (최소 28 영업일 필요)
-    if len(data) < 28:
-        # print(f"{ticker} 데이터가 부족하여 패스")
+#     idx_list = [-7, -14, -21, -28]
+#     pass_flag = True
+#
+#     for idx in idx_list:
+#         past_close = data['Close'].iloc[idx]
+#         change = abs(last_close / past_close - 1) * 100
+#         if change >= 5: # 기준치
+#             pass_flag = False
+#             break
+#
+#     if pass_flag:
+#         # print(f"                                                        최근 4주간 가격변동 5% 미만 → 학습 pass")
+#         continue  # 또는 return
+
+    # 최근 3일, 2달 평균 거래량 계산, 최근 3일 거래량이 최근 2달 거래량의 25% 안되면 패스
+    recent_3_avg = data['Volume'][-3:].mean()
+    recent_2months_avg = data['Volume'][-40:].mean()
+    if recent_3_avg < recent_2months_avg * 0.25:
+        temp = (recent_3_avg/recent_2months_avg * 100)
+        print(f"                                                        최근 3일의 평균거래량이 최근 2달 평균거래량의 25% 미만 → pass : {temp:.2f} %")
         continue
-
-    idx_list = [-7, -14, -21, -28]
-    pass_flag = True
-
-    for idx in idx_list:
-        past_close = data['Close'].iloc[idx]
-        change = abs(last_close / past_close - 1) * 100
-        if change >= 5: # 기준치
-            pass_flag = False
-            break
-
-    if pass_flag:
-        # print(f"                                                        최근 4주간 가격변동 5% 미만 → 학습 pass")
-        continue  # 또는 return
+        # pass
 
     ########################################################################
 
@@ -248,34 +209,83 @@ for count, ticker in enumerate(tickers):
 #         # print(f"                                                        이동평균선이 상승이 아니므로 건너뜁니다.")
 #         continue
 
-    # (xx거래일 전)의 20일선과 현재 20일선 비교
-    if data['MA20'].iloc[-1] < data['MA20'].iloc[-20]:
-        # print(f"                                                        2달 전보다 20일선이 하락해 있으면 건너뜁니다.")
-        continue
-
-    if data['MA5'].iloc[-1] < data['MA20'].iloc[-1]:
-        # print(f"                                                        5일선이 20일선 보다 낮을 경우 : 제외")
-        # continue  # 조건에 맞지 않으면 건너뜀
-        pass
+#     # (xx거래일 전)의 20일선과 현재 20일선 비교
+#     if data['MA20'].iloc[-1] < data['MA20'].iloc[-20]:
+#         # print(f"                                                        2달 전보다 20일선이 하락해 있으면 건너뜁니다.")
+#         continue
+#
+#     if data['MA5'].iloc[-1] < data['MA20'].iloc[-1]:
+#         # print(f"                                                        5일선이 20일선 보다 낮을 경우 : 제외")
+#         # continue  # 조건에 맞지 않으면 건너뜀
+#         pass
 
     ########################################################################
 
+    # 데이터셋 생성
+    scaler = MinMaxScaler(feature_range=(0, 1))
+    # scaled_data = scaler.fit_transform(data.values)
+    feature_cols = [
+        'Close', 'High', 'PBR', 'Low', 'Volume', 'RSI14', 'ma10_gap',
+    ]
+
+    X_for_model = data[feature_cols].fillna(0) # 모델 feature만 NaN을 0으로
+#     X_for_model = X_for_model.apply(pd.to_numeric, errors='coerce') # float64여야 함 (object라면 먼저 float 변환 필요)
+#     X_for_model = X_for_model.replace([np.inf, -np.inf], 0) # # inf/-inf 값을 0으로(또는 np.nan으로) 대체
+    scaled_data = scaler.fit_transform(X_for_model)
+    # 슬라이딩 윈도우로 전체 데이터셋 생성
+    X, Y = create_multistep_dataset(scaled_data, LOOK_BACK, PREDICTION_PERIOD, 0)
+    if count == 0:
+        print("X.shape:", X.shape) # X.shape: (0,) 데이터가 부족해서 슬라이딩 윈도우로 샘플이 만들어지지 않음
+    # print("Y.shape:", Y.shape)
+
+
+    # 머신러닝/딥러닝 모델 입력을 위해 학습/검증 분리
+    # 3차원 유지: (n_samples, look_back, n_features)
+    X_train, X_val, y_train, y_val = train_test_split(X, Y, test_size=0.1, shuffle=False)  # 시계열 데이터라면 shuffle=False 권장, random_state는 의미 없음(어차피 순서대로 나누니까)
+    if X_train.shape[0] < 50:
+        print("                                                        샘플 부족 : ", X_train.shape[0])
+        continue
+
     # 모델 생성 및 학습
-    model = create_model((X.shape[1], X.shape[2]), PREDICTION_PERIOD)
+    model = create_lstm_model((X_train.shape[1], X_train.shape[2]), PREDICTION_PERIOD,
+                              lstm_units=[128,64], dense_units=[64,32])
 
     # 콜백 설정
     from tensorflow.keras.callbacks import EarlyStopping
     early_stop = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
-    history = model.fit(X, Y, batch_size=8, epochs=200, validation_split=0.1, shuffle=False, verbose=0, callbacks=[early_stop])
+    # history = model.fit(X, Y, batch_size=8, epochs=200, validation_split=0.1, shuffle=False, verbose=0, callbacks=[early_stop])
+    history = model.fit(X_train, y_train, batch_size=8, epochs=200,
+                        validation_data=(X_val, y_val),
+                        shuffle=False, verbose=0, callbacks=[early_stop])
+
+    # 모델 평가
+    # val_loss = model.evaluate(X_val, y_val, verbose=1)
+    # print("Validation Loss :", val_loss)
+
+    # X_val : 검증에 쓸 여러 시계열 구간의 집합
+    # predictions : 검증셋 각 구간(윈도우)에 대해 미래 PREDICTION_PERIOD만큼의 예측치 반환
+    # shape: (검증샘플수, 예측일수)
+    predictions = model.predict(X_val, verbose=0)
+
+    # 학습이 최소한으로 되었는지 확인 후 실제 예측을 시작
+    # R-squared; (0=엉망, 1=완벽)
+    r2 = r2_score(y_val, predictions)
+    if r2 < 0.7:
+        print(f"                                                        R-squared 0.7 미만이면 패스 : {r2:.2f}%")
+        continue
+
+
+    # X_input 생성 (마지막 구간)
+    X_input = X[-1:]
+    future_preds = model.predict(X_input, verbose=0).flatten() # 1차원 벡터로 변환
+    # print('future', future_preds)
 
     # 종가 scaler fit (실제 데이터로)
-    close_scaler = MinMaxScaler()
+    close_scaler = MinMaxScaler(feature_range=(0, 1))
     close_prices = data['Close'].values.reshape(-1, 1)
     close_scaler.fit(close_prices)
 
-    # X_input 생성 (마지막 구간)
-    X_input = scaled_data[-LOOK_BACK:].reshape(1, LOOK_BACK, scaled_data.shape[1])
-    future_preds = model.predict(X_input, verbose=0).flatten()
+    # 모델 예측값(future_preds)은 정규화된 값임 >> scaler로 실제 가격 단위(원래 스케일)로 되돌림 (역정규화)
     predicted_prices = close_scaler.inverse_transform(future_preds.reshape(-1, 1)).flatten() # (PREDICTION_PERIOD, )
 
     # 날짜 처리
