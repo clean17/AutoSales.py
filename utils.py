@@ -321,6 +321,9 @@ def add_technical_features(data, window=20, num_std=2):
 
 def add_technical_features_us(data, window=20, num_std=2):
 
+    for col in ['Close', 'UpperBand', 'LowerBand']:
+        if isinstance(data[col], pd.DataFrame):
+            data[col] = data[col].iloc[:, 0]
     # RSI (14일)
     data['RSI14'] = compute_rsi(data['Close'])  # 사전에 정의 필요
 
@@ -354,3 +357,7 @@ def add_technical_features_us(data, window=20, num_std=2):
     data['ma10_gap'] = (data['Close'] - data['MA10']) / data['MA10']
 
     return data
+
+def check_column_types(data, columns):
+    for col in columns:
+        print(f"[{col}] type: {type(data[col])}, shape: {data[col].shape}")
