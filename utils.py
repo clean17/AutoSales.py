@@ -125,6 +125,17 @@ def fetch_stock_data_us(ticker, fromdate, todate):
     if stock_data.empty:
         return pd.DataFrame()
 
+    # 컬럼 구조 확인
+#     print("[DEBUG] stock_data.columns:", stock_data.columns)
+
+    # MultiIndex 컬럼일 경우 평탄화
+    if isinstance(stock_data.columns, pd.MultiIndex):
+        # 어떤 레벨인지 확인 후 droplevel
+        if ticker in stock_data.columns.get_level_values(1):
+            stock_data.columns = stock_data.columns.droplevel(1)
+        elif ticker in stock_data.columns.get_level_values(0):
+            stock_data.columns = stock_data.columns.droplevel(0)
+
     # PER/PBR 정보 try-except로 예외처리
     per_value, pbr_value = 0, 0
     try:
@@ -133,12 +144,11 @@ def fetch_stock_data_us(ticker, fromdate, todate):
         pbr_value = stock_info.get('priceToBook', 0)
     except Exception as e:
         print(f"[{ticker}] info 조회 오류: {e}")
-        # PER/PBR을 0으로 유지
 
-    # 주식 데이터에 PER/PBR 컬럼 추가
     stock_data['PER'] = per_value
     stock_data['PBR'] = pbr_value
 
+    # 이제 컬럼명만 남겼으니 정상적으로 슬라이싱 가능
     stock_data = stock_data[['Open', 'High', 'Low', 'Close', 'Volume', 'PER', 'PBR']].fillna(0)
     return stock_data
 
@@ -321,9 +331,6 @@ def add_technical_features(data, window=20, num_std=2):
 
 def add_technical_features_us(data, window=20, num_std=2):
 
-    for col in ['Close', 'UpperBand', 'LowerBand']:
-        if isinstance(data[col], pd.DataFrame):
-            data[col] = data[col].iloc[:, 0]
     # RSI (14일)
     data['RSI14'] = compute_rsi(data['Close'])  # 사전에 정의 필요
 
@@ -343,7 +350,7 @@ def add_technical_features_us(data, window=20, num_std=2):
     data['MA20_slope'] = data['MA10'].diff()
 
     # 거래량 증감률
-    data['Volume_change'] = data['Volumne'].pct_change().replace([np.inf, -np.inf], 0).fillna(0)
+    data['Volume_change'] = data['Volume'].pct_change().replace([np.inf, -np.inf], 0).fillna(0)
 
     # 당일 변동폭 (고가-저가 비율)
     data['day_range_pct'] = (data['High'] - data['Low']) / (data['Low'] + 1e-9)
