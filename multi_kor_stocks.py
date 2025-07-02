@@ -156,6 +156,18 @@ for count, ticker in enumerate(tickers):
         continue
         # pass
 
+    # 5일선이 너무 하락하면
+    ma5_today = data['MA5'].iloc[-1]
+    ma5_yesterday = data['MA5'].iloc[-2]
+
+    # 변화율 계산 (퍼센트로 보려면 * 100)
+    change_rate = (ma5_today - ma5_yesterday) / ma5_yesterday
+    if change_rate * 100 < -1.7
+        # print(f"어제 5일선의 변화율: {change_rate:.5f}")  # 소수점 5자리
+        print(f"                                                        어제 5일선의 변화율: {change_rate * 100:.3f}% → pass")
+        continue
+
+
 ########################################################################
 
 
