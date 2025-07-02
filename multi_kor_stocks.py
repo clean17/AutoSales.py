@@ -106,24 +106,24 @@ for count, ticker in enumerate(tickers):
     # max_close = np.max(actual_prices)
     # drop_pct = ((max_close - last_close) / max_close) * 100
     # if drop_pct >= 50:
-    #     # print(f"                                                        최고가 대비 현재가가 50% 이상 하락한 경우 → pass : {drop_pct:.2f} %")
+    #     # print(f"                                                        최고가 대비 현재가가 50% 이상 하락한 경우 → pass : {drop_pct:.2f}%")
     #     # continue
     #     pass
 
     # 모든 4일 연속 구간에서 첫날 대비 마지막날 xx% 이상 급등하면 패스
-    window_start = actual_prices[-10:-3]   # 0 ~ N-4
-    window_end = actual_prices[-7:]      # 3 ~ N-1
-    ratio = window_end / window_start   # numpy, pandas Series/DataFrame만 벡터화 연산 지원, ratio는 결과 리스트
-    if np.any(ratio >= 1.6):
-        print(f"                                                        최근 4일 연속 구간에서 첫날 대비 60% 이상 상승 → pass")
-        continue
+    # window_start = actual_prices[-10:-3]   # 0 ~ N-4
+    # window_end = actual_prices[-7:]      # 3 ~ N-1
+    # ratio = window_end / window_start   # numpy, pandas Series/DataFrame만 벡터화 연산 지원, ratio는 결과 리스트
+    # if np.any(ratio >= 1.6):
+    #     print(f"                                                        최근 4일 연속 구간에서 첫날 대비 60% 이상 상승 : {ratio:.2f}% → pass")
+    #     continue
 
     # 현재 종가가 4일 전에 비해서 크게 하락하면 패스
-    close_4days_ago = data['종가'].iloc[-5]
-    rate = (last_close / close_4days_ago - 1) * 100
-    if rate <= -18:
-        print(f"                                                        4일 전 대비 {rate:.2f}% 하락 → pass")
-        continue  # 또는 return
+    # close_4days_ago = data['종가'].iloc[-5]
+    # rate = (last_close / close_4days_ago - 1) * 100
+    # if rate <= -18:
+    #     print(f"                                                        4일 전 대비 {rate:.2f}% 하락 → pass")
+    #     continue  # 또는 return
 
     # # 최근 한달 동안의 변동률이 5%가 한번도 안되면 패스
     # idx_list = [-5, -10, -15, -20]
@@ -142,19 +142,19 @@ for count, ticker in enumerate(tickers):
     # 최근 3일, 2달 평균 거래량 계산, 최근 3일 거래량이 최근 2달 거래량의 25% 안되면 패스
     recent_3_avg = data['거래량'][-3:].mean()
     recent_2months_avg = data['거래량'][-40:].mean()
-    if recent_3_avg < recent_2months_avg * 0.25:
+    if recent_3_avg < recent_2months_avg * 0.20:
         temp = (recent_3_avg/recent_2months_avg * 100)
-        print(f"                                                        최근 3일의 평균거래량이 최근 2달 평균거래량의 25% 미만 → pass : {temp:.2f} %")
+        print(f"                                                        최근 3일의 평균거래량이 최근 2달 평균거래량의 20% 미만 → pass : {temp:.2f}%")
         continue
         # pass
 
 
-    # # 현재 5일선이 20일선보다 낮으면서 하락중이면 패스
-    # ma_angle_5 = data['MA5'].iloc[-1] - data['MA5'].iloc[-2]
-    # if data['MA5'].iloc[-1] < data['MA20'].iloc[-1] and ma_angle_5 < 0:
-    #     # print(f"                                                        5일선이 20일선 보다 낮을 경우 → pass")
-    #     # continue
-    #     pass
+    # 현재 5일선이 20일선보다 낮으면서 하락중이면 패스
+    ma_angle_5 = data['MA5'].iloc[-1] - data['MA5'].iloc[-2]
+    if data['MA5'].iloc[-1] < data['MA20'].iloc[-1] and ma_angle_5 < 0:
+        # print(f"                                                        5일선이 20일선 보다 낮을 경우 → pass")
+        continue
+        # pass
 
 ########################################################################
 
