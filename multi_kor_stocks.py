@@ -142,9 +142,9 @@ for count, ticker in enumerate(tickers):
     # 최근 3일, 2달 평균 거래량 계산, 최근 3일 거래량이 최근 2달 거래량의 25% 안되면 패스
     recent_3_avg = data['거래량'][-3:].mean()
     recent_2months_avg = data['거래량'][-40:].mean()
-    if recent_3_avg < recent_2months_avg * 0.20:
+    if recent_3_avg < recent_2months_avg * 0.15:
         temp = (recent_3_avg/recent_2months_avg * 100)
-        print(f"                                                        최근 3일의 평균거래량이 최근 2달 평균거래량의 20% 미만 → pass : {temp:.2f}%")
+        # print(f"                                                        최근 3일의 평균거래량이 최근 2달 평균거래량의 15% 미만 → pass : {temp:.2f}%")
         continue
         # pass
 
@@ -162,9 +162,9 @@ for count, ticker in enumerate(tickers):
 
     # 변화율 계산 (퍼센트로 보려면 * 100)
     change_rate = (ma5_today - ma5_yesterday) / ma5_yesterday
-    if change_rate * 100 < -1.7
+    if change_rate * 100 < -4:
         # print(f"어제 5일선의 변화율: {change_rate:.5f}")  # 소수점 5자리
-        print(f"                                                        어제 5일선의 변화율: {change_rate * 100:.3f}% → pass")
+        print(f"                                                        어제 5일선의 변화율: {change_rate * 100:.2f}% → pass")
         continue
 
 
