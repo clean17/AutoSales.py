@@ -70,9 +70,9 @@ for i in range(1):
         # 데이터 스케일링
         scaler = MinMaxScaler(feature_range=(0, 1))
         feature_cols = [
-            '종가', '고가', 'PBR', '저가',
-            '거래량', 'RSI14',
-            'ma10_gap',
+            '종가', '고가', 'PBR', '저가', '거래량',
+#             'RSI14',
+#             'ma10_gap',
         ]
         # feature_cols = [
         #     '종가', '고가', '저가', '거래량'

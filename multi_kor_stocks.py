@@ -26,7 +26,7 @@ os.makedirs(output_dir, exist_ok=True)
 PREDICTION_PERIOD = 3
 LOOK_BACK = 15
 AVERAGE_VOLUME = 25000 # 평균거래량
-AVERAGE_TRADING_VALUE = 3_000_000_000 # 평균거래대금 30억
+AVERAGE_TRADING_VALUE = 2_000_000_000 # 평균거래대금 30억
 EXPECTED_GROWTH_RATE = 5
 DATA_COLLECTION_PERIOD = 400 # 샘플 수 = 68(100일 기준) - 20 - 4 + 1 = 45
 
@@ -75,7 +75,7 @@ for count, ticker in enumerate(tickers):
     month_data = data.tail(20)
     month_trading_value = month_data['거래량'] * month_data['종가']
     # 하루라도 거래대금이 4억 미만이 있으면 제외
-    if (month_trading_value < 400_000_000).any():
+    if (month_trading_value < 100_000_000).any():
         # print(f"                                                        최근 4주 중 거래대금 4억 미만 발생 → pass")
         continue
 
@@ -139,7 +139,7 @@ for count, ticker in enumerate(tickers):
     #     # continue
     #     pass
 
-    # 최근 3일, 2달 평균 거래량 계산, 최근 3일 거래량이 최근 2달 거래량의 25% 안되면 패스
+    # 최근 3일, 2달 평균 거래량 계산, 최근 3일 거래량이 최근 2달 거래량의 15% 안되면 패스
     recent_3_avg = data['거래량'][-3:].mean()
     recent_2months_avg = data['거래량'][-40:].mean()
     if recent_3_avg < recent_2months_avg * 0.15:
@@ -177,8 +177,11 @@ for count, ticker in enumerate(tickers):
     # feature_cols = [
     #     '종가', '고가', '저가', '거래량',
     # ]
+    # '종가', '고가', 'PBR', '저가', '거래량' > 0.43
+    # '종가', '고가', 'PBR', '저가', '거래량', 'ma10_gap' > 0.21
     feature_cols = [
-        '종가', '고가', 'PBR', '저가', '거래량', 'RSI14', 'ma10_gap',
+        '종가', '고가', 'PBR', '저가', '거래량',
+#         'RSI14', 'ma10_gap',
     ]
 
     X_for_model = data[feature_cols].fillna(0) # 모델 feature만 NaN을 0으로
@@ -221,7 +224,7 @@ for count, ticker in enumerate(tickers):
     # 학습이 최소한으로 되었는지 확인 후 실제 예측을 시작
     # R-squared; (0=엉망, 1=완벽)
     r2 = r2_score(y_val, predictions)
-    if r2 < 0.7:
+    if r2 < 0.75:
         # print(f"                                                        R-squared 0.7 미만이면 패스 : {r2:.2f}%")
         continue
 

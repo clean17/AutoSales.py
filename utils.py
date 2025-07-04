@@ -305,7 +305,7 @@ def add_technical_features(data, window=20, num_std=2):
     data['MA10'] = data['종가'].rolling(window=10).mean()
     data['MA5_slope'] = data['MA5'].diff()
     data['MA10_slope'] = data['MA10'].diff()
-    data['MA20_slope'] = data['MA10'].diff()
+    data['MA20_slope'] = data['MA20'].diff()
 
     # 거래량 증감률
     data['Volume_change'] = data['거래량'].pct_change().replace([np.inf, -np.inf], 0).fillna(0)
@@ -347,7 +347,7 @@ def add_technical_features_us(data, window=20, num_std=2):
     data['MA10'] = data['Close'].rolling(window=10).mean()
     data['MA5_slope'] = data['MA5'].diff()
     data['MA10_slope'] = data['MA10'].diff()
-    data['MA20_slope'] = data['MA10'].diff()
+    data['MA20_slope'] = data['MA20'].diff()
 
     # 거래량 증감률
     data['Volume_change'] = data['Volume'].pct_change().replace([np.inf, -np.inf], 0).fillna(0)
