@@ -19,16 +19,21 @@ tf.random.set_seed(42)
 random.seed(42)
 
 exchangeRate = get_usd_krw_rate()
+if exchangeRate is None:
+    print('#######################   exchangeRate is None   #######################')
+else:
+    print(f'#######################   exchangeRate is {exchangeRate}   #######################')
 output_dir = 'D:\\sp500'
 os.makedirs(output_dir, exist_ok=True)
 rsi_flag = 0
 
-PREDICTION_PERIOD = 5
+PREDICTION_PERIOD = 3
 EXPECTED_GROWTH_RATE = 5
 DATA_COLLECTION_PERIOD = 400
-LOOK_BACK = 25
+LOOK_BACK = 15
 AVERAGE_VOLUME = 30000
 AVERAGE_TRADING_VALUE = 2_000_000 # 28억 쯤
+KR_AVERAGE_TRADING_VALUE = 2_000_000_000
 
 # 미국 동부 시간대 설정
 now_us = datetime.now(pytz.timezone('America/New_York'))
@@ -42,18 +47,24 @@ end_date = datetime.today().strftime('%Y-%m-%d')
 today = datetime.today().strftime('%Y%m%d')
 
 
-# tickers = get_nasdaq_symbols()
 # tickers = extract_stock_code_from_filenames(output_dir)
-tickers=['RKLB']
+tickers = get_nasdaq_symbols()
+# tickers=['RKLB']
 
 
 # 결과를 저장할 배열
 results = []
+is_first_flag = True
 
 for count, ticker in enumerate(tickers):
     print(f"Processing {count+1}/{len(tickers)} : {ticker}")
 
-    data = add_technical_features_us(fetch_stock_data_us(ticker, start_date_us, end_date))
+    data = fetch_stock_data_us(ticker, start_date_us, end_date)
+    if data is None or 'Close' not in data.columns or data.empty:
+        print(f"{ticker}: 데이터가 비었거나 'Close' 컬럼이 없습니다. pass.")
+        continue
+
+    data = add_technical_features_us(data)
 #     check_column_types(fetch_stock_data_us(ticker, start_date_us, end_date), ['Close', 'Open', 'High', 'Low', 'Volume', 'PER', 'PBR']) # 타입과 shape 확인 > Series 가 나와야 한다
 #     continue
 
@@ -76,26 +87,12 @@ for count, ticker in enumerate(tickers):
     recent_data = data.tail(10)
     recent_trading_value = recent_data['Volume'] * recent_data['Close']     # 최근 2주 거래대금 리스트
     # 하루라도 4억 미만이 있으면 제외
-    if (recent_trading_value < 300_000).any(): # 30만 달러 === 4억
-#         print(f"                                                        최근 2주 중 거래대금 4억 미만 발생 → 제외")
+    if (recent_trading_value * exchangeRate < 100_000_000).any():
+        # print(f"                                                        최근 2주 중 거래대금 4억 미만 발생 → 제외")
         continue
 
-#     # 일일 평균 거래량/거래대금 체크
-#     average_volume = data['Volume'].mean()
-#     if average_volume <= AVERAGE_VOLUME:
-# #         print(f"                                                        평균 거래량({average_volume:.0f}주)이 부족하여 작업을 건너뜁니다.")
-#         continue
-
-#     trading_value = data['Volume'] * data['Close']
-#     average_trading_value = trading_value.mean()
-#     if average_trading_value <= AVERAGE_TRADING_VALUE:
-#         formatted_value = f"{(average_trading_value * exchangeRate) / 100_000_000:.0f}억"
-# #         print(f"                                                        평균 거래액({formatted_value})이 부족하여 작업을 건너뜁니다.")
-#         continue
-
-    recent_trading_value = recent_data['Volume'] * recent_data['Close']
     recent_average_trading_value = recent_trading_value.mean()
-    if recent_average_trading_value <= AVERAGE_TRADING_VALUE:
+    if recent_average_trading_value * exchangeRate <= KR_AVERAGE_TRADING_VALUE:
         formatted_recent_value = f"{(recent_average_trading_value * exchangeRate)/ 100_000_000:.0f}억"
         print(f"                                                        최근 2주 평균 거래액({formatted_recent_value})이 부족하여 작업을 건너뜁니다.")
         continue
@@ -109,115 +106,59 @@ for count, ticker in enumerate(tickers):
         continue
 
 
-    # 최고가 대비 현재가 하락률 계산
-    max_close = np.max(actual_prices)
-    drop_pct = ((max_close - last_close) / max_close) * 100
+    # # 최고가 대비 현재가 하락률 계산
+    # max_close = np.max(actual_prices)
+    # drop_pct = ((max_close - last_close) / max_close) * 100
+    #
+    # # 40% 이상 하락한 경우 건너뜀
+    # if drop_pct >= 50:
+    #     continue
 
-    # 40% 이상 하락한 경우 건너뜀
-    if drop_pct >= 50:
-        continue
+    # # 모든 4일 연속 구간에서 첫날 대비 마지막날 xx% 이상 급등
+    # window_start = actual_prices[:-3]   # 0 ~ N-4
+    # window_end = actual_prices[3:]      # 3 ~ N-1
+    # ratio = window_end / window_start   # numpy, pandas Series/DataFrame만 벡터화 연산 지원, ratio는 결과 리스트
+    #
+    # if np.any(ratio >= 1.6):
+    #     print(f"                                                        어떤 4일 연속 구간에서 첫날 대비 60% 이상 상승: 제외")
+    #     continue
+    #
+    # last_close = data['Close'].iloc[-1]
+    # close_4days_ago = data['Close'].iloc[-5]
+    #
+    # rate = (last_close / close_4days_ago - 1) * 100
+    #
+    # if rate <= -18:
+    #     print(f"                                                        4일 전 대비 {rate:.2f}% 하락 → 학습 제외")
+    #     continue  # 또는 return
 
-    # 모든 4일 연속 구간에서 첫날 대비 마지막날 xx% 이상 급등
-    window_start = actual_prices[:-3]   # 0 ~ N-4
-    window_end = actual_prices[3:]      # 3 ~ N-1
-    ratio = window_end / window_start   # numpy, pandas Series/DataFrame만 벡터화 연산 지원, ratio는 결과 리스트
-
-    if np.any(ratio >= 1.6):
-        print(f"                                                        어떤 4일 연속 구간에서 첫날 대비 60% 이상 상승: 제외")
-        continue
-
-    last_close = data['Close'].iloc[-1]
-    close_4days_ago = data['Close'].iloc[-5]
-
-    rate = (last_close / close_4days_ago - 1) * 100
-
-    if rate <= -18:
-        print(f"                                                        4일 전 대비 {rate:.2f}% 하락 → 학습 제외")
-        continue  # 또는 return
-
-#     idx_list = [-7, -14, -21, -28]
-#     pass_flag = True
-#
-#     for idx in idx_list:
-#         past_close = data['Close'].iloc[idx]
-#         change = abs(last_close / past_close - 1) * 100
-#         if change >= 5: # 기준치
-#             pass_flag = False
-#             break
-#
-#     if pass_flag:
-#         # print(f"                                                        최근 4주간 가격변동 5% 미만 → 학습 pass")
-#         continue  # 또는 return
 
     # 최근 3일, 2달 평균 거래량 계산, 최근 3일 거래량이 최근 2달 거래량의 25% 안되면 패스
     recent_3_avg = data['Volume'][-3:].mean()
     recent_2months_avg = data['Volume'][-40:].mean()
-    if recent_3_avg < recent_2months_avg * 0.25:
+    if recent_3_avg < recent_2months_avg * 0.15:
         temp = (recent_3_avg/recent_2months_avg * 100)
-        print(f"                                                        최근 3일의 평균거래량이 최근 2달 평균거래량의 25% 미만 → pass : {temp:.2f} %")
+        # print(f"                                                        최근 3일의 평균거래량이 최근 2달 평균거래량의 25% 미만 → pass : {temp:.2f} %")
+        # continue
+        pass
+
+    # 현재 5일선이 20일선보다 낮으면서 하락중이면 패스
+    ma_angle_5 = data['MA5'].iloc[-1] - data['MA5'].iloc[-2]
+    if data['MA5'].iloc[-1] < data['MA20'].iloc[-1] and ma_angle_5 < 0:
+        print(f"                                                        5일선이 20일선 보다 낮을 경우 → pass")
         continue
         # pass
 
-    ########################################################################
+    # 5일선이 너무 하락하면
+    ma5_today = data['MA5'].iloc[-1]
+    ma5_yesterday = data['MA5'].iloc[-2]
 
-    # 현재가
-#     last_close = data['Close'].iloc[-1]
-#     upper = data['UpperBand'].iloc[-1]
-#     lower = data['LowerBand'].iloc[-1]
-#     center = data['MA20'].iloc[-1]
-
-    # 매수/매도 조건
-    # if last_close <= lower:
-    #     print("                                                        과매도, 매수 신호!")
-    #     elif last_close >= upper:
-    #         print("과매수, 매도 신호!")
-    #     else:
-    #         print("중립(관망)")
-
-
-    # 이동평균선이 하락중이면 제외 (2가지 조건 비교)
-#     ma_angle = data['MA30'].iloc[-1] - data['MA30'].iloc[-2] # 오늘의 이동평균선 방향
-# #     ma_angle = data['MA20'].iloc[-1] - data['MA20'].iloc[-2] # 오늘의 이동평균선 방향
-#
-#     if ma_angle > 0:
-#         # 상승 중인 종목만 예측/추천
-#         pass
-#     else:
-#         # 하락/횡보면 건너뜀
-#         # print(f"                                                        이동평균선이 상승이 아니므로 건너뜁니다.")
-#         continue
-
-
-
-#     # 이동평균선이 하락중이면 제외
-#     ma_angle_5 = data['MA5'].iloc[-1] - data['MA5'].iloc[-2]
-#     ma_angle_15 = data['MA15'].iloc[-1] - data['MA15'].iloc[-2]
-#     ma_angle_20 = data['MA20'].iloc[-1] - data['MA20'].iloc[-2]
-#
-#     ma_cnt = 0
-#     if ma_angle_5 > 0:
-#         ma_cnt = ma_cnt + 1
-#     if ma_angle_15 > 0:
-#         ma_cnt = ma_cnt + 1
-#     if ma_angle_20 > 0:
-#         ma_cnt = ma_cnt + 1
-#     if ma_cnt >= 2:
-#         # 상승 중인 종목만 예측/추천
-#         pass
-#     else:
-#         # 하락/횡보면 건너뜀
-#         # print(f"                                                        이동평균선이 상승이 아니므로 건너뜁니다.")
-#         continue
-
-#     # (xx거래일 전)의 20일선과 현재 20일선 비교
-#     if data['MA20'].iloc[-1] < data['MA20'].iloc[-20]:
-#         # print(f"                                                        2달 전보다 20일선이 하락해 있으면 건너뜁니다.")
-#         continue
-#
-#     if data['MA5'].iloc[-1] < data['MA20'].iloc[-1]:
-#         # print(f"                                                        5일선이 20일선 보다 낮을 경우 : 제외")
-#         # continue  # 조건에 맞지 않으면 건너뜀
-#         pass
+    # 변화율 계산 (퍼센트로 보려면 * 100)
+    change_rate = (ma5_today - ma5_yesterday) / ma5_yesterday
+    if change_rate * 100 < -4:
+        # print(f"어제 5일선의 변화율: {change_rate:.5f}")  # 소수점 5자리
+        print(f"                                                        어제 5일선의 변화율: {change_rate * 100:.2f}% → pass")
+        continue
 
     ########################################################################
 
@@ -225,7 +166,9 @@ for count, ticker in enumerate(tickers):
     scaler = MinMaxScaler(feature_range=(0, 1))
     # scaled_data = scaler.fit_transform(data.values)
     feature_cols = [
-        'Close', 'High', 'PBR', 'Low', 'Volume', 'RSI14', 'ma10_gap',
+        'Close', 'High', 'PBR', 'Low', 'Volume',
+        # 'RSI14',
+        'ma10_gap',
     ]
 
     X_for_model = data[feature_cols].fillna(0) # 모델 feature만 NaN을 0으로
@@ -234,10 +177,14 @@ for count, ticker in enumerate(tickers):
     scaled_data = scaler.fit_transform(X_for_model)
     # 슬라이딩 윈도우로 전체 데이터셋 생성
     X, Y = create_multistep_dataset(scaled_data, LOOK_BACK, PREDICTION_PERIOD, 0)
-    if count == 0:
+    if is_first_flag:
+        is_first_flag = False
         print("X.shape:", X.shape) # X.shape: (0,) 데이터가 부족해서 슬라이딩 윈도우로 샘플이 만들어지지 않음
     # print("Y.shape:", Y.shape)
 
+    if X.shape[0] < 50:
+        print("                                                        샘플 부족 : ", X.shape[0])
+        continue
 
     # 머신러닝/딥러닝 모델 입력을 위해 학습/검증 분리
     # 3차원 유지: (n_samples, look_back, n_features)

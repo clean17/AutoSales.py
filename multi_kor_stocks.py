@@ -181,7 +181,8 @@ for count, ticker in enumerate(tickers):
     # '종가', '고가', 'PBR', '저가', '거래량', 'ma10_gap' > 0.21
     feature_cols = [
         '종가', '고가', 'PBR', '저가', '거래량',
-#         'RSI14', 'ma10_gap',
+        # 'RSI14',
+        'ma10_gap',
     ]
 
     X_for_model = data[feature_cols].fillna(0) # 모델 feature만 NaN을 0으로
@@ -224,7 +225,8 @@ for count, ticker in enumerate(tickers):
     # 학습이 최소한으로 되었는지 확인 후 실제 예측을 시작
     # R-squared; (0=엉망, 1=완벽)
     r2 = r2_score(y_val, predictions)
-    if r2 < 0.75:
+    # print(f"                                                        R-squared 0.7 미만이면 패스 : {r2:.2f}%")
+    if r2 < 0.70:
         # print(f"                                                        R-squared 0.7 미만이면 패스 : {r2:.2f}%")
         continue
 
