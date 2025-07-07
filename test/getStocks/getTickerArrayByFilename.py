@@ -2,12 +2,15 @@ import os
 import re
 from datetime import datetime
 
-def extract_numbers_from_filenames(directory):
+def extract_numbers_from_filenames(directory, isToday):
     numbers = []
     today = datetime.today().strftime('%Y%m%d')
 
     for filename in os.listdir(directory):
-        if filename.startswith(today) and filename.endswith('.png'):
+        if filename.endswith('.png'):
+            if isToday:
+                if not filename.startswith(today):
+                    continue
             # [ 앞의 6자리 숫자 추출
             # match = re.search(r'\s(\d{6})\s*\[', filename)
 
@@ -40,7 +43,7 @@ def extract_stock_code_from_filenames(directory):
 
 
 directory = r'D:\kospi_stocks'  # 역슬래시 r''로 표기
-extracted_numbers = extract_numbers_from_filenames(directory)
+extracted_numbers = extract_numbers_from_filenames(directory, False)
 print("Extracted numbers:", extracted_numbers)
 
 

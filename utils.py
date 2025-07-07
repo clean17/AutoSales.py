@@ -241,6 +241,24 @@ def compute_rsi(prices, period=14):
     rs = gain / (loss + 1e-9)
     return 100 - (100 / (1 + rs))
 
+def extract_numbers_from_filenames(directory, isToday):
+    numbers = []
+    today = datetime.today().strftime('%Y%m%d')
+
+    for filename in os.listdir(directory):
+        if filename.endswith('.png'):
+            if isToday:
+                if not filename.startswith(today):
+                    continue
+            # [ 앞의 6자리 숫자 추출
+            # match = re.search(r'\s(\d{6})\s*\[', filename)
+
+            # 마지막 대괄호 안의 6자리 숫자 추출
+            match = re.search(r'\[(\d{6})\]\.png$', filename)
+            if match:
+                numbers.append(match.group(1))
+    return numbers
+
 def extract_stock_code_from_filenames(directory):
     stock_codes = []
 
