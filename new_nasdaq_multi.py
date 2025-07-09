@@ -31,9 +31,7 @@ PREDICTION_PERIOD = 3
 EXPECTED_GROWTH_RATE = 5
 DATA_COLLECTION_PERIOD = 400
 LOOK_BACK = 15
-AVERAGE_VOLUME = 30000
-AVERAGE_TRADING_VALUE = 2_000_000 # 28억 쯤
-KR_AVERAGE_TRADING_VALUE = 2_000_000_000
+KR_AVERAGE_TRADING_VALUE = 3_000_000_000
 
 # 미국 동부 시간대 설정
 now_us = datetime.now(pytz.timezone('America/New_York'))
@@ -133,14 +131,14 @@ for count, ticker in enumerate(tickers):
     #     continue  # 또는 return
 
 
-    # 최근 3일, 2달 평균 거래량 계산, 최근 3일 거래량이 최근 2달 거래량의 25% 안되면 패스
-    recent_3_avg = data['Volume'][-3:].mean()
-    recent_2months_avg = data['Volume'][-40:].mean()
-    if recent_3_avg < recent_2months_avg * 0.15:
-        temp = (recent_3_avg/recent_2months_avg * 100)
-        # print(f"                                                        최근 3일의 평균거래량이 최근 2달 평균거래량의 25% 미만 → pass : {temp:.2f} %")
-        # continue
-        pass
+    # # 최근 3일, 2달 평균 거래량 계산, 최근 3일 거래량이 최근 2달 거래량의 25% 안되면 패스
+    # recent_3_avg = data['Volume'][-3:].mean()
+    # recent_2months_avg = data['Volume'][-40:].mean()
+    # if recent_3_avg < recent_2months_avg * 0.15:
+    #     temp = (recent_3_avg/recent_2months_avg * 100)
+    #     # print(f"                                                        최근 3일의 평균거래량이 최근 2달 평균거래량의 25% 미만 → pass : {temp:.2f} %")
+    #     # continue
+    #     pass
 
     # 현재 5일선이 20일선보다 낮으면서 하락중이면 패스
     ma_angle_5 = data['MA5'].iloc[-1] - data['MA5'].iloc[-2]
@@ -217,8 +215,8 @@ for count, ticker in enumerate(tickers):
     # 학습이 최소한으로 되었는지 확인 후 실제 예측을 시작
     # R-squared; (0=엉망, 1=완벽)
     r2 = r2_score(y_val, predictions)
-    if r2 < 0.7:
-        print(f"                                                        R-squared 0.7 미만이면 패스 : {r2:.2f}%")
+    if r2 < 0.65:
+        # print(f"                                                        R-squared 0.7 미만이면 패스 : {r2:.2f}%")
         continue
 
 
@@ -269,6 +267,11 @@ for count, ticker in enumerate(tickers):
     data_plot = data.copy()
     data_plot['date_str'] = data_plot.index.strftime('%Y-%m-%d')
 
+    # data_plot.index가 DatetimeIndex라고 가정
+    three_months_ago = data_plot.index.max() - pd.DateOffset(months=6)
+    data_plot_recent = data_plot[data_plot.index >= three_months_ago].copy()
+    recent_n = len(data_plot_recent)
+
     # 3. 미래 날짜도 문자열로 변환
     future_dates_str = pd.to_datetime(future_dates).strftime('%Y-%m-%d')
 
@@ -277,25 +280,25 @@ for count, ticker in enumerate(tickers):
 
     # --- 상단: 가격 + 볼린저밴드 + 예측 ---
     # 실제 가격
-    ax1.plot(data_plot['date_str'], actual_prices, label='실제 가격', marker='s', markersize=6, markeredgecolor='white')
+    ax1.plot(data_plot_recent['date_str'], actual_prices[-recent_n:], label='실제 가격', marker='s', markersize=6, markeredgecolor='white')
 
     # 예측 가격 (미래 날짜)
     ax1.plot(future_dates_str, predicted_prices, label='예측 가격', linestyle='--', marker='s', markersize=7, markeredgecolor='white', color='tomato')
 
     # 이동평균, 볼린저밴드, 영역 채우기
-    if all(x in data_plot.columns for x in ['MA20', 'UpperBand', 'LowerBand']):
-        ax1.plot(data_plot['date_str'], data_plot['MA20'], label='20일 이동평균선', alpha=0.8)
-        if 'MA5' in data_plot.columns:
-            ax1.plot(data_plot['date_str'], data_plot['MA5'], label='5일 이동평균선', alpha=0.8)
-        ax1.plot(data_plot['date_str'], data_plot['UpperBand'], label='볼린저밴드 상한선', linestyle='--', alpha=0.8)
-        ax1.plot(data_plot['date_str'], data_plot['LowerBand'], label='볼린저밴드 하한선', linestyle='--', alpha=0.8)
-        ax1.fill_between(data_plot['date_str'], data_plot['UpperBand'], data_plot['LowerBand'], color='gray', alpha=0.18)
+    if all(x in data_plot_recent.columns for x in ['MA20', 'UpperBand', 'LowerBand']):
+        ax1.plot(data_plot_recent['date_str'], data_plot_recent['MA20'], label='20일 이동평균선', alpha=0.8)
+        if 'MA5' in data_plot_recent.columns:
+            ax1.plot(data_plot_recent['date_str'], data_plot_recent['MA5'], label='5일 이동평균선', alpha=0.8)
+        ax1.plot(data_plot_recent['date_str'], data_plot_recent['UpperBand'], label='볼린저밴드 상한선', linestyle='--', alpha=0.8)
+        ax1.plot(data_plot_recent['date_str'], data_plot_recent['LowerBand'], label='볼린저밴드 하한선', linestyle='--', alpha=0.8)
+        ax1.fill_between(data_plot_recent['date_str'], data_plot_recent['UpperBand'], data_plot_recent['LowerBand'], color='gray', alpha=0.18)
 
     # 마지막 실제값과 첫 번째 예측값을 점선으로 연결
     ax1.plot(
-        [data_plot['date_str'].iloc[-1], future_dates_str[0]],
-        [actual_prices[-1], predicted_prices[0]],
-        linestyle='dashed', color='gray', linewidth=1.5
+        [data_plot_recent['date_str'].iloc[-1], future_dates_str[0]],
+        [actual_prices[-recent_n:][-1], predicted_prices[0]],
+        linestyle='dashed', color='tomato', linewidth=1.5
     )
 
     ax1.legend()
@@ -303,14 +306,14 @@ for count, ticker in enumerate(tickers):
     ax1.set_title(f'{end_date}  {ticker} (Expected Return: {avg_future_return:.2f}%)')
 
     # --- 하단: 거래량 (양/음/동색 구분) ---
-    ax2.bar(data_plot['date_str'], data_plot['Volume'], color=bar_colors, alpha=0.7)
+    ax2.bar(data_plot_recent['date_str'], data_plot_recent['Volume'], color=bar_colors, alpha=0.65)
     ax2.set_ylabel('Volume')
     ax2.grid(True)
 
     # x축 라벨: 10일 단위만 표시 (과도한 라벨 겹침 방지)
-    tick_idx = np.arange(0, len(data_plot), 10)
+    tick_idx = np.arange(0, len(data_plot_recent), 10)
     ax2.set_xticks(tick_idx)
-    ax2.set_xticklabels(data_plot['date_str'].iloc[tick_idx])
+    ax2.set_xticklabels(data_plot_recent['date_str'].iloc[tick_idx])
 
     plt.setp(ax2.xaxis.get_majorticklabels(), rotation=45)
 
@@ -321,53 +324,6 @@ for count, ticker in enumerate(tickers):
     final_file_path = os.path.join(output_dir, final_file_name)
     plt.savefig(final_file_path)
     plt.close()
-    # plt.show()
-    
-    # plt.figure(figsize=(16, 8))
-    # if rsi_flag:
-    #     plt.subplot(2,1,1)
-    # # 실제 데이터
-    # plt.plot(data.index, actual_prices, label='실제 가격')
-    # # 예측 데이터
-    # plt.plot(future_dates, predicted_prices, label='예측 가격', linestyle='--', marker='o', color='tomato')
-    # 
-    # if all(x in data.columns for x in ['MA20', 'UpperBand', 'LowerBand']):
-    #     plt.plot(data.index, data['MA20'], label='20일 이동평균선') # MA20
-    #     plt.plot(data.index, data['MA5'], label='5일 이동평균선')
-    #     plt.plot(data.index, data['UpperBand'], label='볼린저밴드 상한선', linestyle='--') # Upper Band (2σ)
-    #     plt.plot(data.index, data['LowerBand'], label='볼린저밴드 하한선', linestyle='--') # Lower Band (2σ)
-    #     plt.fill_between(data.index, data['UpperBand'], data['LowerBand'], color='gray', alpha=0.2)
-    # 
-    # # 마지막 실제값과 첫 번째 예측값을 점선으로 연결
-    # plt.plot(
-    #     [data.index[-1], future_dates[0]],  # x축: 마지막 실제날짜와 첫 예측날짜
-    #     [actual_prices[-1], predicted_prices[0]],  # y축: 마지막 실제종가와 첫 예측종가
-    #     linestyle='dashed', color='gray', linewidth=1.5
-    # )
-    # 
-    # plt.title(f'{end_date}  {ticker} (Expected Return: {avg_future_return:.2f}%)')
-    # plt.xlabel('Date')
-    # plt.ylabel('Price')
-    # plt.legend()
-    # plt.grid(True)
-    # plt.xticks(rotation=45)
-    # 
-    # if rsi_flag:
-    #     data['RSI'] = compute_rsi(data['Close'])
-    # 
-    #     # RSI 차트 (하단)
-    #     plt.subplot(2,1,2)
-    #     plt.plot(data['RSI'], label='RSI(14)', color='purple')
-    #     plt.axhline(70, color='red', linestyle='--', label='Overbought (70)')
-    #     plt.axhline(30, color='blue', linestyle='--', label='Oversold (30)')
-    #     plt.legend()
-    #     plt.tight_layout()
-    #     plt.grid(True)
-    # 
-    # final_file_name = f'{today} [ {avg_future_return:.2f}% ] {ticker}.png'
-    # final_file_path = os.path.join(output_dir, final_file_name)
-    # plt.savefig(final_file_path)
-    # plt.close()
 
 ####################################
 

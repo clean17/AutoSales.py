@@ -25,8 +25,7 @@ os.makedirs(output_dir, exist_ok=True)
 
 PREDICTION_PERIOD = 3
 LOOK_BACK = 15
-AVERAGE_VOLUME = 25000 # 평균거래량
-AVERAGE_TRADING_VALUE = 2_000_000_000 # 평균거래대금 30억
+AVERAGE_TRADING_VALUE = 3_000_000_000 # 평균거래대금 30억
 EXPECTED_GROWTH_RATE = 5
 DATA_COLLECTION_PERIOD = 400 # 샘플 수 = 68(100일 기준) - 20 - 4 + 1 = 45
 
@@ -79,20 +78,6 @@ for count, ticker in enumerate(tickers):
         # print(f"                                                        최근 4주 중 거래대금 4억 미만 발생 → pass")
         continue
 
-    # 일일 평균 거래량이 부족하면 패스
-    # average_volume = data['거래량'].mean()
-    # if average_volume <= AVERAGE_VOLUME:
-    #     # print(f"                                                        평균 거래량({average_volume:.0f}주)이 부족 → pass")
-    #     continue
-
-    # 전체 평균 거래대금이 기준치 이하면 패스
-    # trading_value = data['거래량'] * data['종가']
-    # average_trading_value = trading_value.mean()
-    # if average_trading_value <= AVERAGE_TRADING_VALUE:
-    #     formatted_value = f"{average_trading_value / 100_000_000:.0f}억"
-    #     # print(f"                                                        평균 거래대금({formatted_value})이 부족 → pass")
-    #     continue
-
     # 최근 2주 거래대금이 기준치 이하면 패스
     recent_data = data.tail(10)
     recent_trading_value = recent_data['거래량'] * recent_data['종가']
@@ -139,14 +124,14 @@ for count, ticker in enumerate(tickers):
     #     # continue
     #     pass
 
-    # 최근 3일, 2달 평균 거래량 계산, 최근 3일 거래량이 최근 2달 거래량의 15% 안되면 패스
-    recent_3_avg = data['거래량'][-3:].mean()
-    recent_2months_avg = data['거래량'][-40:].mean()
-    if recent_3_avg < recent_2months_avg * 0.15:
-        temp = (recent_3_avg/recent_2months_avg * 100)
-        # print(f"                                                        최근 3일의 평균거래량이 최근 2달 평균거래량의 15% 미만 → pass : {temp:.2f}%")
-        continue
-        # pass
+    # # 최근 3일, 2달 평균 거래량 계산, 최근 3일 거래량이 최근 2달 거래량의 15% 안되면 패스
+    # recent_3_avg = data['거래량'][-3:].mean()
+    # recent_2months_avg = data['거래량'][-40:].mean()
+    # if recent_3_avg < recent_2months_avg * 0.15:
+    #     temp = (recent_3_avg/recent_2months_avg * 100)
+    #     # print(f"                                                        최근 3일의 평균거래량이 최근 2달 평균거래량의 15% 미만 → pass : {temp:.2f}%")
+    #     continue
+    #     # pass
 
 
     # 현재 5일선이 20일선보다 낮으면서 하락중이면 패스
@@ -226,7 +211,7 @@ for count, ticker in enumerate(tickers):
     # R-squared; (0=엉망, 1=완벽)
     r2 = r2_score(y_val, predictions)
     # print(f"                                                        R-squared 0.7 미만이면 패스 : {r2:.2f}%")
-    if r2 < 0.70:
+    if r2 < 0.65:
         # print(f"                                                        R-squared 0.7 미만이면 패스 : {r2:.2f}%")
         continue
 
@@ -277,7 +262,7 @@ for count, ticker in enumerate(tickers):
     data_plot['date_str'] = data_plot.index.strftime('%Y-%m-%d')
 
     # data_plot.index가 DatetimeIndex라고 가정
-    three_months_ago = data_plot.index.max() - pd.DateOffset(months=4)
+    three_months_ago = data_plot.index.max() - pd.DateOffset(months=6)
     data_plot_recent = data_plot[data_plot.index >= three_months_ago].copy()
     recent_n = len(data_plot_recent)
 
