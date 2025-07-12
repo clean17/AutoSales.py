@@ -12,6 +12,7 @@ import ast
 from utils import create_lstm_model, create_multistep_dataset, fetch_stock_data, add_technical_features, get_kor_ticker_list, check_column_types
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.model_selection import train_test_split
+import requests
 
 # 시드 고정
 import numpy as np, tensorflow as tf, random
@@ -46,10 +47,23 @@ ticker_to_name = {ticker: stock.get_market_ticker_name(ticker) for ticker in tic
 
 # 결과를 저장할 배열
 results = []
+total_r2 = 0
+total_cnt = 0
 
 for count, ticker in enumerate(tickers):
     stock_name = ticker_to_name.get(ticker, 'Unknown Stock')
     print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
+
+    percent = f'{round((count+1)/len(tickers)*100, 1):.1f}'
+    requests.post('http://localhost:8090/func/stocks/progress-update/kospi',
+                  json={
+                      "percent": percent,
+                      "count": count+1,
+                      "total_count": len(tickers),
+                      "ticker": ticker,
+                      "stock_name":stock_name,
+                      "done": False,
+                  })
 
     data = add_technical_features(fetch_stock_data(ticker, start_date, today))
 #     check_column_types(fetch_stock_data(ticker, start_date, today), ['종가', '고가', '저가', '거래량', 'PER', 'PBR']) # 타입과 shape 확인 > Series 가 나와야 한다
@@ -210,8 +224,10 @@ for count, ticker in enumerate(tickers):
     # 학습이 최소한으로 되었는지 확인 후 실제 예측을 시작
     # R-squared; (0=엉망, 1=완벽)
     r2 = r2_score(y_val, predictions)
+    total_r2 += r2
+    total_cnt += 1
     # print(f"                                                        R-squared 0.7 미만이면 패스 : {r2:.2f}%")
-    if r2 < 0.65:
+    if r2 < 0.6:
         # print(f"                                                        R-squared 0.7 미만이면 패스 : {r2:.2f}%")
         continue
 
@@ -327,7 +343,8 @@ results.sort(reverse=True, key=lambda x: x[0])
 for avg_future_return, stock_name in results:
     print(f"==== [ {avg_future_return:.2f}% ] {stock_name} ====")
 
-
+requests.post('http://localhost:8090/func/stocks/progress-update/kospi', json={"percent": 100, "done": True})
+print('result2 : ', total_r2/total_cnt)
 
 
 
