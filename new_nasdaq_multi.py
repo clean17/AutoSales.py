@@ -11,6 +11,7 @@ from send2trash import send2trash
 from utils import create_lstm_model, create_multistep_dataset, fetch_stock_data_us, get_nasdaq_symbols, extract_stock_code_from_filenames, get_usd_krw_rate, add_technical_features_us, check_column_types
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.model_selection import train_test_split
+import requests
 
 # 시드 고정
 import numpy as np, tensorflow as tf, random
@@ -18,20 +19,30 @@ np.random.seed(42)
 tf.random.set_seed(42)
 random.seed(42)
 
+
+output_dir = 'D:\\sp500'
+os.makedirs(output_dir, exist_ok=True)
+
+# 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
+root_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(=루트)
+pickle_dir = os.path.join(root_dir, 'pickle_us')
+
+# pickle 폴더가 없으면 자동 생성 (이미 있으면 무시)
+os.makedirs(pickle_dir, exist_ok=True)
+
+
+
+PREDICTION_PERIOD = 3
+EXPECTED_GROWTH_RATE = 4
+DATA_COLLECTION_PERIOD = 400
+LOOK_BACK = 15
+KR_AVERAGE_TRADING_VALUE = 3_000_000_000
+
 exchangeRate = get_usd_krw_rate()
 if exchangeRate is None:
     print('#######################   exchangeRate is None   #######################')
 else:
     print(f'#######################   exchangeRate is {exchangeRate}   #######################')
-output_dir = 'D:\\sp500'
-os.makedirs(output_dir, exist_ok=True)
-rsi_flag = 0
-
-PREDICTION_PERIOD = 3
-EXPECTED_GROWTH_RATE = 5
-DATA_COLLECTION_PERIOD = 400
-LOOK_BACK = 15
-KR_AVERAGE_TRADING_VALUE = 3_000_000_000
 
 # 미국 동부 시간대 설정
 now_us = datetime.now(pytz.timezone('America/New_York'))
@@ -39,6 +50,7 @@ now_us = datetime.now(pytz.timezone('America/New_York'))
 print("미국 동부 시간 기준 현재 시각:", now_us.strftime('%Y-%m-%d %H:%M:%S'))
 # 데이터 수집 시작일 계산
 start_date_us = (now_us - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y-%m-%d')
+start_five_date_us = (now_us - timedelta(days=5)).strftime('%Y-%m-%d')
 print("미국 동부 시간 기준 데이터 수집 시작일:", start_date_us)
 
 end_date = datetime.today().strftime('%Y-%m-%d')
@@ -52,17 +64,45 @@ tickers = get_nasdaq_symbols()
 
 # 결과를 저장할 배열
 results = []
+total_r2 = 0
+total_cnt = 0
 is_first_flag = True
 
 for count, ticker in enumerate(tickers):
     print(f"Processing {count+1}/{len(tickers)} : {ticker}")
 
-    data = fetch_stock_data_us(ticker, start_date_us, end_date)
+
+    # 데이터가 없으면 1년 데이터 요청, 있으면 5일 데이터 요청
+    filepath = os.path.join(pickle_dir, f'{ticker}.pkl')
+    if os.path.exists(filepath):
+        df = pd.read_pickle(filepath)
+        data = fetch_stock_data_us(ticker, start_five_date_us, end_date)
+    else:
+        df = pd.DataFrame()
+        data = fetch_stock_data_us(ticker, start_date_us, end_date)
+
+    # 중복 제거 & 새로운 날짜만 추가
+    if not df.empty:
+        # 기존 날짜 인덱스와 비교하여 새로운 행만 선택
+        new_rows = data.loc[~data.index.isin(df.index)] # ~ (not) : 기존에 없는 날짜만 남김
+        df = pd.concat([df, new_rows])
+    else:
+        df = data
+
+    # 너무 먼 과거 데이터 버리기, 처음 272개
+    if len(df) > 280:
+        df = df.iloc[-280:]
+
+    # 파일 저장
+    df.to_pickle(filepath)
+    # data = pd.read_pickle(filepath)
+    data = df
+
+
     if data is None or 'Close' not in data.columns or data.empty:
         print(f"{ticker}: 데이터가 비었거나 'Close' 컬럼이 없습니다. pass.")
         continue
 
-    data = add_technical_features_us(data)
 #     check_column_types(fetch_stock_data_us(ticker, start_date_us, end_date), ['Close', 'Open', 'High', 'Low', 'Volume', 'PER', 'PBR']) # 타입과 shape 확인 > Series 가 나와야 한다
 #     continue
 
@@ -85,7 +125,7 @@ for count, ticker in enumerate(tickers):
     recent_data = data.tail(10)
     recent_trading_value = recent_data['Volume'] * recent_data['Close']     # 최근 2주 거래대금 리스트
     # 하루라도 4억 미만이 있으면 제외
-    if (recent_trading_value * exchangeRate < 100_000_000).any():
+    if (recent_trading_value * exchangeRate < 300_000_000).any():
         # print(f"                                                        최근 2주 중 거래대금 4억 미만 발생 → 제외")
         continue
 
@@ -140,6 +180,9 @@ for count, ticker in enumerate(tickers):
     #     # continue
     #     pass
 
+    # 2차 생성 feature
+    data = add_technical_features_us(data)
+
     # 현재 5일선이 20일선보다 낮으면서 하락중이면 패스
     ma_angle_5 = data['MA5'].iloc[-1] - data['MA5'].iloc[-2]
     if data['MA5'].iloc[-1] < data['MA20'].iloc[-1] and ma_angle_5 < 0:
@@ -148,15 +191,15 @@ for count, ticker in enumerate(tickers):
         # pass
 
     # 5일선이 너무 하락하면
-    ma5_today = data['MA5'].iloc[-1]
-    ma5_yesterday = data['MA5'].iloc[-2]
-
-    # 변화율 계산 (퍼센트로 보려면 * 100)
-    change_rate = (ma5_today - ma5_yesterday) / ma5_yesterday
-    if change_rate * 100 < -4:
-        # print(f"어제 5일선의 변화율: {change_rate:.5f}")  # 소수점 5자리
-        print(f"                                                        어제 5일선의 변화율: {change_rate * 100:.2f}% → pass")
-        continue
+    # ma5_today = data['MA5'].iloc[-1]
+    # ma5_yesterday = data['MA5'].iloc[-2]
+    #
+    # # 변화율 계산 (퍼센트로 보려면 * 100)
+    # change_rate = (ma5_today - ma5_yesterday) / ma5_yesterday
+    # if change_rate * 100 < -4:
+    #     # print(f"어제 5일선의 변화율: {change_rate:.5f}")  # 소수점 5자리
+    #     print(f"                                                        어제 5일선의 변화율: {change_rate * 100:.2f}% → pass")
+    #     continue
 
     ########################################################################
 
@@ -166,7 +209,7 @@ for count, ticker in enumerate(tickers):
     feature_cols = [
         'Close', 'High', 'PBR', 'Low', 'Volume',
         # 'RSI14',
-        'ma10_gap',
+        # 'ma10_gap',
     ]
 
     X_for_model = data[feature_cols].fillna(0) # 모델 feature만 NaN을 0으로
@@ -183,6 +226,26 @@ for count, ticker in enumerate(tickers):
     if X.shape[0] < 50:
         print("                                                        샘플 부족 : ", X.shape[0])
         continue
+
+    # 학습하기 직전에 요청을 보낸다
+    percent = f'{round((count+1)/len(tickers)*100, 1):.1f}'
+    try:
+        requests.post(
+            'http://localhost:8090/func/stocks/progress-update/nasdaq',
+            json={
+                "percent": percent,
+                "count": count+1,
+                "total_count": len(tickers),
+                "ticker": ticker,
+                "stock_name": "",
+                "done": False,
+            },
+            timeout=5
+        )
+    except Exception as e:
+        # logging.warning(f"progress-update 요청 실패: {e}")
+        print(f"progress-update 요청 실패: {e}")
+        pass  # 오류
 
     # 머신러닝/딥러닝 모델 입력을 위해 학습/검증 분리
     # 3차원 유지: (n_samples, look_back, n_features)
@@ -215,7 +278,9 @@ for count, ticker in enumerate(tickers):
     # 학습이 최소한으로 되었는지 확인 후 실제 예측을 시작
     # R-squared; (0=엉망, 1=완벽)
     r2 = r2_score(y_val, predictions)
-    if r2 < 0.65:
+    total_r2 += r2
+    total_cnt += 1
+    if r2 < 0.5:
         # print(f"                                                        R-squared 0.7 미만이면 패스 : {r2:.2f}%")
         continue
 
@@ -265,6 +330,8 @@ for count, ticker in enumerate(tickers):
 
     # 2. 인덱스 문자열 컬럼 추가 (x축 통일용)
     data_plot = data.copy()
+    # 인덱스를 명시적으로 DatetimeIndex로 변환
+    data_plot.index = pd.to_datetime(data_plot.index)
     data_plot['date_str'] = data_plot.index.strftime('%Y-%m-%d')
 
     # data_plot.index가 DatetimeIndex라고 가정
@@ -332,6 +399,21 @@ results.sort(reverse=True, key=lambda x: x[0])
 
 for avg_future_return, ticker in results:
     print(f"==== [ {avg_future_return:.2f}% ] [{ticker}] ====")
+
+try:
+    requests.post(
+        'http://localhost:8090/func/stocks/progress-update/nasdaq',
+        json={"percent": 100, "done": True},
+        timeout=5
+    )
+except Exception as e:
+    # logging.warning(f"progress-update 요청 실패: {e}")
+    print(f"progress-update 요청 실패: {e}")
+    pass  # 오류
+
+print('result_r2 : ', total_r2/total_cnt)
+print('total_cnt : ', total_cnt)
+
 
 '''
 Series
