@@ -9,7 +9,7 @@ from sklearn.preprocessing import MinMaxScaler
 import matplotlib.pyplot as plt
 from send2trash import send2trash
 import ast
-from utils import create_lstm_model, create_multistep_dataset, fetch_stock_data, add_technical_features, get_kor_ticker_list, check_column_types
+from utils import create_lstm_model, create_multistep_dataset, fetch_stock_data, add_technical_features, get_kor_ticker_list, check_column_types, get_safe_ticker_list
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.model_selection import train_test_split
 import requests
@@ -62,7 +62,7 @@ total_cnt = 0
 # 데이터 가져오는것만 1시간 걸리네
 for count, ticker in enumerate(tickers):
     stock_name = ticker_to_name.get(ticker, 'Unknown Stock')
-    print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
+    # print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
 
 
     # 데이터가 없으면 1년 데이터 요청, 있으면 5일 데이터 요청
@@ -113,7 +113,7 @@ for count, ticker in enumerate(tickers):
     month_data = data.tail(20)
     month_trading_value = month_data['거래량'] * month_data['종가']
     # 하루라도 거래대금이 4억 미만이 있으면 제외
-    if (month_trading_value < 100_000_000).any():
+    if (month_trading_value < 300_000_000).any():
         # print(f"                                                        최근 4주 중 거래대금 4억 미만 발생 → pass")
         continue
 
@@ -144,20 +144,20 @@ for count, ticker in enumerate(tickers):
             continue
 
     # 2. 당일의 종가가 5일 전날의 종가보다 60% 이상 상승
-    if len(actual_prices) >= 6:
-        close_5ago = actual_prices[-6]
-        ratio = (last_close - close_5ago) / close_5ago * 100
-        if last_close >= close_5ago * 1.6:  # 60% 이상 상승
-            print(f"                                                        5일 전 대비 60% 이상 상승: {close_5ago} -> {last_close}  {ratio:.2f}% → pass")
-            continue
+    # if len(actual_prices) >= 6:
+    #     close_5ago = actual_prices[-6]
+    #     ratio = (last_close - close_5ago) / close_5ago * 100
+    #     if last_close >= close_5ago * 1.6:  # 60% 이상 상승
+    #         print(f"                                                        5일 전 대비 60% 이상 상승: {close_5ago} -> {last_close}  {ratio:.2f}% → pass")
+    #         continue
 
     # 3. 당일의 종가가 15일 전날의 종가보다 100% 이상 상승
-    if len(actual_prices) >= 16:
-        close_15ago = actual_prices[-16]
-        ratio = (last_close - close_15ago) / close_15ago * 100
-        if last_close >= close_15ago * 2:  # 100% 이상 상승
-            print(f"                                                        15일 전 대비 100% 이상 상승: {close_15ago} -> {last_close}  {ratio:.2f}% → pass")
-            continue
+    # if len(actual_prices) >= 16:
+    #     close_15ago = actual_prices[-16]
+    #     ratio = (last_close - close_15ago) / close_15ago * 100
+    #     if last_close >= close_15ago * 2:  # 100% 이상 상승
+    #         print(f"                                                        15일 전 대비 100% 이상 상승: {close_15ago} -> {last_close}  {ratio:.2f}% → pass")
+    #         continue
 
 
     # 현재 종가가 4일 전에 비해서 크게 하락하면 패스
@@ -246,16 +246,25 @@ for count, ticker in enumerate(tickers):
         continue
 
     # 학습하기 직전에 요청을 보낸다
+    print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
     percent = f'{round((count+1)/len(tickers)*100, 1):.1f}'
-    requests.post('http://localhost:8090/func/stocks/progress-update/kospi',
-                  json={
-                      "percent": percent,
-                      "count": count+1,
-                      "total_count": len(tickers),
-                      "ticker": ticker,
-                      "stock_name":stock_name,
-                      "done": False,
-                  })
+    try:
+        requests.post(
+            'http://localhost:8090/func/stocks/progress-update/kospi',
+            json={
+                "percent": percent,
+                "count": count+1,
+                "total_count": len(tickers),
+                "ticker": ticker,
+                "stock_name":stock_name,
+                "done": False,
+            },
+            timeout=5
+        )
+    except Exception as e:
+        # logging.warning(f"progress-update 요청 실패: {e}")
+        print(f"progress-update 요청 실패: {e}")
+        pass  # 오류
 
     # 모델 생성 및 학습
     model = create_lstm_model((X_train.shape[1], X_train.shape[2]), PREDICTION_PERIOD,
@@ -281,8 +290,9 @@ for count, ticker in enumerate(tickers):
     # 학습이 최소한으로 되었는지 확인 후 실제 예측을 시작
     # R-squared; (0=엉망, 1=완벽)
     r2 = r2_score(y_val, predictions)
-    total_r2 += r2
-    total_cnt += 1
+    if r2 > 0:
+        total_r2 += r2
+        total_cnt += 1
     # print(f"                                                        R-squared 0.7 미만이면 패스 : {r2:.2f}%")
     if r2 < 0.5:
         # print(f"                                                        R-squared 0.7 미만이면 패스 : {r2:.2f}%")
@@ -402,9 +412,19 @@ results.sort(reverse=True, key=lambda x: x[0])
 for avg_future_return, stock_name in results:
     print(f"==== [ {avg_future_return:.2f}% ] {stock_name} ====")
 
-requests.post('http://localhost:8090/func/stocks/progress-update/kospi', json={"percent": 100, "done": True})
-print('result2 : ', total_r2/total_cnt)
+try:
+    requests.post(
+        'http://localhost:8090/func/stocks/progress-update/kospi',
+        json={"percent": 100, "done": True},
+        timeout=5
+    )
+except Exception as e:
+    # logging.warning(f"progress-update 요청 실패: {e}")
+    print(f"progress-update 요청 실패: {e}")
+    pass  # 오류
 
+print('result_r2 : ', total_r2/total_cnt)
+print('total_cnt : ', total_cnt)
 
 
 
