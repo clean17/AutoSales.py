@@ -24,19 +24,28 @@ random.seed(42)
 output_dir = 'D:\\kospi_stocks'
 os.makedirs(output_dir, exist_ok=True)
 
+# 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
+root_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(=루트)
+pickle_dir = os.path.join(root_dir, 'pickle')
+
+# pickle 폴더가 없으면 자동 생성 (이미 있으면 무시)
+os.makedirs(pickle_dir, exist_ok=True)
+
 PREDICTION_PERIOD = 3
 LOOK_BACK = 15
 AVERAGE_TRADING_VALUE = 3_000_000_000 # 평균거래대금 30억
-EXPECTED_GROWTH_RATE = 5
+EXPECTED_GROWTH_RATE = 4
 DATA_COLLECTION_PERIOD = 400 # 샘플 수 = 68(100일 기준) - 20 - 4 + 1 = 45
 
 today = datetime.today().strftime('%Y%m%d')
+# today = (datetime.today() - timedelta(days=5)).strftime('%Y%m%d')
 today_us = datetime.today().strftime('%Y-%m-%d')
 start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y%m%d')
+start_five_date = (datetime.today() - timedelta(days=5)).strftime('%Y%m%d')
 
 # tickers = ['077970', '079160', '112610', '025540', '003530', '357880', '131970', '009450', '310210', '353200', '136150', '064350', '066575', '005880', '272290', '204270', '066570', '456040', '373220', '096770', '005490', '006650', '042700', '068240', '003280', '067160', '397030', '480370', '085660', '328130', '476040', '241710', '357780', '232140', '011170', '020180', '074600', '042000', '003350', '065350', '004490', '482630', '005420', '033100', '018880', '417200', '332570', '058970', '011790', '053800', '338220', '195870', '010950', '455900', '082740', '225570', '445090', '068760', '007070', '361610', '443060', '089850', '413640', '005850', '141080', '005380', '098460', '277810', '011780', '005810', '075580', '112040', '012510', '240810', '403870', '376900', '001740', '035420', '103140', '068270', '013990', '001450', '457190', '293580', '475150', '280360', '097950', '058820', '034220', '084370', '178320']
 tickers = get_kor_ticker_list()
-# tickers = ['480370']
+# tickers = ['090370']
 
 ticker_to_name = {ticker: stock.get_market_ticker_name(ticker) for ticker in tickers}
 
@@ -50,22 +59,38 @@ results = []
 total_r2 = 0
 total_cnt = 0
 
+# 데이터 가져오는것만 1시간 걸리네
 for count, ticker in enumerate(tickers):
     stock_name = ticker_to_name.get(ticker, 'Unknown Stock')
     print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
 
-    percent = f'{round((count+1)/len(tickers)*100, 1):.1f}'
-    requests.post('http://localhost:8090/func/stocks/progress-update/kospi',
-                  json={
-                      "percent": percent,
-                      "count": count+1,
-                      "total_count": len(tickers),
-                      "ticker": ticker,
-                      "stock_name":stock_name,
-                      "done": False,
-                  })
 
-    data = add_technical_features(fetch_stock_data(ticker, start_date, today))
+    # 데이터가 없으면 1년 데이터 요청, 있으면 5일 데이터 요청
+    filepath = os.path.join(pickle_dir, f'{ticker}.pkl')
+    if os.path.exists(filepath):
+        df = pd.read_pickle(filepath)
+        data = fetch_stock_data(ticker, start_five_date, today)
+    else:
+        df = pd.DataFrame()
+        data = fetch_stock_data(ticker, start_date, today)
+
+    # 중복 제거 & 새로운 날짜만 추가
+    if not df.empty:
+        # 기존 날짜 인덱스와 비교하여 새로운 행만 선택
+        new_rows = data.loc[~data.index.isin(df.index)] # ~ (not) : 기존에 없는 날짜만 남김
+        df = pd.concat([df, new_rows])
+    else:
+        df = data
+
+    # 너무 먼 과거 데이터 버리기
+    if len(df) > 270:
+        df = df.iloc[-270:]
+
+    # 파일 저장
+    df.to_pickle(filepath)
+    # data = pd.read_pickle(filepath)
+    data = df
+
 #     check_column_types(fetch_stock_data(ticker, start_date, today), ['종가', '고가', '저가', '거래량', 'PER', 'PBR']) # 타입과 shape 확인 > Series 가 나와야 한다
 #     continue
 ########################################################################
@@ -109,22 +134,40 @@ for count, ticker in enumerate(tickers):
     #     # continue
     #     pass
 
-    # 모든 4일 연속 구간에서 첫날 대비 마지막날 xx% 이상 급등하면 패스
-    # window_start = actual_prices[-10:-3]   # 0 ~ N-4
-    # window_end = actual_prices[-7:]      # 3 ~ N-1
-    # ratio = window_end / window_start   # numpy, pandas Series/DataFrame만 벡터화 연산 지원, ratio는 결과 리스트
-    # if np.any(ratio >= 1.6):
-    #     print(f"                                                        최근 4일 연속 구간에서 첫날 대비 60% 이상 상승 : {ratio:.2f}% → pass")
-    #     continue
+    # 투경 조건
+    # 1. 당일의 종가가 3일 전날의 종가보다 100% 이상 상승
+    if len(actual_prices) >= 4:
+        close_3ago = actual_prices[-4]
+        ratio = (last_close - close_3ago) / close_3ago * 100
+        if last_close >= close_3ago * 2:  # 100% 이상 상승
+            print(f"                                                        3일 전 대비 100% 이상 상승: {close_3ago} -> {last_close}  {ratio:.2f}% → pass")
+            continue
+
+    # 2. 당일의 종가가 5일 전날의 종가보다 60% 이상 상승
+    if len(actual_prices) >= 6:
+        close_5ago = actual_prices[-6]
+        ratio = (last_close - close_5ago) / close_5ago * 100
+        if last_close >= close_5ago * 1.6:  # 60% 이상 상승
+            print(f"                                                        5일 전 대비 60% 이상 상승: {close_5ago} -> {last_close}  {ratio:.2f}% → pass")
+            continue
+
+    # 3. 당일의 종가가 15일 전날의 종가보다 100% 이상 상승
+    if len(actual_prices) >= 16:
+        close_15ago = actual_prices[-16]
+        ratio = (last_close - close_15ago) / close_15ago * 100
+        if last_close >= close_15ago * 2:  # 100% 이상 상승
+            print(f"                                                        15일 전 대비 100% 이상 상승: {close_15ago} -> {last_close}  {ratio:.2f}% → pass")
+            continue
+
 
     # 현재 종가가 4일 전에 비해서 크게 하락하면 패스
-    # close_4days_ago = data['종가'].iloc[-5]
-    # rate = (last_close / close_4days_ago - 1) * 100
-    # if rate <= -18:
-    #     print(f"                                                        4일 전 대비 {rate:.2f}% 하락 → pass")
-    #     continue  # 또는 return
+    close_4days_ago = actual_prices[-5]
+    rate = (last_close / close_4days_ago - 1) * 100 # 오늘 종가와 4일 전 종가의 상승/하락률(%)
+    if rate <= -18:
+        print(f"                                                        4일 전 대비 {rate:.2f}% 하락 → pass")
+        continue  # 또는 return
 
-    # # 최근 한달 동안의 변동률이 5%가 한번도 안되면 패스
+    # # 최근 한달 동안의 변동률이 적으면 패스
     # idx_list = [-5, -10, -15, -20]
     # pass_flag = True
     # for idx in idx_list:
@@ -147,6 +190,8 @@ for count, ticker in enumerate(tickers):
     #     continue
     #     # pass
 
+    # 2차 생성 feature
+    data = add_technical_features(data)
 
     # 현재 5일선이 20일선보다 낮으면서 하락중이면 패스
     ma_angle_5 = data['MA5'].iloc[-1] - data['MA5'].iloc[-2]
@@ -156,15 +201,15 @@ for count, ticker in enumerate(tickers):
         # pass
 
     # 5일선이 너무 하락하면
-    ma5_today = data['MA5'].iloc[-1]
-    ma5_yesterday = data['MA5'].iloc[-2]
-
-    # 변화율 계산 (퍼센트로 보려면 * 100)
-    change_rate = (ma5_today - ma5_yesterday) / ma5_yesterday
-    if change_rate * 100 < -4:
-        # print(f"어제 5일선의 변화율: {change_rate:.5f}")  # 소수점 5자리
-        print(f"                                                        어제 5일선의 변화율: {change_rate * 100:.2f}% → pass")
-        continue
+    # ma5_today = data['MA5'].iloc[-1]
+    # ma5_yesterday = data['MA5'].iloc[-2]
+    #
+    # # 변화율 계산 (퍼센트로 보려면 * 100)
+    # change_rate = (ma5_today - ma5_yesterday) / ma5_yesterday
+    # if change_rate * 100 < -2:
+    #     # print(f"어제 5일선의 변화율: {change_rate:.5f}")  # 소수점 5자리
+    #     print(f"                                                        어제 5일선의 변화율: {change_rate * 100:.2f}% → pass")
+    #     continue
 
 
 ########################################################################
@@ -181,7 +226,7 @@ for count, ticker in enumerate(tickers):
     feature_cols = [
         '종가', '고가', 'PBR', '저가', '거래량',
         # 'RSI14',
-        'ma10_gap',
+        # 'ma10_gap',
     ]
 
     X_for_model = data[feature_cols].fillna(0) # 모델 feature만 NaN을 0으로
@@ -199,6 +244,18 @@ for count, ticker in enumerate(tickers):
     if X_train.shape[0] < 50:
         print("                                                        샘플 부족 : ", X_train.shape[0])
         continue
+
+    # 학습하기 직전에 요청을 보낸다
+    percent = f'{round((count+1)/len(tickers)*100, 1):.1f}'
+    requests.post('http://localhost:8090/func/stocks/progress-update/kospi',
+                  json={
+                      "percent": percent,
+                      "count": count+1,
+                      "total_count": len(tickers),
+                      "ticker": ticker,
+                      "stock_name":stock_name,
+                      "done": False,
+                  })
 
     # 모델 생성 및 학습
     model = create_lstm_model((X_train.shape[1], X_train.shape[2]), PREDICTION_PERIOD,
@@ -227,7 +284,7 @@ for count, ticker in enumerate(tickers):
     total_r2 += r2
     total_cnt += 1
     # print(f"                                                        R-squared 0.7 미만이면 패스 : {r2:.2f}%")
-    if r2 < 0.6:
+    if r2 < 0.5:
         # print(f"                                                        R-squared 0.7 미만이면 패스 : {r2:.2f}%")
         continue
 
@@ -275,6 +332,8 @@ for count, ticker in enumerate(tickers):
 
     # 2. 인덱스 문자열 컬럼 추가 (x축 통일용)
     data_plot = data.copy()
+    # 인덱스를 명시적으로 DatetimeIndex로 변환
+    data_plot.index = pd.to_datetime(data_plot.index)
     data_plot['date_str'] = data_plot.index.strftime('%Y-%m-%d')
 
     # data_plot.index가 DatetimeIndex라고 가정
