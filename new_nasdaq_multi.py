@@ -33,7 +33,7 @@ os.makedirs(pickle_dir, exist_ok=True)
 
 
 PREDICTION_PERIOD = 3
-EXPECTED_GROWTH_RATE = 4
+EXPECTED_GROWTH_RATE = 3
 DATA_COLLECTION_PERIOD = 400
 LOOK_BACK = 15
 KR_AVERAGE_TRADING_VALUE = 3_000_000_000
@@ -111,7 +111,7 @@ for count, ticker in enumerate(tickers):
     actual_prices = data['Close'].values # 최근 종가 배열
     last_close = actual_prices[-1]
 
-    if data.empty or len(data) < 30:
+    if data.empty or len(data) < 50:
         # print(f"                                                        데이터 부족 → pass")
         continue
 
@@ -125,7 +125,7 @@ for count, ticker in enumerate(tickers):
     recent_data = data.tail(10)
     recent_trading_value = recent_data['Volume'] * recent_data['Close']     # 최근 2주 거래대금 리스트
     # 하루라도 4억 미만이 있으면 제외
-    if (recent_trading_value * exchangeRate < 300_000_000).any():
+    if (recent_trading_value * exchangeRate < 400_000_000).any():
         # print(f"                                                        최근 2주 중 거래대금 4억 미만 발생 → 제외")
         continue
 
@@ -139,8 +139,8 @@ for count, ticker in enumerate(tickers):
     rolling_min = data['Close'].rolling(window=5).min()    # 5일 중 최소가
     ratio = data['Close'] / rolling_min
 
-    if np.any(ratio >= 2.8):
-        print(f"                                                        어느 5일 구간이든 2.8배 급등: 제외")
+    if np.any(ratio >= 2.0):
+        print(f"                                                        어느 5일 구간이든 2배 급등: 제외")
         continue
 
 
@@ -186,20 +186,20 @@ for count, ticker in enumerate(tickers):
     # 현재 5일선이 20일선보다 낮으면서 하락중이면 패스
     ma_angle_5 = data['MA5'].iloc[-1] - data['MA5'].iloc[-2]
     if data['MA5'].iloc[-1] < data['MA20'].iloc[-1] and ma_angle_5 < 0:
-        print(f"                                                        5일선이 20일선 보다 낮을 경우 → pass")
+        # print(f"                                                        5일선이 20일선 보다 낮을 경우 → pass")
         continue
         # pass
 
     # 5일선이 너무 하락하면
-    # ma5_today = data['MA5'].iloc[-1]
-    # ma5_yesterday = data['MA5'].iloc[-2]
-    #
-    # # 변화율 계산 (퍼센트로 보려면 * 100)
-    # change_rate = (ma5_today - ma5_yesterday) / ma5_yesterday
-    # if change_rate * 100 < -4:
-    #     # print(f"어제 5일선의 변화율: {change_rate:.5f}")  # 소수점 5자리
-    #     print(f"                                                        어제 5일선의 변화율: {change_rate * 100:.2f}% → pass")
-    #     continue
+    ma5_today = data['MA5'].iloc[-1]
+    ma5_yesterday = data['MA5'].iloc[-2]
+
+    # 변화율 계산 (퍼센트로 보려면 * 100)
+    change_rate = (ma5_today - ma5_yesterday) / ma5_yesterday
+    if change_rate * 100 < -4:
+        # print(f"어제 5일선의 변화율: {change_rate:.5f}")  # 소수점 5자리
+        print(f"                                                        어제 5일선의 변화율: {change_rate * 100:.2f}% → pass")
+        continue
 
     ########################################################################
 
@@ -278,8 +278,9 @@ for count, ticker in enumerate(tickers):
     # 학습이 최소한으로 되었는지 확인 후 실제 예측을 시작
     # R-squared; (0=엉망, 1=완벽)
     r2 = r2_score(y_val, predictions)
-    total_r2 += r2
-    total_cnt += 1
+    if r2 > 0:
+        total_r2 += r2
+        total_cnt += 1
     if r2 < 0.5:
         # print(f"                                                        R-squared 0.7 미만이면 패스 : {r2:.2f}%")
         continue
@@ -304,7 +305,8 @@ for count, ticker in enumerate(tickers):
 
     # 기대 성장률 미만이면 건너뜀
     if avg_future_return < EXPECTED_GROWTH_RATE:
-        print(f"예상 : {avg_future_return:.2f}%")
+        if avg_future_return > 0:
+            print(f"  예상 : {avg_future_return:.2f}%")
         # pass
         continue
 

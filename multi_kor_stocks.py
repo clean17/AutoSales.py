@@ -34,7 +34,7 @@ os.makedirs(pickle_dir, exist_ok=True)
 PREDICTION_PERIOD = 3
 LOOK_BACK = 15
 AVERAGE_TRADING_VALUE = 3_000_000_000 # 평균거래대금 30억
-EXPECTED_GROWTH_RATE = 4
+EXPECTED_GROWTH_RATE = 3
 DATA_COLLECTION_PERIOD = 400 # 샘플 수 = 68(100일 기준) - 20 - 4 + 1 = 45
 
 today = datetime.today().strftime('%Y%m%d')
@@ -62,7 +62,7 @@ total_cnt = 0
 # 데이터 가져오는것만 1시간 걸리네
 for count, ticker in enumerate(tickers):
     stock_name = ticker_to_name.get(ticker, 'Unknown Stock')
-    # print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
+    print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
 
 
     # 데이터가 없으면 1년 데이터 요청, 있으면 5일 데이터 요청
@@ -221,8 +221,7 @@ for count, ticker in enumerate(tickers):
     # feature_cols = [
     #     '종가', '고가', '저가', '거래량',
     # ]
-    # '종가', '고가', 'PBR', '저가', '거래량' > 0.43
-    # '종가', '고가', 'PBR', '저가', '거래량', 'ma10_gap' > 0.21
+    # ma10_gap 끈게 더 실제와 유사.. ?
     feature_cols = [
         '종가', '고가', 'PBR', '저가', '거래량',
         # 'RSI14',
@@ -242,11 +241,10 @@ for count, ticker in enumerate(tickers):
     # 3차원 유지: (n_samples, look_back, n_features)
     X_train, X_val, y_train, y_val = train_test_split(X, Y, test_size=0.1, shuffle=False)  # 시계열 데이터라면 shuffle=False 권장, random_state는 의미 없음(어차피 순서대로 나누니까)
     if X_train.shape[0] < 50:
-        print("                                                        샘플 부족 : ", X_train.shape[0])
+        # print("                                                        샘플 부족 : ", X_train.shape[0])
         continue
 
     # 학습하기 직전에 요청을 보낸다
-    print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
     percent = f'{round((count+1)/len(tickers)*100, 1):.1f}'
     try:
         requests.post(
@@ -318,7 +316,8 @@ for count, ticker in enumerate(tickers):
 
     # 기대 성장률 미만이면 건너뜀
     if avg_future_return < EXPECTED_GROWTH_RATE:
-        # print(f"  예상 : {avg_future_return:.2f}%")
+        if avg_future_return > 0:
+            print(f"  예상 : {avg_future_return:.2f}%")
         continue
 
     # 결과 저장
