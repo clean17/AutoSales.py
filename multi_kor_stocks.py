@@ -33,7 +33,7 @@ os.makedirs(pickle_dir, exist_ok=True)
 
 PREDICTION_PERIOD = 3
 LOOK_BACK = 15
-AVERAGE_TRADING_VALUE = 3_000_000_000 # 평균거래대금 30억
+AVERAGE_TRADING_VALUE = 4_000_000_000 # 평균거래대금 30억
 EXPECTED_GROWTH_RATE = 3
 DATA_COLLECTION_PERIOD = 400 # 샘플 수 = 68(100일 기준) - 20 - 4 + 1 = 45
 
