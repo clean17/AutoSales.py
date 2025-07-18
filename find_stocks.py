@@ -1,18 +1,9 @@
-import matplotlib
-matplotlib.use('Agg')
 import os
-import sys
 import pandas as pd
 from pykrx import stock
 from datetime import datetime, timedelta
-from sklearn.preprocessing import MinMaxScaler
-import matplotlib.pyplot as plt
-from send2trash import send2trash
-import ast
 from utils import create_lstm_model, create_multistep_dataset, fetch_stock_data, add_technical_features, get_kor_ticker_list, check_column_types, get_safe_ticker_list
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-from sklearn.model_selection import train_test_split
-import requests
+import unicodedata
 
 
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
@@ -45,21 +36,21 @@ for count, ticker in enumerate(tickers):
     filepath = os.path.join(pickle_dir, f'{ticker}.pkl')
     if os.path.exists(filepath):
         df = pd.read_pickle(filepath)
-    #     data = fetch_stock_data(ticker, start_yesterday, today)
-    #
-    # # 중복 제거 & 새로운 날짜만 추가
-    # if not df.empty:
-    #     # 기존 날짜 인덱스와 비교하여 새로운 행만 선택
-    #     new_rows = data.loc[~data.index.isin(df.index)] # ~ (not) : 기존에 없는 날짜만 남김
-    #     df = pd.concat([df, new_rows])
-    # else:
-    #     df = data
+        data = fetch_stock_data(ticker, start_yesterday, today)
+
+    # 중복 제거 & 새로운 날짜만 추가
+    if not df.empty:
+        # 기존 날짜 인덱스와 비교하여 새로운 행만 선택
+        new_rows = data.loc[~data.index.isin(df.index)] # ~ (not) : 기존에 없는 날짜만 남김
+        df = pd.concat([df, new_rows])
+    else:
+        df = data
 
     # 너무 먼 과거 데이터 버리기
     if len(df) > 270:
         df = df.iloc[-270:]
 
-    data = df[:-1]
+    data = df
 
     ########################################################################
 
@@ -89,29 +80,26 @@ for count, ticker in enumerate(tickers):
 
     closes = data['종가'].values
 
-    # 오늘/어제/10일전 인덱스 계산
+    # 1. "어제부터 10일 전"의 박스권 체크
+    box_closes = closes[-11:-1]  # 10일 전~어제 (10개)
+    max_close = box_closes.max()
+    min_close = box_closes.min()
+    range_pct = (max_close - min_close) / min_close * 100
+
+    if range_pct >= 4:
+        continue  # 4% 이상 움직이면 박스권 X
+
+    # 2. 오늘 등락률(어제→오늘)
     today_close = closes[-1]
     yesterday_close = closes[-2]
-    close_10ago = closes[-12]
-
-    # 1. 오늘 등락률 계산 (오늘 vs 어제)
     change_pct_today = (today_close - yesterday_close) / yesterday_close * 100
 
     if change_pct_today < 10:
-        continue  # 10% 미만은 제외
+        continue  # 오늘 10% 미만 상승이면 제외
 
-    # 2. 최근 10영업일간(오늘제외) 종가 변화율 (10일 전 vs 어제)
-    close_past10 = closes[-12]  # 10일 전
-    close_yesterday = closes[-2]  # 어제
-    change_10days = (close_yesterday - close_past10) / close_past10 * 100
-
-    if abs(change_10days) >= 4:
-        continue  # 3% 이상 변화면 횡보 X
 
     # 부합하면 결과에 저장 (상승률, 종목명, 코드)
     results.append((change_pct_today, stock_name, ticker))
-
-
 
 
 
@@ -120,9 +108,24 @@ for count, ticker in enumerate(tickers):
 # 내림차순 정렬 (상승률 기준)
 results.sort(reverse=True, key=lambda x: x[0])
 
-# 최대 종목명 길이 계산
-max_name_len = max(len(name) for _, name, _ in results)
+
+# 글자별 시각적 너비 계산 함수 (한글/한자/일본어 2칸, 영문/숫자/특수문자 1칸)
+def visual_width(text):
+    width = 0
+    for c in text:
+        if unicodedata.east_asian_width(c) in 'WF':  # W: Wide, F: Fullwidth
+            width += 2
+        else:
+            width += 1
+    return width
+
+# 시각적 폭 기준 최대값
+max_name_vis_len = max(visual_width(name) for _, name, _ in results)
+
+# 시각적 폭에 맞춰 공백 패딩
+def pad_visual(text, target_width):
+    gap = target_width - visual_width(text)
+    return text + ' ' * gap
 
 for change, stock_name, ticker in results:
-    # 종목명을 왼쪽 정렬 + 공백 padding
-    print(f"==== {stock_name.ljust(max_name_len)} [{ticker}] 상승률 {change:.2f}% ====")
+    print(f"==== {pad_visual(stock_name, max_name_vis_len)} [{ticker}] 상승률 {change:.2f}% ====")
