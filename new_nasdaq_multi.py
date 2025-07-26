@@ -33,7 +33,7 @@ os.makedirs(pickle_dir, exist_ok=True)
 
 
 PREDICTION_PERIOD = 3
-EXPECTED_GROWTH_RATE = 3
+EXPECTED_GROWTH_RATE = 4
 DATA_COLLECTION_PERIOD = 400
 LOOK_BACK = 15
 KR_AVERAGE_TRADING_VALUE = 5_000_000_000
@@ -281,7 +281,7 @@ for count, ticker in enumerate(tickers):
     if r2 > 0:
         total_r2 += r2
         total_cnt += 1
-    if r2 < 0.5:
+    if r2 < 0.6:
         # print(f"                                                        R-squared 0.7 미만이면 패스 : {r2:.2f}%")
         continue
 
