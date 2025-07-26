@@ -1,5 +1,17 @@
 import requests
 import json
+import os
+
+from dotenv import load_dotenv
+import os
+
+load_dotenv()  # .env 파일을 현재 환경변수로 로드
+
+M_APP_KEY = os.environ.get('M_APP_KEY')
+M_SECRET_KEY = os.environ.get('M_SECRET_KEY')
+
+print(M_APP_KEY)
+print(M_SECRET_KEY)
 
 # 접근토큰 발급
 def fn_au10001(data):
