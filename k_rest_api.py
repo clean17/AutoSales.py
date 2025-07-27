@@ -10,9 +10,6 @@ load_dotenv()  # .env 파일을 현재 환경변수로 로드
 M_APP_KEY = os.environ.get('M_APP_KEY')
 M_SECRET_KEY = os.environ.get('M_SECRET_KEY')
 
-print(M_APP_KEY)
-print(M_SECRET_KEY)
-
 # 접근토큰 발급
 def fn_au10001(data):
     # 1. 요청할 API URL
@@ -39,8 +36,8 @@ if __name__ == '__main__':
     # 1. 요청 데이터
     params = {
         'grant_type': 'client_credentials',  # grant_type
-        'appkey': 'AxserEsdcredca.....',  # 앱키
-        'secretkey': 'SEefdcwcforehDre2fdvc....',  # 시크릿키
+        'appkey': M_APP_KEY,  # 앱키
+        'secretkey': M_SECRET_KEY,  # 시크릿키
     }
 
     # 2. API 실행
