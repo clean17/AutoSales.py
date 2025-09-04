@@ -15,6 +15,12 @@ import tensorflow as tf
 from send2trash import send2trash
 import ast
 
+'''
+2024.08.09 ~ 2025.01.01
+첫번째 예측 스크립트
+현재는 사용하지 않는다
+'''
+
 # Set random seed for reproducibility
 # tf.random.set_seed(42)
 

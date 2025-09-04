@@ -5,6 +5,10 @@ from datetime import datetime, timedelta
 from utils import create_lstm_model, create_multistep_dataset, fetch_stock_data, add_technical_features, get_kor_ticker_list, check_column_types, get_safe_ticker_list
 import unicodedata
 
+'''
+급등주 탐색
+최근 2주동안 지지부진한 상태였는데 갑자기 폭등한 주식을 찾는다
+'''
 
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
 root_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(=루트)

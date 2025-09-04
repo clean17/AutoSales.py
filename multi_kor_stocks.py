@@ -109,12 +109,12 @@ for count, ticker in enumerate(tickers):
         # print("                                                        종가가 0이거나 500원 미만 → pass")
         continue
 
-    # 최근 한달 거래대금 중 4억 미만이 있으면 패스
+    # 최근 한달 거래대금 중 3억 미만이 있으면 패스
     month_data = data.tail(20)
     month_trading_value = month_data['거래량'] * month_data['종가']
-    # 하루라도 거래대금이 4억 미만이 있으면 제외
+    # 하루라도 거래대금이 3억 미만이 있으면 제외
     if (month_trading_value < 300_000_000).any():
-        # print(f"                                                        최근 4주 중 거래대금 4억 미만 발생 → pass")
+        # print(f"                                                        최근 4주 중 거래대금 3억 미만 발생 → pass")
         continue
 
     # 최근 2주 거래대금이 기준치 이하면 패스
@@ -161,11 +161,11 @@ for count, ticker in enumerate(tickers):
 
 
     # 현재 종가가 4일 전에 비해서 크게 하락하면 패스
-    close_4days_ago = actual_prices[-5]
-    rate = (last_close / close_4days_ago - 1) * 100 # 오늘 종가와 4일 전 종가의 상승/하락률(%)
-    if rate <= -18:
-        print(f"                                                        4일 전 대비 {rate:.2f}% 하락 → pass")
-        continue  # 또는 return
+    # close_4days_ago = actual_prices[-5]
+    # rate = (last_close / close_4days_ago - 1) * 100 # 오늘 종가와 4일 전 종가의 상승/하락률(%)
+    # if rate <= -18:
+    #     print(f"                                                        4일 전 대비 {rate:.2f}% 하락 → pass")
+    #     continue  # 또는 return
 
     # # 최근 한달 동안의 변동률이 적으면 패스
     # idx_list = [-5, -10, -15, -20]

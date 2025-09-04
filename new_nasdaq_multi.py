@@ -36,7 +36,7 @@ PREDICTION_PERIOD = 3
 EXPECTED_GROWTH_RATE = 4
 DATA_COLLECTION_PERIOD = 400
 LOOK_BACK = 15
-KR_AVERAGE_TRADING_VALUE = 5_000_000_000
+KR_AVERAGE_TRADING_VALUE = 6_000_000_000
 
 exchangeRate = get_usd_krw_rate()
 if exchangeRate is None:
@@ -121,19 +121,31 @@ for count, ticker in enumerate(tickers):
         # print("                                                        종가가 0이거나 500원 미만이므로 작업을 건너뜁니다.")
         continue
 
+    # 한달 데이터
+    month_data = data.tail(20)
+    month_trading_value = month_data['Volume'] * month_data['Close']
+    # 하루라도 거래대금이 5억 미만이 있으면 제외
+    if (month_trading_value * exchangeRate < 500_000_000).any():
+        # print(f"                                                        최근 4주 중 거래대금 5억 미만 발생 → pass")
+        continue
+
     # 최근 2 주
     recent_data = data.tail(10)
     recent_trading_value = recent_data['Volume'] * recent_data['Close']     # 최근 2주 거래대금 리스트
-    # 하루라도 4억 미만이 있으면 제외
-    if (recent_trading_value * exchangeRate < 400_000_000).any():
-        # print(f"                                                        최근 2주 중 거래대금 4억 미만 발생 → 제외")
-        continue
-
     recent_average_trading_value = recent_trading_value.mean()
     if recent_average_trading_value * exchangeRate <= KR_AVERAGE_TRADING_VALUE:
         formatted_recent_value = f"{(recent_average_trading_value * exchangeRate)/ 100_000_000:.0f}억"
         print(f"                                                        최근 2주 평균 거래액({formatted_recent_value})이 부족하여 작업을 건너뜁니다.")
         continue
+
+    # 투경 조건
+    # 1. 당일의 종가가 3일 전날의 종가보다 100% 이상 상승
+    if len(actual_prices) >= 4:
+        close_3ago = actual_prices[-4]
+        ratio = (last_close - close_3ago) / close_3ago * 100
+        if last_close >= close_3ago * 2:  # 100% 이상 상승
+            print(f"                                                        3일 전 대비 100% 이상 상승: {close_3ago} -> {last_close}  {ratio:.2f}% → pass")
+            continue
 
     # rolling window로 5일 전 대비 현재가 3배 이상 오른 지점 찾기
     rolling_min = data['Close'].rolling(window=5).min()    # 5일 중 최소가
@@ -195,11 +207,11 @@ for count, ticker in enumerate(tickers):
     ma5_yesterday = data['MA5'].iloc[-2]
 
     # 변화율 계산 (퍼센트로 보려면 * 100)
-    change_rate = (ma5_today - ma5_yesterday) / ma5_yesterday
-    if change_rate * 100 < -4:
-        # print(f"어제 5일선의 변화율: {change_rate:.5f}")  # 소수점 5자리
-        print(f"                                                        어제 5일선의 변화율: {change_rate * 100:.2f}% → pass")
-        continue
+    # change_rate = (ma5_today - ma5_yesterday) / ma5_yesterday
+    # if change_rate * 100 < -4:
+    #     # print(f"어제 5일선의 변화율: {change_rate:.5f}")  # 소수점 5자리
+    #     print(f"                                                        어제 5일선의 변화율: {change_rate * 100:.2f}% → pass")
+    #     continue
 
     ########################################################################
 
