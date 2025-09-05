@@ -4,10 +4,11 @@ from pykrx import stock
 from datetime import datetime, timedelta
 from utils import create_lstm_model, create_multistep_dataset, fetch_stock_data, add_technical_features, get_kor_ticker_list, check_column_types, get_safe_ticker_list
 import unicodedata
+import requests
 
 '''
 급등주 탐색
-최근 2주동안 지지부진한 상태였는데 갑자기 폭등한 주식을 찾는다
+최근 2주동안 횡보하다가 갑자기 폭등한 주식 찾기
 '''
 
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
@@ -15,10 +16,8 @@ root_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 
 pickle_dir = os.path.join(root_dir, 'pickle')
 
 # pickle 폴더가 없으면 자동 생성 (이미 있으면 무시)
-LOOK_BACK = 15
 os.makedirs(pickle_dir, exist_ok=True)
 
-RATE_OF_CHANGE = 10
 AVERAGE_TRADING_VALUE = 1_000_000_000 # 평균거래대금
 
 today = datetime.today().strftime('%Y%m%d')
@@ -85,9 +84,12 @@ for count, ticker in enumerate(tickers):
     closes = data['종가'].values
 
     # 1. "어제부터 10일 전"의 박스권 체크
-    box_closes = closes[-11:-1]  # 10일 전~어제 (10개)
+    box_closes = closes[-11:-1]  # 10일 전 ~ 오늘 이전 (10개)
+    # print('box', box_closes)
     max_close = box_closes.max()
+    # print('max', max_close)
     min_close = box_closes.min()
+    # print('min', min_close)
     range_pct = (max_close - min_close) / min_close * 100
 
     if range_pct >= 4:
@@ -95,41 +97,66 @@ for count, ticker in enumerate(tickers):
 
     # 2. 오늘 등락률(어제→오늘)
     today_close = closes[-1]
+    # print('today', today_close)
     yesterday_close = closes[-2]
+    # print('yesterday', yesterday_close)
     change_pct_today = (today_close - yesterday_close) / yesterday_close * 100
 
     if change_pct_today < 10:
         continue  # 오늘 10% 미만 상승이면 제외
 
 
-    # 부합하면 결과에 저장 (상승률, 종목명, 코드)
-    results.append((change_pct_today, stock_name, ticker))
-
+    # 부합하면 결과에 저장 (상승률, 종목명, 코드)}
+    change_pct_today = round(change_pct_today, 2)
+    results.append((change_pct_today, stock_name, ticker, today_close, yesterday_close))
+    try:
+        requests.post(
+            'http://localhost:8090/func/stocks/interest',
+            json={
+                "nation": "kor",
+                "stock_code": str(ticker),
+                "stock_name": str(stock_name),
+                "pred_price_change_3d_pct": "",
+                "yesterday_close": str(yesterday_close),
+                "current_price": str(today_close),
+                "today_price_change_pct": str(change_pct_today),
+                "avg5d_trading_value": "",
+                "current_trading_value":"",
+                "trading_value_change_pct": "",
+                "image_url": "",
+            },
+            timeout=5
+        )
+    except Exception as e:
+        # logging.warning(f"progress-update 요청 실패: {e}")
+        print(f"progress-update 요청 실패: {e}")
+        pass  # 오류
 
 
 #######################################################################
 
-# 내림차순 정렬 (상승률 기준)
-results.sort(reverse=True, key=lambda x: x[0])
+if len(results) > 0:
+    # 내림차순 정렬 (상승률 기준)
+    results.sort(reverse=True, key=lambda x: x[0])
 
 
-# 글자별 시각적 너비 계산 함수 (한글/한자/일본어 2칸, 영문/숫자/특수문자 1칸)
-def visual_width(text):
-    width = 0
-    for c in text:
-        if unicodedata.east_asian_width(c) in 'WF':  # W: Wide, F: Fullwidth
-            width += 2
-        else:
-            width += 1
-    return width
+    # 글자별 시각적 너비 계산 함수 (한글/한자/일본어 2칸, 영문/숫자/특수문자 1칸)
+    def visual_width(text):
+        width = 0
+        for c in text:
+            if unicodedata.east_asian_width(c) in 'WF':  # W: Wide, F: Fullwidth
+                width += 2
+            else:
+                width += 1
+        return width
 
-# 시각적 폭 기준 최대값
-max_name_vis_len = max(visual_width(name) for _, name, _ in results)
+    # 시각적 폭 기준 최대값
+    max_name_vis_len = max(visual_width(name) for _, name, _, _, _ in results)
 
-# 시각적 폭에 맞춰 공백 패딩
-def pad_visual(text, target_width):
-    gap = target_width - visual_width(text)
-    return text + ' ' * gap
+    # 시각적 폭에 맞춰 공백 패딩
+    def pad_visual(text, target_width):
+        gap = target_width - visual_width(text)
+        return text + ' ' * gap
 
-for change, stock_name, ticker in results:
-    print(f"==== {pad_visual(stock_name, max_name_vis_len)} [{ticker}] 상승률 {change:.2f}% ====")
+    for change, stock_name, ticker, current_price, yesterday_close in results:
+        print(f"==== {pad_visual(stock_name, max_name_vis_len)} [{ticker}] 상승률 {change:.2f}% ====")
