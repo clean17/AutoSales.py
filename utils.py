@@ -8,6 +8,8 @@ import yfinance as yf
 import os
 import re
 from bs4 import BeautifulSoup
+from typing import Optional
+
 
 # 시드 고정
 import numpy as np, tensorflow as tf, random
@@ -386,3 +388,50 @@ def add_technical_features_us(data, window=20, num_std=2):
 def check_column_types(data, columns):
     for col in columns:
         print(f"[{col}] type: {type(data[col])}, shape: {data[col].shape}")
+
+
+
+def get_name_from_usa_ticker(ticker: str) -> Optional[str]:
+    TOSSINVEST_API_URL = "https://wts-info-api.tossinvest.com/api/v3/search-all/wts-auto-complete"
+
+    payload = {
+        "query":str(ticker),
+        "sections":[
+            {"type":"SCREENER"},
+            {"type":"NEWS"},
+            {"type":"PRODUCT","option":{"addIntegratedSearchResult":"true"}},
+            {"type":"TICS"}
+        ]
+    }
+
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        # timeout=(연결, 읽기)
+        resp = requests.post(TOSSINVEST_API_URL, json=payload, headers=headers, timeout=(5, 15))
+        resp.raise_for_status()                     # 4xx/5xx면 예외 발생
+
+        data = resp.json()
+
+        keywords = []
+        for block in data.get("result", []):
+            if block.get("type") == "PRODUCT":
+                for item in block.get("data", {}).get("items", []):
+                    if item.get("keyword"):
+                        keywords.append(item.get("keyword"))
+
+
+        first_keyword = keywords[0] if keywords else None
+        return first_keyword
+
+    except requests.exceptions.JSONDecodeError:
+        print("응답이 JSON 형식이 아닙니다:", resp.text[:500])
+    except requests.exceptions.Timeout:
+        print("요청 타임아웃")
+    except requests.exceptions.HTTPError as e:
+        print("HTTP 에러:", e.response.status_code, e.response.text[:500])
+    except requests.exceptions.RequestException as e:
+        print("네트워크/요청 에러:", repr(e))

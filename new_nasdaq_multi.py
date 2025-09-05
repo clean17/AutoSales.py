@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from sklearn.preprocessing import MinMaxScaler
 import matplotlib.pyplot as plt
 from send2trash import send2trash
-from utils import create_lstm_model, create_multistep_dataset, fetch_stock_data_us, get_nasdaq_symbols, extract_stock_code_from_filenames, get_usd_krw_rate, add_technical_features_us, check_column_types
+from utils import create_lstm_model, create_multistep_dataset, fetch_stock_data_us, get_nasdaq_symbols, extract_stock_code_from_filenames, get_usd_krw_rate, add_technical_features_us, check_column_types, get_name_from_usa_ticker
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.model_selection import train_test_split
 import requests
@@ -293,7 +293,7 @@ for count, ticker in enumerate(tickers):
     if r2 > 0:
         total_r2 += r2
         total_cnt += 1
-    if r2 < 0.6:
+    if r2 < 0.62:
         # print(f"                                                        R-squared 0.7 미만이면 패스 : {r2:.2f}%")
         continue
 
@@ -322,8 +322,10 @@ for count, ticker in enumerate(tickers):
         # pass
         continue
 
+    stock_name = get_name_from_usa_ticker(ticker)
+
     # 결과 저장
-    results.append((avg_future_return, ticker))
+    results.append((avg_future_return, ticker, stock_name))
 
     # 기존 파일 삭제
     for file_name in os.listdir(output_dir):
@@ -401,7 +403,7 @@ for count, ticker in enumerate(tickers):
     plt.tight_layout()
 
     # 파일 저장 (옵션)
-    final_file_name = f'{today} [ {avg_future_return:.2f}% ] {ticker}.png'
+    final_file_name = f'{today} [ {avg_future_return:.2f}% ] {stock_name} [{ticker}].png'
     final_file_path = os.path.join(output_dir, final_file_name)
     plt.savefig(final_file_path)
     plt.close()
@@ -411,8 +413,8 @@ for count, ticker in enumerate(tickers):
 # 정렬 및 출력
 results.sort(reverse=True, key=lambda x: x[0])
 
-for avg_future_return, ticker in results:
-    print(f"==== [ {avg_future_return:.2f}% ] [{ticker}] ====")
+for avg_future_return, ticker, stock_name in results:
+    print(f"==== [ {avg_future_return:.2f}% ] {stock_name} [{ticker}] ====")
 
 try:
     requests.post(

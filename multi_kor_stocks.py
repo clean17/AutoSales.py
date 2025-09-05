@@ -292,7 +292,7 @@ for count, ticker in enumerate(tickers):
         total_r2 += r2
         total_cnt += 1
     # print(f"                                                        R-squared 0.7 미만이면 패스 : {r2:.2f}%")
-    if r2 < 0.6:
+    if r2 < 0.62:
         # print(f"                                                        R-squared 0.7 미만이면 패스 : {r2:.2f}%")
         continue
 
