@@ -18,9 +18,14 @@ tf.random.set_seed(42)
 random.seed(42)
 
 def get_kor_ticker_list():
-    tickers_kospi = get_safe_ticker_list(market="KOSPI")
-    tickers_kosdaq = get_safe_ticker_list(market="KOSDAQ")
-    tickers = tickers_kospi + tickers_kosdaq
+    # tickers_kospi = get_safe_ticker_list(market="KOSPI")
+    # tickers_kosdaq = get_safe_ticker_list(market="KOSDAQ")
+    # tickers = tickers_kospi + tickers_kosdaq
+
+    url = "https://chickchick.shop/func/stocks/kor"
+    res = requests.get(url)
+    data = res.json()
+    tickers = [item["stock_code"] for item in data if "stock_code" in item]
     return tickers
 
 def get_safe_ticker_list(market="KOSPI"):
