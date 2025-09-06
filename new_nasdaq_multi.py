@@ -386,7 +386,7 @@ for count, ticker in enumerate(tickers):
 
     ax1.legend()
     ax1.grid(True)
-    ax1.set_title(f'{end_date}  {ticker} (Expected Return: {avg_future_return:.2f}%)')
+    ax1.set_title(f'{end_date}  {stock_name} [{ticker}] (Expected Return: {avg_future_return:.2f}%)')
 
     # --- 하단: 거래량 (양/음/동색 구분) ---
     ax2.bar(data_plot_recent['date_str'], data_plot_recent['Volume'], color=bar_colors, alpha=0.65)
