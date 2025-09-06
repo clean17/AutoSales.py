@@ -110,6 +110,31 @@ for count, ticker in enumerate(tickers):
         # print('ratio', ratio)
         # 결과: (배수, 종목명, 코드, 오늘거래대금, 5일평균거래대금)
 
+        try:
+            res = requests.post(
+                'http://localhost:8090/func/stocks/info',
+                json={"stock_name": str(ticker)},
+                timeout=5
+            )
+            data = res.json()
+            product_code = data.result[0].data.items[0].productCode;
+
+            res2 = requests.post(
+                'http://localhost:8090/func/stocks/overview',
+                json={"product_code": str(product_code)},
+                timeout=5
+            )
+            data2 = res2.json()
+            # 시가총액
+            market_value = data2["result"]["marketValueKrw"]
+            # 시가총액이 500억보다 작으면 패스
+            if (market_value < 50_000_000_000):
+                continue
+
+        except Exception as e:
+            print(f"info 요청 실패: {e}")
+            pass  # 오류
+
         ratio = round(ratio, 2)
         results.append((ratio, stock_name, ticker, float(today_val), float(avg5)))
 
@@ -128,6 +153,7 @@ for count, ticker in enumerate(tickers):
                     "current_trading_value": str(today_val),
                     "trading_value_change_pct": str(ratio),
                     "image_url": "",
+                    "market_value": str(market_value),
                 },
                 timeout=5
             )

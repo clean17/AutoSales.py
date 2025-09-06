@@ -106,9 +106,36 @@ for count, ticker in enumerate(tickers):
         continue  # 오늘 10% 미만 상승이면 제외
 
 
+    try:
+        res = requests.post(
+            'http://localhost:8090/func/stocks/info',
+            json={"stock_name": str(ticker)},
+            timeout=5
+        )
+        data = res.json()
+        product_code = data.result[0].data.items[0].productCode;
+
+        res2 = requests.post(
+            'http://localhost:8090/func/stocks/overview',
+            json={"product_code": str(product_code)},
+            timeout=5
+        )
+        data2 = res2.json()
+        # 시가총액
+        market_value = data2["result"]["marketValueKrw"]
+        # 시가총액이 500억보다 작으면 패스
+        if (market_value < 50_000_000_000):
+            continue
+
+    except Exception as e:
+        print(f"info 요청 실패: {e}")
+        pass  # 오류
+
+
     # 부합하면 결과에 저장 (상승률, 종목명, 코드)}
     change_pct_today = round(change_pct_today, 2)
     results.append((change_pct_today, stock_name, ticker, today_close, yesterday_close))
+
     try:
         requests.post(
             'http://localhost:8090/func/stocks/interest',
@@ -124,6 +151,7 @@ for count, ticker in enumerate(tickers):
                 "current_trading_value":"",
                 "trading_value_change_pct": "",
                 "image_url": "",
+                "market_value": str(market_value),
             },
             timeout=5
         )
