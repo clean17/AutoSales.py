@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 from pykrx import stock
 from datetime import datetime, timedelta
-from utils import create_lstm_model, create_multistep_dataset, fetch_stock_data, add_technical_features, get_kor_ticker_list, check_column_types, get_safe_ticker_list
+from utils import fetch_stock_data, add_technical_features
 import unicodedata
 import requests
 
@@ -22,7 +22,11 @@ os.makedirs(pickle_dir, exist_ok=True)
 today = datetime.today().strftime('%Y%m%d')
 start_yesterday = (datetime.today() - timedelta(days=1)).strftime('%Y%m%d')
 
-tickers = get_kor_ticker_list()
+url = "https://chickchick.shop/func/stocks/kor"
+res = requests.get(url)
+data = res.json()
+tickers = [item["stock_code"] for item in data if "stock_code" in item]
+# tickers = get_kor_ticker_list()
 ticker_to_name = {ticker: stock.get_market_ticker_name(ticker) for ticker in tickers}
 
 
@@ -112,15 +116,15 @@ for count, ticker in enumerate(tickers):
 
         try:
             res = requests.post(
-                'http://localhost:8090/func/stocks/info',
+                'https://chickchick.shop/func/stocks/info',
                 json={"stock_name": str(ticker)},
                 timeout=5
             )
             data = res.json()
-            product_code = data.result[0].data.items[0].productCode;
+            product_code = data["result"][0]["data"]["items"][0]["productCode"]
 
             res2 = requests.post(
-                'http://localhost:8090/func/stocks/overview',
+                'https://chickchick.shop/func/stocks/overview',
                 json={"product_code": str(product_code)},
                 timeout=5
             )
@@ -140,7 +144,7 @@ for count, ticker in enumerate(tickers):
 
         try:
             requests.post(
-                'http://localhost:8090/func/stocks/interest',
+                'https://chickchick.shop/func/stocks/interest',
                 json={
                     "nation": "kor",
                     "stock_code": str(ticker),
