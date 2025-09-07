@@ -8,6 +8,8 @@ import yfinance as yf
 import os
 import re
 from typing import Optional
+import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
 
 
 # 시드 고정
@@ -445,3 +447,75 @@ def get_name_from_usa_ticker(ticker: str) -> Optional[str]:
         print("HTTP 에러:", e.response.status_code, e.response.text[:500])
     except requests.exceptions.RequestException as e:
         print("네트워크/요청 에러:", repr(e))
+
+
+# matplotlib로 캔들스틱 그래프 만들기
+def plot_candles_standard(data: pd.DataFrame, show_months=5, title="Bollinger Bands And Volume (Candlestick — close vs open)", show_weekly=True):
+    df = data.copy()
+
+    # 최근 5개월만
+    end   = df.index.max()
+    start = end - pd.DateOffset(months=show_months)
+    df = df.loc[start:end].copy()
+    df.index = pd.to_datetime(df.index)
+
+    # ==== 색상 기준: 종가 vs 시가 ====
+    openp  = df['시가'].to_numpy()
+    closep = df['종가'].to_numpy()
+    high   = df['고가'].to_numpy()
+    low    = df['저가'].to_numpy()
+
+    up   = closep > openp
+    down = closep < openp
+    same = ~(up | down) # 상승이거나 하락이 아닌경우 = 보함
+
+    colors = np.where(up, 'red', np.where(down, 'blue', 'gray'))
+
+    # x축 위치, 동일한 간격
+    x = np.arange(len(df))
+    date_str = df.index.strftime('%Y-%m-%d')
+
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(20, 12),
+                                   sharex=True, gridspec_kw={'height_ratios': [3, 1]})
+
+    # --- 윗부분: 캔들 + 지표 ---
+
+    # 1) 윅(저~고) - 방향별 색상 적용
+    ax1.vlines(x[up],   low[up],   high[up],   color='red',  linewidth=1, alpha=0.9)
+    ax1.vlines(x[down], low[down], high[down], color='blue', linewidth=1, alpha=0.9)
+    ax1.vlines(x[same], low[same], high[same], color='gray', linewidth=1, alpha=0.9)
+
+    # 2) 몸통(시가↔종가) - 방향별 색상 적용
+    width = 0.6 # 캔들 폭
+    for i, (o, c, col) in enumerate(zip(openp, closep, colors)):
+        bottom = min(o, c)
+        height = max(abs(c - o), 1e-8)  # 0폭 방지
+        ax1.add_patch(Rectangle((x[i] - width/2, bottom), width, height,
+                                facecolor=col, edgecolor=col, alpha=0.9))
+
+    # (옵션) 이동평균/볼밴 있으면 오버레이
+    if 'MA20' in df.columns:
+        ax1.plot(x, df['MA20'], label='MA20', alpha=0.9)
+    if 'MA5' in df.columns:
+        ax1.plot(x, df['MA5'], label='MA5', alpha=0.9)
+    if {'UpperBand','LowerBand'}.issubset(df.columns):
+        ax1.plot(x, df['UpperBand'], label='Upper Band (2σ)', linestyle='--', alpha=0.8)
+        ax1.plot(x, df['LowerBand'], label='Lower Band (2σ)', linestyle='--', alpha=0.8)
+        ax1.fill_between(x, df['UpperBand'], df['LowerBand'], color='gray', alpha=0.18)
+
+    ax1.set_title(title)
+    ax1.grid(True)
+    ax1.legend()
+
+    # --- 아랫부분: 거래량 (윗부분과 동일 색) ---
+    ax2.bar(x, df['거래량'], color=colors, alpha=0.7)
+    ax2.set_ylabel('Volume')
+    ax2.grid(True)
+
+    # x축 라벨(10개 간격, 10거래일)
+    tick_idx = np.arange(0, len(df), 10)
+    ax2.set_xticks(tick_idx)
+    ax2.set_xticklabels(date_str[tick_idx], rotation=45, ha='right')
+
+    plt.tight_layout()
+    plt.show()
