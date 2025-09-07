@@ -7,29 +7,26 @@ from tensorflow.keras.models import Sequential, load_model
 from tensorflow.keras.layers import LSTM, Dense, Dropout
 import matplotlib.pyplot as plt
 from tensorflow.keras.callbacks import ModelCheckpoint
-import os
 import pickle
+import os, sys
+from pathlib import Path
+
+# 자동 탐색 (utils.py를 찾을 때까지 위로 올라가 탐색)
+here = Path(__file__).resolve()
+for parent in [here.parent, *here.parents]:
+    if (parent / "utils.py").exists():
+        sys.path.insert(0, str(parent))
+        break
+else:
+    raise FileNotFoundError("utils.py를 상위 디렉터리에서 찾지 못했습니다.")
+
+from utils import invert_scale
 
 # 시드 고정 테스트
 import numpy as np, tensorflow as tf, random
 np.random.seed(42)
 tf.random.set_seed(42)
 random.seed(42)
-
-# 예측 결과를 실제 값(주가)으로 복원
-def invert_scale(scaled_preds, scaler, feature_index=3):
-    """
-    scaled_preds: (샘플수, forecast_horizon) - 스케일된 종가 예측 결과
-    scaler: 학습에 사용된 MinMaxScaler 객체
-    feature_index: 종가 컬럼 인덱스(보통 3)
-    """
-    inv_preds = []
-    for row in scaled_preds:
-        temp = np.zeros((len(row), scaler.n_features_in_))
-        temp[:, feature_index] = row  # 종가 위치에 예측값 할당
-        inv = scaler.inverse_transform(temp)[:, feature_index]  # 역변환 후 종가만 추출
-        inv_preds.append(inv)
-    return np.array(inv_preds)
 
 
 # 데이터 수집

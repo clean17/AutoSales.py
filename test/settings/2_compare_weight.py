@@ -1,27 +1,29 @@
 import FinanceDataReader as fdr
-import numpy as np
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout
 from tensorflow.keras.callbacks import EarlyStopping
-import os
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+import os, sys
+from pathlib import Path
+
+# 자동 탐색 (utils.py를 찾을 때까지 위로 올라가 탐색)
+here = Path(__file__).resolve()
+for parent in [here.parent, *here.parents]:
+    if (parent / "utils.py").exists():
+        sys.path.insert(0, str(parent))
+        break
+else:
+    raise FileNotFoundError("utils.py를 상위 디렉터리에서 찾지 못했습니다.")
+
+from utils import invert_scale
 
 # 시드 고정 테스트
 import numpy as np, tensorflow as tf, random
 np.random.seed(42)
 tf.random.set_seed(42)
 random.seed(42)
-
-def invert_scale(scaled_preds, scaler, feature_index=3):
-    inv_preds = []
-    for row in scaled_preds:
-        temp = np.zeros((len(row), scaler.n_features_in_))
-        temp[:, feature_index] = row
-        inv = scaler.inverse_transform(temp)[:, feature_index]
-        inv_preds.append(inv)
-    return np.array(inv_preds)
 
 # 여러 종목코드 예시
 tickers = ['214450']

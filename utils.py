@@ -7,7 +7,6 @@ import requests
 import yfinance as yf
 import os
 import re
-from bs4 import BeautifulSoup
 from typing import Optional
 
 
@@ -16,6 +15,12 @@ import numpy as np, tensorflow as tf, random
 np.random.seed(42)
 tf.random.set_seed(42)
 random.seed(42)
+
+def get_kor_ticker_list_by_pykrx():
+    tickers_kospi = get_safe_ticker_list(market="KOSPI")
+    tickers_kosdaq = get_safe_ticker_list(market="KOSDAQ")
+    tickers = tickers_kospi + tickers_kosdaq
+    return tickers
 
 def get_kor_ticker_list():
     # tickers_kospi = get_safe_ticker_list(market="KOSPI")
@@ -225,18 +230,18 @@ def create_lstm_model(input_shape, n_future,
     return model
 
 
-# def create_model(input_shape, n_future):
-#     model = Sequential([
-#         LSTM(32, return_sequences=True, input_shape=(input_shape)),
-#         Dropout(0.2),
-#         LSTM(16, return_sequences=False),
-#         Dropout(0.2),
-#         Dense(16, activation='relu'),
-#         Dense(8, activation='relu'),
-#         Dense(n_future)
-#     ])
-#     model.compile(optimizer='adam', loss='mean_squared_error')
-#     return model
+def create_model(input_shape, n_future):
+    model = Sequential([
+        LSTM(32, return_sequences=True, input_shape=(input_shape)),
+        Dropout(0.2),
+        LSTM(16, return_sequences=False),
+        Dropout(0.2),
+        Dense(16, activation='relu'),
+        Dense(8, activation='relu'),
+        Dense(n_future)
+    ])
+    model.compile(optimizer='adam', loss='mean_squared_error')
+    return model
 
 
 def compute_rsi(prices, period=14):

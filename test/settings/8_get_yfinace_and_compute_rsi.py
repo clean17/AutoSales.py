@@ -1,5 +1,19 @@
 import yfinance as yf
 
+import os, sys
+from pathlib import Path
+
+# 자동 탐색 (utils.py를 찾을 때까지 위로 올라가 탐색)
+here = Path(__file__).resolve()
+for parent in [here.parent, *here.parents]:
+    if (parent / "utils.py").exists():
+        sys.path.insert(0, str(parent))
+        break
+else:
+    raise FileNotFoundError("utils.py를 상위 디렉터리에서 찾지 못했습니다.")
+
+from utils import compute_rsi
+
 ticker = 'RKLB'
 start_date = '2024-01-01'
 end_date = '2024-06-14'
@@ -19,18 +33,8 @@ else:
     # print(df)
 
 
-import pandas as pd
 import matplotlib.pyplot as plt
 
-def compute_rsi(prices, period=14):
-    delta = prices.diff()
-    up = delta.clip(lower=0)
-    down = -delta.clip(upper=0)
-    ma_up = up.rolling(window=period, min_periods=1).mean()
-    ma_down = down.rolling(window=period, min_periods=1).mean()
-    rs = ma_up / ma_down
-    rsi = 100 - (100 / (1 + rs))
-    return rsi
 
 # 예시: 종가 데이터프레임
 data = df

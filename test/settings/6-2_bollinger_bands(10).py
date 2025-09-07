@@ -1,11 +1,18 @@
 from datetime import datetime, timedelta
 import matplotlib.pyplot as plt
-import os
-import sys
+import pandas as pd
 
-# 현재 파일에서 2단계 위 폴더 경로 구하기
-BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
-sys.path.append(BASE_DIR)
+import os, sys
+from pathlib import Path
+
+# 자동 탐색 (utils.py를 찾을 때까지 위로 올라가 탐색)
+here = Path(__file__).resolve()
+for parent in [here.parent, *here.parents]:
+    if (parent / "utils.py").exists():
+        sys.path.insert(0, str(parent))
+        break
+else:
+    raise FileNotFoundError("utils.py를 상위 디렉터리에서 찾지 못했습니다.")
 
 from utils import fetch_stock_data
 
@@ -49,16 +56,25 @@ MA가 하락 중일 때 과매도 신호는 “하락 추세 속 과매도”이
 window_10 = 10
 num_std = 2
 
-# 데이터 수집
-# today = datetime.today().strftime('%Y%m%d')
-today = (datetime.today() - timedelta(days=5)).strftime('%Y%m%d')
-last_year = (datetime.today() - timedelta(days=100)).strftime('%Y%m%d')
 # ticker = "002380"
 ticker = "000660"
 
-data = fetch_stock_data(ticker, last_year, today)
-# data.to_pickle(f'{ticker}.pkl')
-# data = pd.read_pickle(f'{ticker}.pkl')
+DATA_COLLECTION_PERIOD = 400 # 샘플 수 = 68(100일 기준) - 20 - 4 + 1 = 45
+# 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
+root_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(=루트)
+pickle_dir = os.path.join(root_dir, 'pickle')
+start_five_date = (datetime.today() - timedelta(days=5)).strftime('%Y%m%d')
+start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y%m%d')
+today = datetime.today().strftime('%Y%m%d')
+
+# 데이터가 없으면 1년 데이터 요청, 있으면 5일 데이터 요청
+filepath = os.path.join(pickle_dir, f'{ticker}.pkl')
+if os.path.exists(filepath):
+    df = pd.read_pickle(filepath)
+    data = fetch_stock_data(ticker, start_five_date, today)
+else:
+    df = pd.DataFrame()
+    data = fetch_stock_data(ticker, start_date, today)
 
 
 # 볼린저밴드 10

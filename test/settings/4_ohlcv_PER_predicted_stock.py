@@ -1,13 +1,23 @@
 import pandas as pd
-import numpy as np
 from pykrx import stock
 from datetime import datetime, timedelta
 from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras.models import Sequential, load_model
 from tensorflow.keras.layers import LSTM, Dense, Dropout
 import matplotlib.pyplot as plt
-import tensorflow as tf
-import os
+import os, sys
+from pathlib import Path
+
+# 자동 탐색 (utils.py를 찾을 때까지 위로 올라가 탐색)
+here = Path(__file__).resolve()
+for parent in [here.parent, *here.parents]:
+    if (parent / "utils.py").exists():
+        sys.path.insert(0, str(parent))
+        break
+else:
+    raise FileNotFoundError("utils.py를 상위 디렉터리에서 찾지 못했습니다.")
+
+from utils import fetch_stock_data
 
 # 시드 고정 테스트
 import numpy as np, tensorflow as tf, random
@@ -16,24 +26,13 @@ tf.random.set_seed(42)
 random.seed(42)
 
 # 데이터 수집
-# today = datetime.today().strftime('%Y%m%d')
-today = (datetime.today() - timedelta(days=5)).strftime('%Y%m%d')
+today = datetime.today().strftime('%Y%m%d')
+# today = (datetime.today() - timedelta(days=5)).strftime('%Y%m%d')
 last_year = (datetime.today() - timedelta(days=80)).strftime('%Y%m%d')
 ticker = "000660"
 
-# 주식 데이터(시가, 고가, 저가, 종가, 거래량)와 재무 데이터(PER)를 가져온다
-def fetch_stock_data(ticker, fromdate, todate):
-    ohlcv = stock.get_market_ohlcv_by_date(fromdate=fromdate, todate=today, ticker=ticker)
-    fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker)
-    if 'PER' not in fundamental.columns:
-        fundamental['PER'] = 0
-    else:
-        fundamental['PER'] = fundamental['PER'].fillna(0)
-    data = pd.concat([ohlcv, fundamental['PER']], axis=1).fillna(0)
-    return data
-
-data = fetch_stock_data(ticker, last_year, today)
-data.to_pickle(f'{ticker}.pkl')
+# data = fetch_stock_data(ticker, last_year, today)
+# data.to_pickle(f'{ticker}.pkl')
 
 # data.to_csv(f'{ticker}.csv')  # 원하는 경로/이름으로 저장
 # data = pd.read_csv(f'{ticker}.csv', index_col=0, parse_dates=True)
@@ -136,19 +135,19 @@ plt.xlabel('Date')
 plt.ylabel('Price')
 plt.legend()
 plt.grid(True)
-# plt.show()
+plt.show()
 
 
 
 
-output_dir = 'D:\\stocks'
-last_price = data['종가'].iloc[-1]
-future_return = (future_prices[-1] / last_price - 1) * 100
-stock_name = stock.get_market_ticker_name(ticker)
-timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
-file_path = os.path.join(output_dir, f'4 {today} [ {future_return:.2f}% ] {stock_name} {ticker} [ {last_price} ] {timestamp}.png')
-plt.savefig(file_path)
-plt.close()
+# output_dir = 'D:\\stocks'
+# last_price = data['종가'].iloc[-1]
+# future_return = (future_prices[-1] / last_price - 1) * 100
+# stock_name = stock.get_market_ticker_name(ticker)
+# timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+# file_path = os.path.join(output_dir, f'4 {today} [ {future_return:.2f}% ] {stock_name} {ticker} [ {last_price} ] {timestamp}.png')
+# plt.savefig(file_path)
+# plt.close()
 
 '''
 loss 가 가장 낮은 세팅
