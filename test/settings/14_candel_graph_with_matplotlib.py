@@ -14,7 +14,8 @@ for parent in [here.parent, *here.parents]:
 else:
     raise FileNotFoundError("utils.py를 상위 디렉터리에서 찾지 못했습니다.")
 
-from utils import fetch_stock_data, add_technical_features, plot_candles_weekly_standard, plot_candles_weekly, plot_candles_daily
+from utils import fetch_stock_data, add_technical_features, plot_candles_standard, plot_candles_weekly_standard, \
+    plot_candles_weekly, plot_candles_daily
 
 
 
@@ -47,27 +48,28 @@ data = data.dropna(subset=['종가', '거래량'])
 
 
 
-# 일봉 그래프
+# 일봉 그래프만
 # plot_candles_standard(data, show_months=5, title='Bollinger Bands & Volume — Standard Candles')
 
-# 주봉 그래프
+# 주봉 그래프만
 # plot_candles_weekly_standard(data, show_months=12)
 
 
 # sharex: 여러 서브플롯들이 x축(스케일/눈금/포맷)을 같이 쓸지 말지를 정하는 옵션
-fig, (ax1, ax2, ax3, ax4) = plt.subplots(
-    4, 1, figsize=(16, 20), sharex=False,
-    gridspec_kw={'height_ratios':[3,1,3,1]},
-    dpi=200
-)
+fig = plt.figure(figsize=(16, 20), dpi=200)
+gs = fig.add_gridspec(nrows=4, ncols=1, height_ratios=[3, 1, 3, 1])
+# gs = fig.add_gridspec(nrows=2, ncols=1, height_ratios=[3, 1])
 
-# 일봉 두 패널
-plot_candles_daily(data, show_months=5, title="Daily — BB & Volume",
-                   ax_price=ax1, ax_volume=ax2)
+ax_d_price = fig.add_subplot(gs[0, 0])
+ax_d_vol   = fig.add_subplot(gs[1, 0], sharex=ax_d_price)
+ax_w_price = fig.add_subplot(gs[2, 0])
+ax_w_vol   = fig.add_subplot(gs[3, 0], sharex=ax_w_price)
 
-# 주봉 두 패널
-plot_candles_weekly(data, show_months=12, title=" ",
-                    ax_price=ax3, ax_volume=ax4)
+plot_candles_daily(data, show_months=5, title="Daily Chart",
+                   ax_price=ax_d_price, ax_volume=ax_d_vol)
+
+plot_candles_weekly(data, show_months=12, title="Weekly Chart",
+                    ax_price=ax_w_price, ax_volume=ax_w_vol)
 
 plt.tight_layout()
 # plt.show()
