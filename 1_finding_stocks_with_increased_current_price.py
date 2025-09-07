@@ -1,10 +1,23 @@
-import os
+import os, sys
 import pandas as pd
 from pykrx import stock
 from datetime import datetime, timedelta
 from utils import fetch_stock_data, add_technical_features, get_kor_ticker_list
 import unicodedata
 import requests
+from pathlib import Path
+import matplotlib.pyplot as plt
+
+# 자동 탐색 (utils.py를 찾을 때까지 위로 올라가 탐색)
+here = Path(__file__).resolve()
+for parent in [here.parent, *here.parents]:
+    if (parent / "utils.py").exists():
+        sys.path.insert(0, str(parent))
+        break
+else:
+    raise FileNotFoundError("utils.py를 상위 디렉터리에서 찾지 못했습니다.")
+
+from utils import fetch_stock_data, add_technical_features, plot_candles_weekly, plot_candles_daily
 
 '''
 급등주 탐색
@@ -142,6 +155,34 @@ for count, ticker in enumerate(tickers):
         pass  # 오류
 
 
+
+    fig = plt.figure(figsize=(16, 20), dpi=200)
+    gs = fig.add_gridspec(nrows=4, ncols=1, height_ratios=[3, 1, 3, 1])
+
+    ax_d_price = fig.add_subplot(gs[0, 0])
+    ax_d_vol   = fig.add_subplot(gs[1, 0], sharex=ax_d_price)
+    ax_w_price = fig.add_subplot(gs[2, 0])
+    ax_w_vol   = fig.add_subplot(gs[3, 0], sharex=ax_w_price)
+
+    plot_candles_daily(data, show_months=5, title="Daily Chart",
+                       ax_price=ax_d_price, ax_volume=ax_d_vol)
+
+    plot_candles_weekly(data, show_months=12, title="Weekly Chart",
+                        ax_price=ax_w_price, ax_volume=ax_w_vol)
+
+    plt.tight_layout()
+    # plt.show()
+
+    # 파일 저장 (옵션)
+    output_dir = 'D:\\interest_stocks'
+    os.makedirs(output_dir, exist_ok=True)
+
+    final_file_name = f'{today} {stock_name} [{ticker}].png'
+    final_file_path = os.path.join(output_dir, final_file_name)
+    plt.savefig(final_file_path)
+    plt.close()
+
+
     # 부합하면 결과에 저장 (상승률, 종목명, 코드)}
     change_pct_today = round(change_pct_today, 2)
     results.append((change_pct_today, stock_name, ticker, today_close, yesterday_close))
@@ -160,7 +201,7 @@ for count, ticker in enumerate(tickers):
                 "avg5d_trading_value": "",
                 "current_trading_value":"",
                 "trading_value_change_pct": "",
-                "image_url": "",
+                "image_url": str(final_file_path),
                 "market_value": str(market_value),
             },
             timeout=5

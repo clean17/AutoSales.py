@@ -1,4 +1,4 @@
-import os
+import os, sys
 import numpy as np
 import pandas as pd
 from pykrx import stock
@@ -6,6 +6,19 @@ from datetime import datetime, timedelta
 from utils import fetch_stock_data, add_technical_features, get_kor_ticker_list
 import unicodedata
 import requests
+from pathlib import Path
+import matplotlib.pyplot as plt
+
+# 자동 탐색 (utils.py를 찾을 때까지 위로 올라가 탐색)
+here = Path(__file__).resolve()
+for parent in [here.parent, *here.parents]:
+    if (parent / "utils.py").exists():
+        sys.path.insert(0, str(parent))
+        break
+else:
+    raise FileNotFoundError("utils.py를 상위 디렉터리에서 찾지 못했습니다.")
+
+from utils import fetch_stock_data, add_technical_features, plot_candles_weekly, plot_candles_daily
 
 '''
 거래대금 증가 종목 탐색
@@ -135,6 +148,33 @@ for count, ticker in enumerate(tickers):
             print(f"info 요청 실패: {e}")
             pass  # 오류
 
+
+        fig = plt.figure(figsize=(16, 20), dpi=200)
+        gs = fig.add_gridspec(nrows=4, ncols=1, height_ratios=[3, 1, 3, 1])
+
+        ax_d_price = fig.add_subplot(gs[0, 0])
+        ax_d_vol   = fig.add_subplot(gs[1, 0], sharex=ax_d_price)
+        ax_w_price = fig.add_subplot(gs[2, 0])
+        ax_w_vol   = fig.add_subplot(gs[3, 0], sharex=ax_w_price)
+
+        plot_candles_daily(data, show_months=5, title="Daily Chart",
+                           ax_price=ax_d_price, ax_volume=ax_d_vol)
+
+        plot_candles_weekly(data, show_months=12, title="Weekly Chart",
+                            ax_price=ax_w_price, ax_volume=ax_w_vol)
+
+        plt.tight_layout()
+        # plt.show()
+
+        # 파일 저장 (옵션)
+        output_dir = 'D:\\interest_stocks'
+        os.makedirs(output_dir, exist_ok=True)
+
+        final_file_name = f'{today} {stock_name} [{ticker}].png'
+        final_file_path = os.path.join(output_dir, final_file_name)
+        plt.savefig(final_file_path)
+        plt.close()
+
         ratio = round(ratio, 2)
         results.append((ratio, stock_name, ticker, float(today_val), float(avg5)))
 
@@ -152,7 +192,7 @@ for count, ticker in enumerate(tickers):
                     "avg5d_trading_value": str(avg5),
                     "current_trading_value": str(today_val),
                     "trading_value_change_pct": str(ratio),
-                    "image_url": "",
+                    "image_url": str(final_file_path),
                     "market_value": str(market_value),
                 },
                 timeout=5
