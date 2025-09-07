@@ -450,7 +450,7 @@ def get_name_from_usa_ticker(ticker: str) -> Optional[str]:
 
 
 # matplotlib로 캔들스틱 그래프 만들기
-def plot_candles_standard(data: pd.DataFrame, show_months=5, title="Bollinger Bands And Volume (Candlestick — close vs open)", show_weekly=True):
+def plot_candles_standard(data: pd.DataFrame, show_months=5, title="Bollinger Bands And Volume (Candlestick — close vs open)"):
     df = data.copy()
 
     # 최근 5개월만
@@ -519,3 +519,242 @@ def plot_candles_standard(data: pd.DataFrame, show_months=5, title="Bollinger Ba
 
     plt.tight_layout()
     plt.show()
+
+
+def plot_candles_weekly_standard(data: pd.DataFrame, show_months=5, title: str = "Bollinger Bands And Volume — Weekly (Candlestick — close vs open)",):
+    df = data.copy()
+    df.index = pd.to_datetime(df.index)
+    df = df.sort_index()
+
+    # 숫자화
+    for col in ['시가','고가','저가','종가','거래량']:
+        df[col] = pd.to_numeric(df[col], errors='coerce')
+
+    # 1) 주봉 리샘플 (금요일 기준)
+    w = df[['시가','고가','저가','종가','거래량']].resample('W-FRI').agg({
+        '시가':'first','고가':'max','저가':'min','종가':'last','거래량':'sum'
+    }).dropna(subset=['시가','고가','저가','종가'])
+
+    # 2) 최근 N개월만
+    end = w.index.max()
+    start = end - pd.DateOffset(months=show_months)
+    w = w.loc[start:end].copy()
+
+    # 3) 주봉 지표(있으면 그리되, 여기서 재계산해서 컬럼 추가)
+    w['MA5']  = w['종가'].rolling(5).mean()
+    w['MA20'] = w['종가'].rolling(20).mean()
+    std20 = w['종가'].rolling(20).std()
+    w['UpperBand'] = w['MA20'] + 2*std20
+    w['LowerBand'] = w['MA20'] - 2*std20
+
+    # 4) 색상(종가 vs 시가)
+    openp  = w['시가'].to_numpy()
+    closep = w['종가'].to_numpy()
+    high   = w['고가'].to_numpy()
+    low    = w['저가'].to_numpy()
+
+    up   = closep > openp
+    down = closep < openp
+    same = ~(up | down)
+    colors = np.where(up, 'red', np.where(down, 'blue', 'gray'))
+
+    # 5) x축 등간격
+    x = np.arange(len(w))
+    date_str = w.index.strftime('%Y-%m-%d')
+
+    # 6) 3:1 (가격:거래량)
+    fig, (ax1, ax2) = plt.subplots(
+        2, 1, figsize=(20, 12), sharex=True, gridspec_kw={'height_ratios': [3, 1]}
+    )
+
+    # --- 상단: 주봉 캔들 + 지표 ---
+    # 윅(저~고)
+    ax1.vlines(x[up],   low[up],   high[up],   color='red',  linewidth=1.3, alpha=0.95)
+    ax1.vlines(x[down], low[down], high[down], color='blue', linewidth=1.3, alpha=0.95)
+    ax1.vlines(x[same], low[same], high[same], color='gray', linewidth=1.3, alpha=0.95)
+
+    # 몸통(시가↔종가)
+    width = 0.6
+    for i, (o, c, col) in enumerate(zip(openp, closep, colors)):
+        bottom = min(o, c)
+        height = max(abs(c - o), 1e-8)  # 0폭 방지
+        ax1.add_patch(Rectangle((x[i] - width/2, bottom), width, height,
+                                facecolor=col, edgecolor=col, alpha=0.95, linewidth=1.0))
+
+    # 지표(주봉 기준)
+    ax1.plot(x, w['MA20'].to_numpy(), label='MA20 (W)', alpha=0.9)
+    ax1.plot(x, w['MA5'].to_numpy(),  label='MA5 (W)',  alpha=0.9)
+    ax1.plot(x, w['UpperBand'].to_numpy(), '--', color='gray', alpha=0.85, label='UpperBand (W)')
+    ax1.plot(x, w['LowerBand'].to_numpy(), '--', color='gray', alpha=0.85, label='LowerBand (W)')
+    ax1.fill_between(x, w['UpperBand'].to_numpy(), w['LowerBand'].to_numpy(), color='gray', alpha=0.18)
+
+    ax1.set_title(title)
+    ax1.grid(True, alpha=0.25)
+    ax1.legend(loc='upper left')
+
+    # --- 하단: 주봉 거래량 ---
+    ax2.bar(x, w['거래량'].to_numpy(), color=colors, alpha=0.7)
+    ax2.set_ylabel('Volume (Weekly)')
+    ax2.grid(True, alpha=0.25)
+
+    # x축 라벨(가독성)
+    tick_idx = np.arange(0, len(w), max(1, len(w)//10))
+    ax2.set_xticks(tick_idx)
+    ax2.set_xticklabels(date_str[tick_idx], rotation=45, ha='right')
+
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_candles_daily(
+        data: pd.DataFrame,
+        show_months: int = 5,
+        title: str = "Daily — Bollinger Bands & Volume",
+        ax_price=None,
+        ax_volume=None,
+):
+    df = data.copy()
+    df.index = pd.to_datetime(df.index)
+    df = df.sort_index()
+
+    # 최근 N개월
+    end = df.index.max()
+    start = end - pd.DateOffset(months=show_months)
+    df = df.loc[start:end].copy()
+
+    # 숫자화 & 필수 컬럼
+    for col in ['시가','고가','저가','종가','거래량']:
+        df[col] = pd.to_numeric(df[col], errors='coerce')
+    df = df.dropna(subset=['시가','고가','저가','종가'])
+
+    # 축 준비
+    own_fig = False
+    if ax_price is None or ax_volume is None:
+        fig, (ax_price, ax_volume) = plt.subplots(2, 1, figsize=(20, 12), sharex=True,
+                                                  gridspec_kw={'height_ratios':[3,1]})
+        own_fig = True
+    else:
+        fig = ax_price.figure
+
+    # 데이터 준비
+    x = np.arange(len(df))
+    o = df['시가'].to_numpy(); c = df['종가'].to_numpy()
+    h = df['고가'].to_numpy(); l = df['저가'].to_numpy()
+    up = c > o; down = c < o; same = ~(up | down)
+    colors = np.where(up, 'red', np.where(down, 'blue', 'gray'))
+
+    # 윗 패널: 캔들
+    ax_price.vlines(x[up],   l[up],   h[up],   color='red',  linewidth=1.3, alpha=0.95, zorder=3)
+    ax_price.vlines(x[down], l[down], h[down], color='blue', linewidth=1.3, alpha=0.95, zorder=3)
+    ax_price.vlines(x[same], l[same], h[same], color='gray', linewidth=1.3, alpha=0.95, zorder=3)
+
+    width = 0.6
+    for i in range(len(df)):
+        bottom = min(o[i], c[i]); height = max(abs(c[i]-o[i]), 1e-8)
+        ax_price.add_patch(Rectangle((x[i]-width/2, bottom), width, height,
+                                     facecolor=colors[i], edgecolor=colors[i],
+                                     linewidth=1.0, alpha=0.95, zorder=2))
+
+    # 지표(있을 때만)
+    if 'MA20' in df.columns: ax_price.plot(x, df['MA20'].to_numpy(), label='MA20', alpha=0.9, zorder=1)
+    if 'MA5'  in df.columns: ax_price.plot(x, df['MA5'].to_numpy(),  label='MA5',  alpha=0.9, zorder=1)
+    if {'UpperBand','LowerBand'}.issubset(df.columns):
+        ub, lb = df['UpperBand'].to_numpy(), df['LowerBand'].to_numpy()
+        ax_price.plot(x, ub, '--', color='gray', alpha=0.85, label='UpperBand', zorder=0)
+        ax_price.plot(x, lb, '--', color='gray', alpha=0.85, label='LowerBand', zorder=0)
+        ax_price.fill_between(x, ub, lb, color='gray', alpha=0.18, zorder=-1)
+
+    ax_price.set_title(title)
+    ax_price.grid(True, alpha=0.25)
+    ax_price.legend(loc='upper left')
+
+    # 아랫 패널: 거래량
+    ax_volume.bar(x, df['거래량'].to_numpy(), color=colors, alpha=0.7)
+    ax_volume.set_ylabel('Volume (D)')
+    ax_volume.grid(True, alpha=0.25)
+    ds = df.index.strftime('%Y-%m-%d')
+    tick_idx = np.arange(0, len(df), max(1, len(df)//12))
+    ax_volume.set_xticks(tick_idx)
+    ax_volume.set_xticklabels(ds[tick_idx], rotation=45, ha='right')
+
+    return fig, ax_price, ax_volume
+
+def plot_candles_weekly(
+        data: pd.DataFrame,
+        show_months: int = 5,
+        title: str = "Weekly — Bollinger Bands & Volume",
+        ax_price=None,
+        ax_volume=None,
+):
+    df = data.copy()
+    df.index = pd.to_datetime(df.index)
+    df = df.sort_index()
+    for col in ['시가','고가','저가','종가','거래량']:
+        df[col] = pd.to_numeric(df[col], errors='coerce')
+
+    # 주봉 리샘플
+    w = df[['시가','고가','저가','종가','거래량']].resample('W-FRI').agg({
+        '시가':'first','고가':'max','저가':'min','종가':'last','거래량':'sum'
+    }).dropna(subset=['시가','고가','저가','종가'])
+
+    # 최근 N개월
+    end = w.index.max()
+    start = end - pd.DateOffset(months=show_months)
+    w = w.loc[start:end].copy()
+
+    # 지표(주봉 기준)
+    w['MA5']  = w['종가'].rolling(5).mean()
+    w['MA20'] = w['종가'].rolling(20).mean()
+    std20 = w['종가'].rolling(20).std()
+    w['UpperBand'] = w['MA20'] + 2*std20
+    w['LowerBand'] = w['MA20'] - 2*std20
+
+    # 축 준비
+    own_fig = False
+    if ax_price is None or ax_volume is None:
+        fig, (ax_price, ax_volume) = plt.subplots(2, 1, figsize=(20, 12), sharex=True,
+                                                  gridspec_kw={'height_ratios':[3,1]})
+        own_fig = True
+    else:
+        fig = ax_price.figure
+
+    # 데이터 준비
+    x = np.arange(len(w))
+    o = w['시가'].to_numpy(); c = w['종가'].to_numpy()
+    h = w['고가'].to_numpy(); l = w['저가'].to_numpy()
+    up = c > o; down = c < o; same = ~(up | down)
+    colors = np.where(up, 'red', np.where(down, 'blue', 'gray'))
+
+    # 윗 패널: 캔들
+    ax_price.vlines(x[up],   l[up],   h[up],   color='red',  linewidth=1.6, alpha=0.95, zorder=3)
+    ax_price.vlines(x[down], l[down], h[down], color='blue', linewidth=1.6, alpha=0.95, zorder=3)
+    ax_price.vlines(x[same], l[same], h[same], color='gray', linewidth=1.6, alpha=0.95, zorder=3)
+
+    width = 0.6
+    for i in range(len(w)):
+        bottom = min(o[i], c[i]); height = max(abs(c[i]-o[i]), 1e-8)
+        ax_price.add_patch(Rectangle((x[i]-width/2, bottom), width, height,
+                                     facecolor=colors[i], edgecolor=colors[i],
+                                     linewidth=1.0, alpha=0.95, zorder=2))
+
+    # 지표(주봉)
+    ax_price.plot(x, w['MA20'].to_numpy(), label='MA20 (W)', alpha=0.9, zorder=1)
+    ax_price.plot(x, w['MA5'].to_numpy(),  label='MA5 (W)',  alpha=0.9, zorder=1)
+    ax_price.plot(x, w['UpperBand'].to_numpy(), '--', color='gray', alpha=0.85, label='UpperBand (W)', zorder=0)
+    ax_price.plot(x, w['LowerBand'].to_numpy(), '--', color='gray', alpha=0.85, label='LowerBand (W)', zorder=0)
+    ax_price.fill_between(x, w['UpperBand'].to_numpy(), w['LowerBand'].to_numpy(), color='gray', alpha=0.18, zorder=-1)
+
+    ax_price.set_title(title)
+    ax_price.grid(True, alpha=0.25)
+    ax_price.legend(loc='upper left')
+
+    # 아랫 패널: 거래량
+    ax_volume.bar(x, w['거래량'].to_numpy(), color=colors, alpha=0.7)
+    ax_volume.set_ylabel('Volume (W)')
+    ax_volume.grid(True, alpha=0.25)
+    dsw = w.index.strftime('%Y-%m-%d')
+    tick_idx = np.arange(0, len(w), max(1, len(w)//10))
+    ax_volume.set_xticks(tick_idx)
+    ax_volume.set_xticklabels(dsw[tick_idx], rotation=45, ha='right')
+
+    return fig, ax_price, ax_volume

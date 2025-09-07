@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 import pandas as pd
 import os, sys
 from pathlib import Path
+import matplotlib.pyplot as plt
 
 
 # 자동 탐색 (utils.py를 찾을 때까지 위로 올라가 탐색)
@@ -13,7 +14,7 @@ for parent in [here.parent, *here.parents]:
 else:
     raise FileNotFoundError("utils.py를 상위 디렉터리에서 찾지 못했습니다.")
 
-from utils import fetch_stock_data, add_technical_features, plot_candles_standard
+from utils import fetch_stock_data, add_technical_features, plot_candles_weekly_standard, plot_candles_weekly, plot_candles_daily
 
 
 
@@ -46,4 +47,36 @@ data = data.dropna(subset=['종가', '거래량'])
 
 
 
-plot_candles_standard(data, show_months=5, title='Bollinger Bands & Volume — Standard Candles', show_weekly=False)
+# 일봉 그래프
+# plot_candles_standard(data, show_months=5, title='Bollinger Bands & Volume — Standard Candles')
+
+# 주봉 그래프
+# plot_candles_weekly_standard(data, show_months=12)
+
+
+# sharex: 여러 서브플롯들이 x축(스케일/눈금/포맷)을 같이 쓸지 말지를 정하는 옵션
+fig, (ax1, ax2, ax3, ax4) = plt.subplots(
+    4, 1, figsize=(16, 20), sharex=False,
+    gridspec_kw={'height_ratios':[3,1,3,1]},
+    dpi=200
+)
+
+# 일봉 두 패널
+plot_candles_daily(data, show_months=5, title="Daily — BB & Volume",
+                   ax_price=ax1, ax_volume=ax2)
+
+# 주봉 두 패널
+plot_candles_weekly(data, show_months=12, title=" ",
+                    ax_price=ax3, ax_volume=ax4)
+
+plt.tight_layout()
+# plt.show()
+
+# 파일 저장 (옵션)
+output_dir = 'D:\\stocks'
+os.makedirs(output_dir, exist_ok=True)
+
+final_file_name = f'{today} [{ticker}].png'
+final_file_path = os.path.join(output_dir, final_file_name)
+plt.savefig(final_file_path)
+plt.close()
