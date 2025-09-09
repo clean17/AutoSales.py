@@ -45,8 +45,8 @@ start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftim
 start_five_date = (datetime.today() - timedelta(days=5)).strftime('%Y%m%d')
 
 # tickers = ['077970', '079160', '112610', '025540', '003530', '357880', '131970', '009450', '310210', '353200', '136150', '064350', '066575', '005880', '272290', '204270', '066570', '456040', '373220', '096770', '005490', '006650', '042700', '068240', '003280', '067160', '397030', '480370', '085660', '328130', '476040', '241710', '357780', '232140', '011170', '020180', '074600', '042000', '003350', '065350', '004490', '482630', '005420', '033100', '018880', '417200', '332570', '058970', '011790', '053800', '338220', '195870', '010950', '455900', '082740', '225570', '445090', '068760', '007070', '361610', '443060', '089850', '413640', '005850', '141080', '005380', '098460', '277810', '011780', '005810', '075580', '112040', '012510', '240810', '403870', '376900', '001740', '035420', '103140', '068270', '013990', '001450', '457190', '293580', '475150', '280360', '097950', '058820', '034220', '084370', '178320']
-# tickers = get_kor_ticker_list()
-tickers = ['090370']
+tickers = get_kor_ticker_list()
+# tickers = ['090370']
 
 ticker_to_name = {ticker: stock.get_market_ticker_name(ticker) for ticker in tickers}
 
@@ -250,7 +250,7 @@ for count, ticker in enumerate(tickers):
     percent = f'{round((count+1)/len(tickers)*100, 1):.1f}'
     try:
         requests.post(
-            'http://localhost:8090/func/stocks/progress-update/kospi',
+            'https://chickchick.shop/func/stocks/progress-update/kospi',
             json={
                 "percent": percent,
                 "count": count+1,
@@ -415,7 +415,7 @@ for avg_future_return, stock_name in results:
 
 try:
     requests.post(
-        'http://localhost:8090/func/stocks/progress-update/kospi',
+        'https://chickchick.shop/func/stocks/progress-update/kospi',
         json={"percent": 100, "done": True},
         timeout=5
     )

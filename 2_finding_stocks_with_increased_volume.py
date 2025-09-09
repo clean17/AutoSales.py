@@ -42,8 +42,11 @@ ticker_to_name = {ticker: stock.get_market_ticker_name(ticker) for ticker in tic
 
 # 결과를 저장할 배열
 results = []
+results2 = []
 
 for count, ticker in enumerate(tickers):
+    condition_passed = True
+    condition_passed2 = True
     time.sleep(0.2)  # 200ms 대기
     stock_name = ticker_to_name.get(ticker, 'Unknown Stock')
     print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
@@ -101,7 +104,24 @@ for count, ticker in enumerate(tickers):
     closes = data['종가'].values
     trading_value = data['거래량'] * data['종가']
 
-    # 1. 오늘 등락률(어제→오늘)
+
+    """
+    10일 동안 박스권 > 오늘 급등 찾기
+    """
+    # "어제부터 10일 전"의 박스권 체크
+    box_closes = closes[-11:-1]  # 10일 전 ~ 오늘 이전 (10개)
+    # print('box', box_closes)
+    max_close = box_closes.max()
+    # print('max', max_close)
+    min_close = box_closes.min()
+    # print('min', min_close)
+    range_pct = (max_close - min_close) / min_close * 100
+
+    if range_pct >= 4:
+        condition_passed = False
+        # continue  # 4% 이상 움직이면 박스권 X
+
+    # 오늘 등락률(어제→오늘)
     today_close = closes[-1]
     # print('today', today_close)
     yesterday_close = closes[-2]
@@ -109,10 +129,42 @@ for count, ticker in enumerate(tickers):
     change_pct_today = (today_close - yesterday_close) / yesterday_close * 100
 
     if change_pct_today < 10:
-        continue  # 오늘 10% 미만 상승이면 제외
+        condition_passed = False
+        condition_passed2 = False
+        # continue  # 오늘 10% 미만 상승이면 제외
 
-    # 2. 거래대금
-    # 지난 5거래일 평균(오늘 제외: -6:-1), 오늘값: -1
+
+    # 시가 총액 500억 이하 패스
+    try:
+        res = requests.post(
+            'https://chickchick.shop/func/stocks/info',
+            json={"stock_name": str(ticker)},
+            timeout=5
+        )
+        json_data = res.json()
+        product_code = json_data["result"][0]["data"]["items"][0]["productCode"]
+
+        res2 = requests.post(
+            'https://chickchick.shop/func/stocks/overview',
+            json={"product_code": str(product_code)},
+            timeout=5
+        )
+        data2 = res2.json()
+        market_value = data2["result"]["marketValueKrw"]
+        # 시가총액이 500억보다 작으면 패스
+        if (market_value < 50_000_000_000):
+            # condition_passed = False
+            continue
+
+    except Exception as e:
+        print(f"info 요청 실패: {e}")
+        pass  # 오류
+
+
+    """
+    5일 평균 거래대금 * 10 < 오늘 거래대금 찾기
+    """
+    # 지난 5거래일 평균 거래대금(오늘 제외: -6:-1), 오늘값: -1
     avg5 = trading_value.iloc[-6:-1].mean()
     # print('avg', avg5)
     today_val = trading_value.iloc[-1]
@@ -122,66 +174,73 @@ for count, ticker in enumerate(tickers):
     TARGET_VALUE = 10
     # 0 나눗셈 방지 및 조건 체크
     if avg5 > 0 and np.isfinite(avg5) and today_val >= TARGET_VALUE * avg5:
+        condition_passed2 = True
+
+    # 그래프 생성
+    fig = plt.figure(figsize=(16, 20), dpi=200)
+    gs = fig.add_gridspec(nrows=4, ncols=1, height_ratios=[3, 1, 3, 1])
+
+    ax_d_price = fig.add_subplot(gs[0, 0])
+    ax_d_vol   = fig.add_subplot(gs[1, 0], sharex=ax_d_price)
+    ax_w_price = fig.add_subplot(gs[2, 0])
+    ax_w_vol   = fig.add_subplot(gs[3, 0], sharex=ax_w_price)
+
+    plot_candles_daily(data, show_months=5, title=f'{today} {stock_name} [{ticker}] Daily Chart',
+                       ax_price=ax_d_price, ax_volume=ax_d_vol)
+
+    plot_candles_weekly(data, show_months=12, title=f'{today} {stock_name} [{ticker}] Weekly Chart',
+                        ax_price=ax_w_price, ax_volume=ax_w_vol)
+
+    plt.tight_layout()
+    # plt.show()
+
+    # 파일 저장 (옵션)
+    output_dir = 'D:\\interest_stocks'
+    os.makedirs(output_dir, exist_ok=True)
+
+    final_file_name = f'{today} {stock_name} [{ticker}].png'
+    final_file_path = os.path.join(output_dir, final_file_name)
+    plt.savefig(final_file_path)
+    plt.close()
+
+
+    if condition_passed:
+        # 부합하면 결과에 저장 (상승률, 종목명, 코드)}
+        change_pct_today = round(change_pct_today, 2)
+        results.append((change_pct_today, stock_name, ticker, today_close, yesterday_close))
+
+        try:
+            requests.post(
+                'https://chickchick.shop/func/stocks/interest',
+                json={
+                    "nation": "kor",
+                    "stock_code": str(ticker),
+                    "stock_name": str(stock_name),
+                    "pred_price_change_3d_pct": "",
+                    "yesterday_close": str(yesterday_close),
+                    "current_price": str(today_close),
+                    "today_price_change_pct": str(change_pct_today),
+                    "avg5d_trading_value": str(avg5),
+                    "current_trading_value": str(today_val),
+                    "trading_value_change_pct": str(ratio),
+                    "image_url": str(final_file_name),
+                    "market_value": str(market_value),
+                },
+                timeout=5
+            )
+        except Exception as e:
+            # logging.warning(f"progress-update 요청 실패: {e}")
+            print(f"progress-update 요청 실패: {e}")
+            pass  # 오류
+
+
+    if condition_passed2:
         ratio = today_val / avg5 * 100
         # print('ratio', ratio)
         # 결과: (배수, 종목명, 코드, 오늘거래대금, 5일평균거래대금)
 
-        try:
-            res = requests.post(
-                'https://chickchick.shop/func/stocks/info',
-                json={"stock_name": str(ticker)},
-                timeout=5
-            )
-            json_data = res.json()
-            product_code = json_data["result"][0]["data"]["items"][0]["productCode"]
-
-            res2 = requests.post(
-                'https://chickchick.shop/func/stocks/overview',
-                json={"product_code": str(product_code)},
-                timeout=5
-            )
-            json_data2 = res2.json()
-            # 시가총액
-            market_value = json_data2["result"]["marketValueKrw"]
-            # 시가총액이 500억보다 작으면 패스
-            if (market_value < 50_000_000_000):
-                print('시가총액이 500억보다 작음')
-                continue
-
-        except Exception as e:
-            print(f"info 요청 실패: {e}")
-            pass  # 오류
-
-
-
-        fig = plt.figure(figsize=(16, 20), dpi=200)
-        gs = fig.add_gridspec(nrows=4, ncols=1, height_ratios=[3, 1, 3, 1])
-
-        ax_d_price = fig.add_subplot(gs[0, 0])
-        ax_d_vol   = fig.add_subplot(gs[1, 0], sharex=ax_d_price)
-        ax_w_price = fig.add_subplot(gs[2, 0])
-        ax_w_vol   = fig.add_subplot(gs[3, 0], sharex=ax_w_price)
-
-        plot_candles_daily(data, show_months=5, title=f'{today} {stock_name} [{ticker}] Daily Chart',
-                           ax_price=ax_d_price, ax_volume=ax_d_vol)
-
-        plot_candles_weekly(data, show_months=12, title=f'{today} {stock_name} [{ticker}] Weekly Chart',
-                            ax_price=ax_w_price, ax_volume=ax_w_vol)
-
-        plt.tight_layout()
-        # plt.show()
-
-        # 파일 저장 (옵션)
-        output_dir = 'D:\\interest_stocks'
-        os.makedirs(output_dir, exist_ok=True)
-
-        final_file_name = f'{today} {stock_name} [{ticker}].png'
-        final_file_path = os.path.join(output_dir, final_file_name)
-        plt.savefig(final_file_path)
-        plt.close()
-
         ratio = round(ratio, 2)
-        results.append((ratio, stock_name, ticker, float(today_val), float(avg5)))
+        results2.append((ratio, stock_name, ticker, float(today_val), float(avg5)))
 
         try:
             requests.post(
@@ -234,5 +293,32 @@ if len(results) > 0:
         gap = target_width - visual_width(text)
         return text + ' ' * gap
 
-    for ratio, stock_name, ticker, today_val, avg5 in results:
+    for change, stock_name, ticker, current_price, yesterday_close in results:
+        print(f"==== {pad_visual(stock_name, max_name_vis_len)} [{ticker}] 상승률 {change:,.2f}% ====")
+
+
+if len(results2) > 0:
+    # 내림차순 정렬 (상승률 기준)
+    results2.sort(reverse=True, key=lambda x: x[0])
+
+
+    # 글자별 시각적 너비 계산 함수 (한글/한자/일본어 2칸, 영문/숫자/특수문자 1칸)
+    def visual_width(text):
+        width = 0
+        for c in text:
+            if unicodedata.east_asian_width(c) in 'WF':  # W: Wide, F: Fullwidth
+                width += 2
+            else:
+                width += 1
+        return width
+
+    # 시각적 폭 기준 최대값
+    max_name_vis_len = max(visual_width(name) for _, name, _, _, _ in results2)
+
+    # 시각적 폭에 맞춰 공백 패딩
+    def pad_visual(text, target_width):
+        gap = target_width - visual_width(text)
+        return text + ' ' * gap
+
+    for ratio, stock_name, ticker, today_val, avg5 in results2:
         print(f"==== {pad_visual(stock_name, max_name_vis_len)} [{ticker}]  {avg5/100_000_000:.2f}억 >>> {today_val/100_000_000:.2f}억, 거래대금 상승률 : {ratio:,.2f}% ====")

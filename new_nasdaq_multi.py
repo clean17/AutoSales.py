@@ -243,7 +243,7 @@ for count, ticker in enumerate(tickers):
     percent = f'{round((count+1)/len(tickers)*100, 1):.1f}'
     try:
         requests.post(
-            'http://localhost:8090/func/stocks/progress-update/nasdaq',
+            'https://chickchick.shop/func/stocks/progress-update/nasdaq',
             json={
                 "percent": percent,
                 "count": count+1,
@@ -418,7 +418,7 @@ for avg_future_return, ticker, stock_name in results:
 
 try:
     requests.post(
-        'http://localhost:8090/func/stocks/progress-update/nasdaq',
+        'https://chickchick.shop/func/stocks/progress-update/nasdaq',
         json={"percent": 100, "done": True},
         timeout=5
     )

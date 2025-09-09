@@ -86,12 +86,12 @@ for count, ticker in enumerate(tickers):
         # print("                                                        종가가 0이거나 500원 미만 → pass")
         continue
 
-    # 최근 2주 거래대금이 기준치 이하면 패스
-    recent_data = data.tail(10)
-    recent_trading_value = recent_data['거래량'] * recent_data['종가']
-    recent_average_trading_value = recent_trading_value.mean()
-    if recent_average_trading_value <= AVERAGE_TRADING_VALUE:
-        continue
+    # # 최근 2주 거래대금이 기준치 이하면 패스
+    # recent_data = data.tail(10)
+    # recent_trading_value = recent_data['거래량'] * recent_data['종가']
+    # recent_average_trading_value = recent_trading_value.mean()
+    # if recent_average_trading_value <= AVERAGE_TRADING_VALUE:
+    #     continue
 
 
     # 2차 생성 feature
