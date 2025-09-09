@@ -2,11 +2,11 @@ import os, sys
 import pandas as pd
 from pykrx import stock
 from datetime import datetime, timedelta
-from utils import fetch_stock_data, add_technical_features, get_kor_ticker_list
 import unicodedata
 import requests
 from pathlib import Path
 import matplotlib.pyplot as plt
+import time
 
 # 자동 탐색 (utils.py를 찾을 때까지 위로 올라가 탐색)
 here = Path(__file__).resolve()
@@ -17,7 +17,7 @@ for parent in [here.parent, *here.parents]:
 else:
     raise FileNotFoundError("utils.py를 상위 디렉터리에서 찾지 못했습니다.")
 
-from utils import fetch_stock_data, add_technical_features, plot_candles_weekly, plot_candles_daily
+from utils import fetch_stock_data, get_kor_ticker_list, add_technical_features, plot_candles_weekly, plot_candles_daily
 
 '''
 급등주 탐색
@@ -37,6 +37,7 @@ today = datetime.today().strftime('%Y%m%d')
 start_yesterday = (datetime.today() - timedelta(days=1)).strftime('%Y%m%d')
 
 tickers = get_kor_ticker_list()
+# tickers = ['378850']
 ticker_to_name = {ticker: stock.get_market_ticker_name(ticker) for ticker in tickers}
 
 
@@ -44,6 +45,7 @@ ticker_to_name = {ticker: stock.get_market_ticker_name(ticker) for ticker in tic
 results = []
 
 for count, ticker in enumerate(tickers):
+    time.sleep(0.2)  # 200ms 대기
     stock_name = ticker_to_name.get(ticker, 'Unknown Stock')
     print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
 
@@ -135,8 +137,8 @@ for count, ticker in enumerate(tickers):
             json={"stock_name": str(ticker)},
             timeout=5
         )
-        data = res.json()
-        product_code = data["result"][0]["data"]["items"][0]["productCode"]
+        json_data = res.json()
+        product_code = json_data["result"][0]["data"]["items"][0]["productCode"]
 
         res2 = requests.post(
             'https://chickchick.shop/func/stocks/overview',
@@ -164,10 +166,10 @@ for count, ticker in enumerate(tickers):
     ax_w_price = fig.add_subplot(gs[2, 0])
     ax_w_vol   = fig.add_subplot(gs[3, 0], sharex=ax_w_price)
 
-    plot_candles_daily(data, show_months=5, title="Daily Chart",
+    plot_candles_daily(data, show_months=5, title=f'{today} {stock_name} [{ticker}] Daily Chart',
                        ax_price=ax_d_price, ax_volume=ax_d_vol)
 
-    plot_candles_weekly(data, show_months=12, title="Weekly Chart",
+    plot_candles_weekly(data, show_months=12, title=f'{today} {stock_name} [{ticker}] Weekly Chart',
                         ax_price=ax_w_price, ax_volume=ax_w_vol)
 
     plt.tight_layout()
@@ -201,7 +203,7 @@ for count, ticker in enumerate(tickers):
                 "avg5d_trading_value": "",
                 "current_trading_value":"",
                 "trading_value_change_pct": "",
-                "image_url": str(final_file_path),
+                "image_url": str(final_file_name),
                 "market_value": str(market_value),
             },
             timeout=5
@@ -238,4 +240,4 @@ if len(results) > 0:
         return text + ' ' * gap
 
     for change, stock_name, ticker, current_price, yesterday_close in results:
-        print(f"==== {pad_visual(stock_name, max_name_vis_len)} [{ticker}] 상승률 {change:.2f}% ====")
+        print(f"==== {pad_visual(stock_name, max_name_vis_len)} [{ticker}] 상승률 {change:,.2f}% ====")

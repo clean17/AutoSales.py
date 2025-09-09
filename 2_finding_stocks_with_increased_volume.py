@@ -3,11 +3,11 @@ import numpy as np
 import pandas as pd
 from pykrx import stock
 from datetime import datetime, timedelta
-from utils import fetch_stock_data, add_technical_features, get_kor_ticker_list
 import unicodedata
 import requests
 from pathlib import Path
 import matplotlib.pyplot as plt
+import time
 
 # 자동 탐색 (utils.py를 찾을 때까지 위로 올라가 탐색)
 here = Path(__file__).resolve()
@@ -18,7 +18,7 @@ for parent in [here.parent, *here.parents]:
 else:
     raise FileNotFoundError("utils.py를 상위 디렉터리에서 찾지 못했습니다.")
 
-from utils import fetch_stock_data, add_technical_features, plot_candles_weekly, plot_candles_daily
+from utils import fetch_stock_data, get_kor_ticker_list, add_technical_features, plot_candles_weekly, plot_candles_daily
 
 '''
 거래대금 증가 종목 탐색
@@ -36,6 +36,7 @@ today = datetime.today().strftime('%Y%m%d')
 start_yesterday = (datetime.today() - timedelta(days=1)).strftime('%Y%m%d')
 
 tickers = get_kor_ticker_list()
+# tickers = ['092460']
 ticker_to_name = {ticker: stock.get_market_ticker_name(ticker) for ticker in tickers}
 
 
@@ -43,6 +44,7 @@ ticker_to_name = {ticker: stock.get_market_ticker_name(ticker) for ticker in tic
 results = []
 
 for count, ticker in enumerate(tickers):
+    time.sleep(0.2)  # 200ms 대기
     stock_name = ticker_to_name.get(ticker, 'Unknown Stock')
     print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
 
@@ -85,6 +87,7 @@ for count, ticker in enumerate(tickers):
 
     # 2차 생성 feature
     data = add_technical_features(data)
+
 
     # 현재 5일선이 20일선보다 낮으면서 하락중이면 패스
     ma_angle_5 = data['MA5'].iloc[-1] - data['MA5'].iloc[-2]
@@ -129,24 +132,26 @@ for count, ticker in enumerate(tickers):
                 json={"stock_name": str(ticker)},
                 timeout=5
             )
-            data = res.json()
-            product_code = data["result"][0]["data"]["items"][0]["productCode"]
+            json_data = res.json()
+            product_code = json_data["result"][0]["data"]["items"][0]["productCode"]
 
             res2 = requests.post(
                 'https://chickchick.shop/func/stocks/overview',
                 json={"product_code": str(product_code)},
                 timeout=5
             )
-            data2 = res2.json()
+            json_data2 = res2.json()
             # 시가총액
-            market_value = data2["result"]["marketValueKrw"]
+            market_value = json_data2["result"]["marketValueKrw"]
             # 시가총액이 500억보다 작으면 패스
             if (market_value < 50_000_000_000):
+                print('시가총액이 500억보다 작음')
                 continue
 
         except Exception as e:
             print(f"info 요청 실패: {e}")
             pass  # 오류
+
 
 
         fig = plt.figure(figsize=(16, 20), dpi=200)
@@ -157,10 +162,10 @@ for count, ticker in enumerate(tickers):
         ax_w_price = fig.add_subplot(gs[2, 0])
         ax_w_vol   = fig.add_subplot(gs[3, 0], sharex=ax_w_price)
 
-        plot_candles_daily(data, show_months=5, title="Daily Chart",
+        plot_candles_daily(data, show_months=5, title=f'{today} {stock_name} [{ticker}] Daily Chart',
                            ax_price=ax_d_price, ax_volume=ax_d_vol)
 
-        plot_candles_weekly(data, show_months=12, title="Weekly Chart",
+        plot_candles_weekly(data, show_months=12, title=f'{today} {stock_name} [{ticker}] Weekly Chart',
                             ax_price=ax_w_price, ax_volume=ax_w_vol)
 
         plt.tight_layout()
@@ -186,13 +191,13 @@ for count, ticker in enumerate(tickers):
                     "stock_code": str(ticker),
                     "stock_name": str(stock_name),
                     "pred_price_change_3d_pct": "",
-                    "yesterday_close": "",
-                    "current_price": "",
-                    "today_price_change_pct": "",
+                    "yesterday_close": str(yesterday_close),
+                    "current_price": str(today_close),
+                    "today_price_change_pct": str(change_pct_today),
                     "avg5d_trading_value": str(avg5),
                     "current_trading_value": str(today_val),
                     "trading_value_change_pct": str(ratio),
-                    "image_url": str(final_file_path),
+                    "image_url": str(final_file_name),
                     "market_value": str(market_value),
                 },
                 timeout=5
@@ -230,4 +235,4 @@ if len(results) > 0:
         return text + ' ' * gap
 
     for ratio, stock_name, ticker, today_val, avg5 in results:
-        print(f"==== {pad_visual(stock_name, max_name_vis_len)} [{ticker}]  {avg5/100_000_000:.2f}억 >>> {today_val/100_000_000:.2f}억, 거래대금 상승률 : {ratio:.2f}% ====")
+        print(f"==== {pad_visual(stock_name, max_name_vis_len)} [{ticker}]  {avg5/100_000_000:.2f}억 >>> {today_val/100_000_000:.2f}억, 거래대금 상승률 : {ratio:,.2f}% ====")

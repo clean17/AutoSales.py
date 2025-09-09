@@ -351,7 +351,7 @@ def add_technical_features(data, window=20, num_std=2):
     # data['long_bullish'] = ((data['종가'] - data['시가']) / data['시가'] > 0.02).astype(int)
 
     # 최근 N일간 등락률
-    data['chg_5d'] = (data['종가'] / data['종가'].shift(5)) - 1
+    # data['chg_5d'] = (data['종가'] / data['종가'].shift(5)) - 1
     # 현재가 vs 이동평균(MA) 괴리율
     data['ma5_gap'] = (data['종가'] - data['MA5']) / data['MA5']
     data['ma10_gap'] = (data['종가'] - data['MA10']) / data['MA10']
@@ -458,13 +458,17 @@ GRAY2 = '#9AA0A6'
 
 # matplotlib로 캔들스틱 그래프 만들기
 def plot_candles_standard(data: pd.DataFrame, show_months=5, title="Bollinger Bands And Volume (Candlestick — close vs open)"):
-    df = data.copy()
+    if isinstance(data, dict):
+        df = pd.DataFrame(data)
+    else:
+        df = data.copy()
+    df.index = pd.to_datetime(df.index)
+    df = df.sort_index()
 
-    # 최근 5개월만
-    end   = df.index.max()
+    # 최근 N개월
+    end = df.index.max()
     start = end - pd.DateOffset(months=show_months)
     df = df.loc[start:end].copy()
-    df.index = pd.to_datetime(df.index)
 
     # ==== 색상 기준: 종가 vs 시가 ====
     openp  = df['시가'].to_numpy()
@@ -529,7 +533,10 @@ def plot_candles_standard(data: pd.DataFrame, show_months=5, title="Bollinger Ba
 
 
 def plot_candles_weekly_standard(data: pd.DataFrame, show_months=5, title: str = "Bollinger Bands And Volume — Weekly (Candlestick — close vs open)",):
-    df = data.copy()
+    if isinstance(data, dict):
+        df = pd.DataFrame(data)
+    else:
+        df = data.copy()
     df.index = pd.to_datetime(df.index)
     df = df.sort_index()
 
@@ -620,7 +627,10 @@ def plot_candles_daily(
         ax_price=None,
         ax_volume=None,
 ):
-    df = data.copy()
+    if isinstance(data, dict):
+        df = pd.DataFrame(data)
+    else:
+        df = data.copy()
     df.index = pd.to_datetime(df.index)
     df = df.sort_index()
 
@@ -697,9 +707,13 @@ def plot_candles_weekly(
         ax_price=None,
         ax_volume=None,
 ):
-    df = data.copy()
+    if isinstance(data, dict):
+        df = pd.DataFrame(data)
+    else:
+        df = data.copy()
     df.index = pd.to_datetime(df.index)
     df = df.sort_index()
+
     for col in ['시가','고가','저가','종가','거래량']:
         df[col] = pd.to_numeric(df[col], errors='coerce')
 

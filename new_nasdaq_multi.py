@@ -359,7 +359,7 @@ for count, ticker in enumerate(tickers):
     future_dates_str = pd.to_datetime(future_dates).strftime('%Y-%m-%d')
 
     # 4. 그래프 (윗부분: 가격/지표, 아랫부분: 거래량)
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(16, 8), sharex=True, gridspec_kw={'height_ratios': [3, 1]})
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(16, 8), sharex=True, gridspec_kw={'height_ratios': [3, 1]}, dpi=200)
 
     # --- 상단: 가격 + 볼린저밴드 + 예측 ---
     # 실제 가격
