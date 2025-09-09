@@ -18,7 +18,8 @@ for parent in [here.parent, *here.parents]:
 else:
     raise FileNotFoundError("utils.py를 상위 디렉터리에서 찾지 못했습니다.")
 
-from utils import fetch_stock_data, get_kor_ticker_list, add_technical_features, plot_candles_weekly, plot_candles_daily
+from utils import fetch_stock_data, get_kor_ticker_list, get_kor_ticker_dict_list, add_technical_features, \
+    plot_candles_weekly, plot_candles_daily
 
 '''
 거래대금 증가 종목 탐색
@@ -35,9 +36,11 @@ os.makedirs(pickle_dir, exist_ok=True)
 today = datetime.today().strftime('%Y%m%d')
 start_yesterday = (datetime.today() - timedelta(days=1)).strftime('%Y%m%d')
 
-tickers = get_kor_ticker_list()
+# tickers = get_kor_ticker_list()
+tickers_dict = get_kor_ticker_dict_list()
+tickers = list(tickers_dict.keys())
 # tickers = ['092460']
-ticker_to_name = {ticker: stock.get_market_ticker_name(ticker) for ticker in tickers}
+# ticker_to_name = {ticker: stock.get_market_ticker_name(ticker) for ticker in tickers}
 
 
 # 결과를 저장할 배열
@@ -47,8 +50,8 @@ results2 = []
 for count, ticker in enumerate(tickers):
     condition_passed = True
     condition_passed2 = True
-    time.sleep(0.2)  # 200ms 대기
-    stock_name = ticker_to_name.get(ticker, 'Unknown Stock')
+    time.sleep(0.1)  # x00ms 대기
+    stock_name = tickers_dict.get(ticker, 'Unknown Stock')
     print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
 
 
@@ -74,11 +77,16 @@ for count, ticker in enumerate(tickers):
 
     ########################################################################
 
-    actual_prices = data['종가'].values # 종가 배열
-    last_close = actual_prices[-1]
+    closes = data['종가'].values
+    last_close = closes[-1]
+
+    trading_value = data['거래량'] * data['종가']
+    # 금일 거래대금 50억 이하 패스
+    if trading_value < 5_000_000_000:
+        continue
 
     # 데이터가 부족하면 패스
-    if data.empty or len(data) < 30:
+    if data.empty or len(data) < 50:
         # print(f"                                                        데이터 부족 → pass")
         continue
 
@@ -100,10 +108,6 @@ for count, ticker in enumerate(tickers):
 
     ########################################################################
     # ======== 조건 체크 시작 ========
-
-    closes = data['종가'].values
-    trading_value = data['거래량'] * data['종가']
-
 
     """
     10일 동안 박스권 > 오늘 급등 찾기

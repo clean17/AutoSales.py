@@ -9,7 +9,8 @@ from sklearn.preprocessing import MinMaxScaler
 import matplotlib.pyplot as plt
 from send2trash import send2trash
 import ast
-from utils import create_lstm_model, create_multistep_dataset, fetch_stock_data, add_technical_features, get_kor_ticker_list, check_column_types, get_safe_ticker_list
+from utils import create_lstm_model, create_multistep_dataset, fetch_stock_data, add_technical_features, \
+    get_kor_ticker_list, get_kor_ticker_dict_list, check_column_types, get_safe_ticker_list
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.model_selection import train_test_split
 import requests
@@ -45,10 +46,12 @@ start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftim
 start_five_date = (datetime.today() - timedelta(days=5)).strftime('%Y%m%d')
 
 # tickers = ['077970', '079160', '112610', '025540', '003530', '357880', '131970', '009450', '310210', '353200', '136150', '064350', '066575', '005880', '272290', '204270', '066570', '456040', '373220', '096770', '005490', '006650', '042700', '068240', '003280', '067160', '397030', '480370', '085660', '328130', '476040', '241710', '357780', '232140', '011170', '020180', '074600', '042000', '003350', '065350', '004490', '482630', '005420', '033100', '018880', '417200', '332570', '058970', '011790', '053800', '338220', '195870', '010950', '455900', '082740', '225570', '445090', '068760', '007070', '361610', '443060', '089850', '413640', '005850', '141080', '005380', '098460', '277810', '011780', '005810', '075580', '112040', '012510', '240810', '403870', '376900', '001740', '035420', '103140', '068270', '013990', '001450', '457190', '293580', '475150', '280360', '097950', '058820', '034220', '084370', '178320']
-tickers = get_kor_ticker_list()
+# tickers = get_kor_ticker_list()
 # tickers = ['090370']
+tickers_dict = get_kor_ticker_dict_list()
+tickers = list(tickers_dict.keys())
 
-ticker_to_name = {ticker: stock.get_market_ticker_name(ticker) for ticker in tickers}
+# ticker_to_name = {ticker: stock.get_market_ticker_name(ticker) for ticker in tickers}
 
 # for file_name in os.listdir(output_dir):
 #     if file_name.startswith(today):
@@ -63,7 +66,7 @@ total_cnt = 0
 # 데이터 가져오는것만 1시간 걸리네
 for count, ticker in enumerate(tickers):
     time.sleep(0.1)  # 100ms 대기
-    stock_name = ticker_to_name.get(ticker, 'Unknown Stock')
+    stock_name = tickers_dict.get(ticker, 'Unknown Stock')
     print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
 
 

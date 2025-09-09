@@ -35,6 +35,16 @@ def get_kor_ticker_list():
     tickers = [item["stock_code"] for item in data if "stock_code" in item]
     return tickers
 
+def get_kor_ticker_dict_list():
+    url = "https://chickchick.shop/func/stocks/kor"
+    res = requests.get(url)
+    data = res.json()
+    return {
+        item["stock_code"]: item["stock_name"]
+        for item in data
+        if "stock_code" in item and "stock_name" in item
+    }
+
 def get_safe_ticker_list(market="KOSPI"):
     def fetch_tickers_for_date(date):
         try:
