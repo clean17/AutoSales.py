@@ -18,6 +18,9 @@ np.random.seed(42)
 tf.random.set_seed(42)
 random.seed(42)
 
+
+today = datetime.today().strftime('%Y%m%d')
+
 def get_kor_ticker_list_by_pykrx():
     tickers_kospi = get_safe_ticker_list(market="KOSPI")
     tickers_kosdaq = get_safe_ticker_list(market="KOSDAQ")
@@ -38,6 +41,20 @@ def get_kor_ticker_list():
 def get_kor_ticker_dict_list():
     url = "https://chickchick.shop/func/stocks/kor"
     res = requests.get(url)
+    data = res.json()
+    return {
+        item["stock_code"]: item["stock_name"]
+        for item in data
+        if "stock_code" in item and "stock_name" in item
+    }
+
+def get_kor_interest_ticker_dick_list():
+    url = "https://chickchick.shop/func/stocks/interest/data"
+    payload = {
+        "date": today,
+    }
+
+    res = requests.post(url, json=payload)
     data = res.json()
     return {
         item["stock_code"]: item["stock_name"]

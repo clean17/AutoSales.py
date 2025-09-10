@@ -1,9 +1,7 @@
 import os, sys
 import numpy as np
 import pandas as pd
-from pykrx import stock
 from datetime import datetime, timedelta
-import unicodedata
 import requests
 from pathlib import Path
 import matplotlib.pyplot as plt
@@ -18,12 +16,11 @@ for parent in [here.parent, *here.parents]:
 else:
     raise FileNotFoundError("utils.py를 상위 디렉터리에서 찾지 못했습니다.")
 
-from utils import fetch_stock_data, get_kor_ticker_list, get_kor_ticker_dict_list, add_technical_features, \
+from utils import fetch_stock_data, get_kor_interest_ticker_dick_list, add_technical_features, \
     plot_candles_weekly, plot_candles_daily
 
 '''
-거래대금 증가 종목 탐색
-지난 5 거래일에 비해 오늘 거래대금이 x배 이상 상승한 종목 찾기
+관심 종목 5분 마다 데이터 갱신
 '''
 
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
@@ -36,21 +33,14 @@ os.makedirs(pickle_dir, exist_ok=True)
 today = datetime.today().strftime('%Y%m%d')
 start_yesterday = (datetime.today() - timedelta(days=1)).strftime('%Y%m%d')
 
-# tickers = get_kor_ticker_list()
-tickers_dict = get_kor_ticker_dict_list()
+tickers_dict = get_kor_interest_ticker_dick_list()
 tickers = list(tickers_dict.keys())
-# tickers = ['092460']
-# ticker_to_name = {ticker: stock.get_market_ticker_name(ticker) for ticker in tickers}
 
-
-# 결과를 저장할 배열
-results = []
-results2 = []
 
 for count, ticker in enumerate(tickers):
     condition_passed = True
     condition_passed2 = True
-    time.sleep(0.1)  # x00ms 대기
+    time.sleep(1)  # 1초 대기
     stock_name = tickers_dict.get(ticker, 'Unknown Stock')
     print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
 
@@ -211,7 +201,6 @@ for count, ticker in enumerate(tickers):
     if condition_passed:
         # 부합하면 결과에 저장 (상승률, 종목명, 코드)}
         change_pct_today = round(change_pct_today, 2)
-        results.append((change_pct_today, stock_name, ticker, today_close, yesterday_close))
 
         try:
             requests.post(
@@ -244,7 +233,6 @@ for count, ticker in enumerate(tickers):
         # 결과: (배수, 종목명, 코드, 오늘거래대금, 5일평균거래대금)
 
         ratio = round(ratio, 2)
-        results2.append((ratio, stock_name, ticker, float(today_val), float(avg5)))
 
         try:
             requests.post(
@@ -270,59 +258,3 @@ for count, ticker in enumerate(tickers):
             print(f"progress-update 요청 실패: {e}")
             pass  # 오류
 
-
-#######################################################################
-
-
-if len(results) > 0:
-    # 내림차순 정렬 (상승률 기준)
-    results.sort(reverse=True, key=lambda x: x[0])
-
-
-    # 글자별 시각적 너비 계산 함수 (한글/한자/일본어 2칸, 영문/숫자/특수문자 1칸)
-    def visual_width(text):
-        width = 0
-        for c in text:
-            if unicodedata.east_asian_width(c) in 'WF':  # W: Wide, F: Fullwidth
-                width += 2
-            else:
-                width += 1
-        return width
-
-    # 시각적 폭 기준 최대값
-    max_name_vis_len = max(visual_width(name) for _, name, _, _, _ in results)
-
-    # 시각적 폭에 맞춰 공백 패딩
-    def pad_visual(text, target_width):
-        gap = target_width - visual_width(text)
-        return text + ' ' * gap
-
-    for change, stock_name, ticker, current_price, yesterday_close in results:
-        print(f"==== {pad_visual(stock_name, max_name_vis_len)} [{ticker}] 상승률 {change:,.2f}% ====")
-
-
-if len(results2) > 0:
-    # 내림차순 정렬 (상승률 기준)
-    results2.sort(reverse=True, key=lambda x: x[0])
-
-
-    # 글자별 시각적 너비 계산 함수 (한글/한자/일본어 2칸, 영문/숫자/특수문자 1칸)
-    def visual_width(text):
-        width = 0
-        for c in text:
-            if unicodedata.east_asian_width(c) in 'WF':  # W: Wide, F: Fullwidth
-                width += 2
-            else:
-                width += 1
-        return width
-
-    # 시각적 폭 기준 최대값
-    max_name_vis_len = max(visual_width(name) for _, name, _, _, _ in results2)
-
-    # 시각적 폭에 맞춰 공백 패딩
-    def pad_visual(text, target_width):
-        gap = target_width - visual_width(text)
-        return text + ' ' * gap
-
-    for ratio, stock_name, ticker, today_val, avg5 in results2:
-        print(f"==== {pad_visual(stock_name, max_name_vis_len)} [{ticker}]  {avg5/100_000_000:.2f}억 >>> {today_val/100_000_000:.2f}억, 거래대금 상승률 : {ratio:,.2f}% ====")

@@ -117,7 +117,7 @@ for count, ticker in enumerate(tickers):
 
     # 종가가 0.0이거나 500원 미만이면 건너뜀
     last_row = data.iloc[-1]
-    if last_row['Close'] == 0.0 or last_row['Close'] < 0.4:
+    if last_row['Close'] == 0.0 or last_row['Close'] * exchangeRate < 500:
         # print("                                                        종가가 0이거나 500원 미만이므로 작업을 건너뜁니다.")
         continue
 
@@ -129,7 +129,7 @@ for count, ticker in enumerate(tickers):
         # print(f"                                                        최근 4주 중 거래대금 5억 미만 발생 → pass")
         continue
 
-    # 최근 2 주
+    # 최근 2주 평균 거래대금 60억 미만 패스
     recent_data = data.tail(10)
     recent_trading_value = recent_data['Volume'] * recent_data['Close']     # 최근 2주 거래대금 리스트
     recent_average_trading_value = recent_trading_value.mean()
@@ -203,8 +203,8 @@ for count, ticker in enumerate(tickers):
         # pass
 
     # 5일선이 너무 하락하면
-    ma5_today = data['MA5'].iloc[-1]
-    ma5_yesterday = data['MA5'].iloc[-2]
+    # ma5_today = data['MA5'].iloc[-1]
+    # ma5_yesterday = data['MA5'].iloc[-2]
 
     # 변화율 계산 (퍼센트로 보려면 * 100)
     # change_rate = (ma5_today - ma5_yesterday) / ma5_yesterday
@@ -293,7 +293,7 @@ for count, ticker in enumerate(tickers):
     if r2 > 0:
         total_r2 += r2
         total_cnt += 1
-    if r2 < 0.62:
+    if r2 < 0.64:
         # print(f"                                                        R-squared 0.7 미만이면 패스 : {r2:.2f}%")
         continue
 
