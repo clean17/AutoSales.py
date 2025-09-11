@@ -14,8 +14,7 @@ for parent in [here.parent, *here.parents]:
 else:
     raise FileNotFoundError("utils.py를 상위 디렉터리에서 찾지 못했습니다.")
 
-from utils import fetch_stock_data, add_technical_features, plot_candles_standard, plot_candles_weekly_standard, \
-    plot_candles_weekly, plot_candles_daily
+from utils import fetch_stock_data, add_technical_features, plot_candles_weekly, plot_candles_daily
 
 
 
