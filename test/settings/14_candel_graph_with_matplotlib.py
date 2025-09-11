@@ -47,19 +47,23 @@ data = data.dropna(subset=['종가', '거래량'])
 
 
 
-
 # 일봉 그래프만
-# plot_candles_standard(data, show_months=5, title='Bollinger Bands & Volume — Standard Candles')
+# fig = plt.figure(figsize=(20, 12))
+# gs = fig.add_gridspec(nrows=2, ncols=1, height_ratios=[3, 1])
+#
+# ax_d_price = fig.add_subplot(gs[0, 0])
+# ax_d_vol   = fig.add_subplot(gs[1, 0], sharex=ax_d_price)
+#
+# plot_candles_daily(data, show_months=5, title="Daily Chart",
+#                    ax_price=ax_d_price, ax_volume=ax_d_vol)
 
-# 주봉 그래프만
-# plot_candles_weekly_standard(data, show_months=12)
 
+
+## 일봉 + 주봉 그래프
+fig = plt.figure(figsize=(20, 24), dpi=200)
+gs = fig.add_gridspec(nrows=4, ncols=1, height_ratios=[3, 1, 3, 1])
 
 # sharex: 여러 서브플롯들이 x축(스케일/눈금/포맷)을 같이 쓸지 말지를 정하는 옵션
-fig = plt.figure(figsize=(16, 20), dpi=200)
-gs = fig.add_gridspec(nrows=4, ncols=1, height_ratios=[3, 1, 3, 1])
-# gs = fig.add_gridspec(nrows=2, ncols=1, height_ratios=[3, 1])
-
 ax_d_price = fig.add_subplot(gs[0, 0])
 ax_d_vol   = fig.add_subplot(gs[1, 0], sharex=ax_d_price)
 ax_w_price = fig.add_subplot(gs[2, 0])

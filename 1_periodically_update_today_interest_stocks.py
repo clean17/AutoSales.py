@@ -42,7 +42,7 @@ for count, ticker in enumerate(tickers):
     condition_passed2 = True
     time.sleep(1)  # 1초 대기
     stock_name = tickers_dict.get(ticker, 'Unknown Stock')
-    print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
+    # print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
 
 
     # 데이터가 없으면 1년 데이터 요청, 있으면 5일 데이터 요청
