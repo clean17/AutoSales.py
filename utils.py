@@ -523,7 +523,7 @@ def plot_candles_daily(
     # 축 준비
     if ax_price is None or ax_volume is None:
         fig, (ax_price, ax_volume) = plt.subplots(
-            2, 1, figsize=(20, 12), sharex=True, gridspec_kw={'height_ratios':[3,1]}
+            2, 1, figsize=(16, 12), sharex=True, gridspec_kw={'height_ratios':[3,1]}
         )
     else:
         fig = ax_price.figure
@@ -578,7 +578,7 @@ def plot_candles_daily(
     ax_price.tick_params(axis='x', which='both', labelbottom=True)   # 윗 축 라벨 표시
     # plt.setp(ax_price.get_xticklabels(), rotation=45, ha='right')    # 회전/정렬
     plt.setp(ax_price.get_xticklabels(), rotation=0, ha='center')    # 회전/정렬
-    ax_price.set_title(title)
+    ax_price.set_title(title, fontsize=14)
     ax_price.grid(True, alpha=0.25)
     ax_price.legend(loc='upper left')
 
@@ -640,7 +640,7 @@ def plot_candles_weekly(
     # 축 준비
     if ax_price is None or ax_volume is None:
         fig, (ax_price, ax_volume) = plt.subplots(
-            2, 1, figsize=(20, 12), sharex=True, gridspec_kw={'height_ratios':[3,1]}
+            2, 1, figsize=(16, 12), sharex=True, gridspec_kw={'height_ratios':[3,1]}
         )
     else:
         fig = ax_price.figure
@@ -681,7 +681,7 @@ def plot_candles_weekly(
     ax_price.tick_params(axis='x', which='both', labelbottom=True)   # 윗 축 라벨 표시
     # plt.setp(ax_price.get_xticklabels(), rotation=45, ha='right')    # 회전/정렬
     plt.setp(ax_price.get_xticklabels(), rotation=0, ha='center')    # 회전/정렬
-    ax_price.set_title(title)
+    ax_price.set_title(title, fontsize=14)
     ax_price.grid(True, alpha=0.25)
     ax_price.legend(loc='upper left')
 

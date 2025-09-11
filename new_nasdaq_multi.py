@@ -410,7 +410,7 @@ for count, ticker in enumerate(tickers):
     # plt.savefig(final_file_path)
     # plt.close()
 
-    fig = plt.figure(figsize=(20, 24), dpi=200)
+    fig = plt.figure(figsize=(14, 16), dpi=150)
     gs = fig.add_gridspec(nrows=4, ncols=1, height_ratios=[3, 1, 3, 1])
 
     # sharex: 여러 서브플롯들이 x축(스케일/눈금/포맷)을 같이 쓸지 말지를 정하는 옵션

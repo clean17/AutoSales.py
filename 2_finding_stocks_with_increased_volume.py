@@ -181,7 +181,7 @@ for count, ticker in enumerate(tickers):
         condition_passed2 = True
 
     # 그래프 생성
-    fig = plt.figure(figsize=(16, 20), dpi=200)
+    fig = plt.figure(figsize=(14, 16), dpi=150)
     gs = fig.add_gridspec(nrows=4, ncols=1, height_ratios=[3, 1, 3, 1])
 
     ax_d_price = fig.add_subplot(gs[0, 0])

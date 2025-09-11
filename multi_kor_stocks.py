@@ -324,7 +324,7 @@ for count, ticker in enumerate(tickers):
     avg_future_return = (np.mean(predicted_prices) / last_close - 1) * 100
 
     # 기대 성장률 미만이면 건너뜀
-    if avg_future_return < EXPECTED_GROWTH_RATE:
+    if avg_future_return < EXPECTED_GROWTH_RATE and avg_future_return < 20:
         if avg_future_return > 0:
             print(f"  예상 : {avg_future_return:.2f}%")
         continue
@@ -406,7 +406,7 @@ for count, ticker in enumerate(tickers):
 
 
 
-    fig = plt.figure(figsize=(20, 24), dpi=200)
+    fig = plt.figure(figsize=(14, 16), dpi=150)
     gs = fig.add_gridspec(nrows=4, ncols=1, height_ratios=[3, 1, 3, 1])
 
     # sharex: 여러 서브플롯들이 x축(스케일/눈금/포맷)을 같이 쓸지 말지를 정하는 옵션
