@@ -10,7 +10,8 @@ import matplotlib.pyplot as plt
 from send2trash import send2trash
 import ast
 from utils import create_lstm_model, create_multistep_dataset, fetch_stock_data, add_technical_features, \
-    get_kor_ticker_list, get_kor_ticker_dict_list, check_column_types, get_safe_ticker_list
+    get_kor_ticker_list, get_kor_ticker_dict_list, check_column_types, get_safe_ticker_list, plot_candles_daily, \
+    plot_candles_weekly
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.model_selection import train_test_split
 import requests
@@ -24,6 +25,7 @@ random.seed(42)
 
 
 output_dir = 'D:\\kospi_stocks'
+# output_dir = 'D:\\stocks'
 os.makedirs(output_dir, exist_ok=True)
 
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
@@ -45,18 +47,19 @@ today_us = datetime.today().strftime('%Y-%m-%d')
 start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y%m%d')
 start_five_date = (datetime.today() - timedelta(days=5)).strftime('%Y%m%d')
 
-# tickers = ['077970', '079160', '112610', '025540', '003530', '357880', '131970', '009450', '310210', '353200', '136150', '064350', '066575', '005880', '272290', '204270', '066570', '456040', '373220', '096770', '005490', '006650', '042700', '068240', '003280', '067160', '397030', '480370', '085660', '328130', '476040', '241710', '357780', '232140', '011170', '020180', '074600', '042000', '003350', '065350', '004490', '482630', '005420', '033100', '018880', '417200', '332570', '058970', '011790', '053800', '338220', '195870', '010950', '455900', '082740', '225570', '445090', '068760', '007070', '361610', '443060', '089850', '413640', '005850', '141080', '005380', '098460', '277810', '011780', '005810', '075580', '112040', '012510', '240810', '403870', '376900', '001740', '035420', '103140', '068270', '013990', '001450', '457190', '293580', '475150', '280360', '097950', '058820', '034220', '084370', '178320']
+# pykrx로 종목 리스트 조회
 # tickers = get_kor_ticker_list()
-# tickers = ['090370']
+# ticker_to_name = {ticker: stock.get_market_ticker_name(ticker) for ticker in tickers}
+
+# chickchick.com에서 종목 리스트 조회
 tickers_dict = get_kor_ticker_dict_list()
 tickers = list(tickers_dict.keys())
-
-# ticker_to_name = {ticker: stock.get_market_ticker_name(ticker) for ticker in tickers}
 
 # for file_name in os.listdir(output_dir):
 #     if file_name.startswith(today):
 #         send2trash(os.path.join(output_dir, file_name))
 
+# tickers = ['441270'] # 테스트용
 
 # 결과를 저장할 배열
 results = []
@@ -65,8 +68,9 @@ total_cnt = 0
 
 # 데이터 가져오는것만 1시간 걸리네
 for count, ticker in enumerate(tickers):
-    time.sleep(0.1)  # 100ms 대기
+    time.sleep(0.2)  # 200ms 대기
     stock_name = tickers_dict.get(ticker, 'Unknown Stock')
+    # stock_name = '파인엠텍' # 테스트용
     print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
 
 
@@ -339,66 +343,85 @@ for count, ticker in enumerate(tickers):
 
 #######################################################################
 
-    # 1. 조건별 색상 결정 (거래량 바 차트)
-    up = data['종가'] > data['시가']
-    down = data['종가'] < data['시가']
-    bar_colors = np.where(up, 'red', np.where(down, 'blue', 'gray'))
+    # # 1. 조건별 색상 결정 (거래량 바 차트)
+    # up = data['종가'] > data['시가']
+    # down = data['종가'] < data['시가']
+    # bar_colors = np.where(up, 'red', np.where(down, 'blue', 'gray'))
+    #
+    # # 2. 인덱스 문자열 컬럼 추가 (x축 통일용)
+    # data_plot = data.copy()
+    # # 인덱스를 명시적으로 DatetimeIndex로 변환
+    # data_plot.index = pd.to_datetime(data_plot.index)
+    # data_plot['date_str'] = data_plot.index.strftime('%Y-%m-%d')
+    #
+    # # data_plot.index가 DatetimeIndex라고 가정
+    # three_months_ago = data_plot.index.max() - pd.DateOffset(months=6)
+    # data_plot_recent = data_plot[data_plot.index >= three_months_ago].copy()
+    # recent_n = len(data_plot_recent)
+    #
+    # # 3. 미래 날짜도 문자열로 변환
+    # future_dates_str = pd.to_datetime(future_dates).strftime('%Y-%m-%d')
+    #
+    # # 4. 그래프 (윗부분: 가격/지표, 아랫부분: 거래량)
+    # fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(16, 8), sharex=True, gridspec_kw={'height_ratios': [3, 1]}, dpi=200)
+    #
+    # # --- 상단: 가격 + 볼린저밴드 + 예측 ---
+    # # 실제 가격
+    # ax1.plot(data_plot_recent['date_str'], actual_prices[-recent_n:], label='실제 가격', marker='s', markersize=6, markeredgecolor='white')
+    #
+    # # 예측 가격 (미래 날짜)
+    # ax1.plot(future_dates_str, predicted_prices, label='예측 가격', linestyle='--', marker='s', markersize=7, markeredgecolor='white', color='tomato')
+    #
+    # # 이동평균, 볼린저밴드, 영역 채우기
+    # if all(x in data_plot_recent.columns for x in ['MA20', 'UpperBand', 'LowerBand']):
+    #     ax1.plot(data_plot_recent['date_str'], data_plot_recent['MA20'], label='20일 이동평균선', alpha=0.8)
+    #     if 'MA5' in data_plot_recent.columns:
+    #         ax1.plot(data_plot_recent['date_str'], data_plot_recent['MA5'], label='5일 이동평균선', alpha=0.8)
+    #     ax1.plot(data_plot_recent['date_str'], data_plot_recent['UpperBand'], label='볼린저밴드 상한선', linestyle='--', alpha=0.8)
+    #     ax1.plot(data_plot_recent['date_str'], data_plot_recent['LowerBand'], label='볼린저밴드 하한선', linestyle='--', alpha=0.8)
+    #     ax1.fill_between(data_plot_recent['date_str'], data_plot_recent['UpperBand'], data_plot_recent['LowerBand'], color='gray', alpha=0.18)
+    #
+    # # 마지막 실제값과 첫 번째 예측값을 점선으로 연결
+    # ax1.plot(
+    #     [data_plot_recent['date_str'].iloc[-1], future_dates_str[0]],
+    #     [actual_prices[-recent_n:][-1], predicted_prices[0]],
+    #     linestyle='dashed', color='tomato', linewidth=1.5
+    # )
+    #
+    # ax1.legend()
+    # ax1.grid(True)
+    # ax1.set_title(f'{today_us}   {stock_name} [ {ticker} ] (Expected Return: {avg_future_return:.2f}%)')
+    #
+    # # --- 하단: 거래량 (양/음/동색 구분) ---
+    # ax2.bar(data_plot_recent['date_str'], data_plot_recent['거래량'], color=bar_colors, alpha=0.65)
+    # ax2.set_ylabel('Volume')
+    # ax2.grid(True)
+    #
+    # # x축 라벨: 10일 단위만 표시 (과도한 라벨 겹침 방지)
+    # tick_idx = np.arange(0, len(data_plot_recent), 10)
+    # ax2.set_xticks(tick_idx)
+    # ax2.set_xticklabels(data_plot_recent['date_str'].iloc[tick_idx])
+    #
+    # plt.setp(ax2.xaxis.get_majorticklabels(), rotation=45)
 
-    # 2. 인덱스 문자열 컬럼 추가 (x축 통일용)
-    data_plot = data.copy()
-    # 인덱스를 명시적으로 DatetimeIndex로 변환
-    data_plot.index = pd.to_datetime(data_plot.index)
-    data_plot['date_str'] = data_plot.index.strftime('%Y-%m-%d')
 
-    # data_plot.index가 DatetimeIndex라고 가정
-    three_months_ago = data_plot.index.max() - pd.DateOffset(months=6)
-    data_plot_recent = data_plot[data_plot.index >= three_months_ago].copy()
-    recent_n = len(data_plot_recent)
 
-    # 3. 미래 날짜도 문자열로 변환
-    future_dates_str = pd.to_datetime(future_dates).strftime('%Y-%m-%d')
+    fig = plt.figure(figsize=(20, 24), dpi=200)
+    gs = fig.add_gridspec(nrows=4, ncols=1, height_ratios=[3, 1, 3, 1])
 
-    # 4. 그래프 (윗부분: 가격/지표, 아랫부분: 거래량)
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(16, 8), sharex=True, gridspec_kw={'height_ratios': [3, 1]}, dpi=200)
+    # sharex: 여러 서브플롯들이 x축(스케일/눈금/포맷)을 같이 쓸지 말지를 정하는 옵션
+    ax_d_price = fig.add_subplot(gs[0, 0])
+    ax_d_vol   = fig.add_subplot(gs[1, 0], sharex=ax_d_price)
+    ax_w_price = fig.add_subplot(gs[2, 0])
+    ax_w_vol   = fig.add_subplot(gs[3, 0], sharex=ax_w_price)
 
-    # --- 상단: 가격 + 볼린저밴드 + 예측 ---
-    # 실제 가격
-    ax1.plot(data_plot_recent['date_str'], actual_prices[-recent_n:], label='실제 가격', marker='s', markersize=6, markeredgecolor='white')
+    daily_chart_title = f'{today_us}   {stock_name} [ {ticker} ] (예상 상승률: {avg_future_return:.2f}%)'
+    plot_candles_daily(data, show_months=6  , title=daily_chart_title,
+                       ax_price=ax_d_price, ax_volume=ax_d_vol,
+                       future_dates=future_dates, predicted_prices=predicted_prices)
 
-    # 예측 가격 (미래 날짜)
-    ax1.plot(future_dates_str, predicted_prices, label='예측 가격', linestyle='--', marker='s', markersize=7, markeredgecolor='white', color='tomato')
-
-    # 이동평균, 볼린저밴드, 영역 채우기
-    if all(x in data_plot_recent.columns for x in ['MA20', 'UpperBand', 'LowerBand']):
-        ax1.plot(data_plot_recent['date_str'], data_plot_recent['MA20'], label='20일 이동평균선', alpha=0.8)
-        if 'MA5' in data_plot_recent.columns:
-            ax1.plot(data_plot_recent['date_str'], data_plot_recent['MA5'], label='5일 이동평균선', alpha=0.8)
-        ax1.plot(data_plot_recent['date_str'], data_plot_recent['UpperBand'], label='볼린저밴드 상한선', linestyle='--', alpha=0.8)
-        ax1.plot(data_plot_recent['date_str'], data_plot_recent['LowerBand'], label='볼린저밴드 하한선', linestyle='--', alpha=0.8)
-        ax1.fill_between(data_plot_recent['date_str'], data_plot_recent['UpperBand'], data_plot_recent['LowerBand'], color='gray', alpha=0.18)
-
-    # 마지막 실제값과 첫 번째 예측값을 점선으로 연결
-    ax1.plot(
-        [data_plot_recent['date_str'].iloc[-1], future_dates_str[0]],
-        [actual_prices[-recent_n:][-1], predicted_prices[0]],
-        linestyle='dashed', color='tomato', linewidth=1.5
-    )
-
-    ax1.legend()
-    ax1.grid(True)
-    ax1.set_title(f'{today_us}   {stock_name} [ {ticker} ] (Expected Return: {avg_future_return:.2f}%)')
-
-    # --- 하단: 거래량 (양/음/동색 구분) ---
-    ax2.bar(data_plot_recent['date_str'], data_plot_recent['거래량'], color=bar_colors, alpha=0.65)
-    ax2.set_ylabel('Volume')
-    ax2.grid(True)
-
-    # x축 라벨: 10일 단위만 표시 (과도한 라벨 겹침 방지)
-    tick_idx = np.arange(0, len(data_plot_recent), 10)
-    ax2.set_xticks(tick_idx)
-    ax2.set_xticklabels(data_plot_recent['date_str'].iloc[tick_idx])
-
-    plt.setp(ax2.xaxis.get_majorticklabels(), rotation=45)
+    plot_candles_weekly(data, show_months=12, title="Weekly Chart",
+                        ax_price=ax_w_price, ax_volume=ax_w_vol)
 
     plt.tight_layout()
 
