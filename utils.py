@@ -44,6 +44,70 @@ def _rma(s: pd.Series, length: int) -> pd.Series:
 
 
 
+# ----- 기본 지표 -----
+# def compute_rsi(prices, period=14):
+#     delta = prices.diff()
+#     up = delta.clip(lower=0)
+#     down = -delta.clip(upper=0)
+#     gain = up.rolling(window=period, min_periods=1).mean()
+#     loss = down.rolling(window=period, min_periods=1).mean()
+#     rs = gain / (loss + 1e-9)
+#     return 100 - (100 / (1 + rs))
+
+def compute_rsi(close: pd.Series, length: int = 14) -> pd.Series:
+    delta = close.diff()
+    up = delta.clip(lower=0)
+    down = (-delta).clip(lower=0)
+    rs = _rma(up, length) / _rma(down, length)
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
+
+def compute_macd(close: pd.Series, fast=12, slow=26, signal=9):
+    macd_line = _ema(close, fast) - _ema(close, slow)
+    signal_line = _ema(macd_line, signal)
+    hist = macd_line - signal_line
+    return macd_line, signal_line, hist
+
+def _true_range(high, low, close):
+    prev_close = close.shift(1)
+    tr = pd.concat([high - low, (high - prev_close).abs(), (low - prev_close).abs()], axis=1).max(axis=1)
+    return tr
+
+def compute_atr(high, low, close, length=14):
+    tr = _true_range(high, low, close)
+    return _rma(tr, length)
+
+def compute_di_adx(high, low, close, length=14):
+    up_move = high.diff()
+    down_move = -low.diff()
+    plus_dm = pd.Series(np.where((up_move > down_move) & (up_move > 0), up_move, 0.0), index=high.index)
+    minus_dm = pd.Series(np.where((down_move > up_move) & (down_move > 0), down_move, 0.0), index=low.index)
+    atr = compute_atr(high, low, close, length)
+    plus_di = 100 * _rma(plus_dm, length) / atr
+    minus_di = 100 * _rma(minus_dm, length) / atr
+    dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di)
+    adx = _rma(dx, length)
+    return plus_di, minus_di, adx
+
+def compute_cci(high, low, close, length=14):
+    tp = (high + low + close) / 3.0
+    sma = tp.rolling(length, min_periods=length).mean()
+    md = (tp - sma).abs().rolling(length, min_periods=length).mean()
+    return (tp - sma) / (0.015 * md)
+
+def compute_ultimate_osc(high, low, close, p1=7, p2=14, p3=28):
+    prev_close = close.shift(1)
+    bp = close - pd.concat([low, prev_close], axis=1).min(axis=1)
+    tr = pd.concat([high, prev_close], axis=1).max(axis=1) - pd.concat([low, prev_close], axis=1).min(axis=1)
+    def avg(n):
+        return (bp.rolling(n, min_periods=n).sum() / tr.rolling(n, min_periods=n).sum())
+    uo = 100 * (4*avg(p1) + 2*avg(p2) + avg(p3)) / 7.0
+    return uo
+
+def compute_roc(close, length=12, pct=True):
+    r = close.pct_change(length) if pct else close.diff(length)
+    return r * 100 if pct else r
+
 
 def get_kor_ticker_list_by_pykrx():
     tickers_kospi = get_safe_ticker_list(market="KOSPI")
@@ -297,15 +361,6 @@ def create_model(input_shape, n_future):
     return model
 
 
-def compute_rsi(prices, period=14):
-    delta = prices.diff()
-    up = delta.clip(lower=0)
-    down = -delta.clip(upper=0)
-    gain = up.rolling(window=period, min_periods=1).mean()
-    loss = down.rolling(window=period, min_periods=1).mean()
-    rs = gain / (loss + 1e-9)
-    return 100 - (100 / (1 + rs))
-
 def extract_numbers_from_filenames(directory, isToday):
     numbers = []
     today = datetime.today().strftime('%Y%m%d')
@@ -370,6 +425,28 @@ def invert_scale(scaled_preds, scaler, feature_index=3):
     return np.array(inv_preds)
 
 
+"""
+지표 추가 함수
+
+매수 판단:
+  MACD·ADX·ROC 같이 추세 지표가 긍정적일 때 신뢰성 높음
+  RSI나 STOCH이 중립이거나 과매수 직전일 때 진입 타이밍 좋음
+  
+진입(매수): MACD ↑, ADX > 25, ROC 양수, CCI +100 돌파
+  
+보유: MACD·ADX 유지, Ultimate Oscillator 50 이상, ATR 안정
+  
+매도: MACD 하락, ADX 25 이하, CCI·Ultimate Oscillator 꺾임
+
+
+
+추세·모멘텀·변동성” 요약 피처
+추세(Trend): EMA/MACD 기울기, MACD 히스토그램의 평균·합
+모멘텀(Momentum): ROC 평균·최댓값, RSI 평균·상/하위 분위수, CCI 평균
+변동성(Volatility/Risk): ATR 평균·최댓값, 수익률 표준편차, 고저폭 평균
+
+모델이 윈도우 내 패턴을 “요약 벡터”로 바로 보게 되어 학습 안정성·일반화에 보통 도움이 된다
+"""
 def add_technical_features(data, window=20, num_std=2):
     data = data.copy()
 
@@ -380,12 +457,17 @@ def add_technical_features(data, window=20, num_std=2):
     col_c = _col(data, '종가',   'Close')
     col_v = _col(data, '거래량', 'Volume')
 
-    # RSI (14일)
-    data['RSI14'] = compute_rsi(data[col_c])  # 사전에 정의 필요
+    o, h, l, c, v = data[col_o], data[col_h], data[col_l], data[col_c], data[col_v]
+
+    """
+    RSI(14) — 상대강도지수 (Relative Strength Index)
+    70 이상이면 과매수, 30 이하이면 과매도
+    """
+    data['RSI14'] = compute_rsi(c)  # 사전에 정의 필요
 
     # 볼린저밴드 (MA20, STD20, 상단/하단 밴드)
-    data['MA20'] = data[col_c].rolling(window=window).mean()
-    data['STD20'] = data[col_c].rolling(window=window).std()
+    data['MA20'] =c.rolling(window=window).mean()
+    data['STD20'] =c.rolling(window=window).std()
     data['UpperBand'] = data['MA20'] + (num_std * data['STD20'])
     data['LowerBand'] = data['MA20'] - (num_std * data['STD20'])
 
@@ -393,17 +475,20 @@ def add_technical_features(data, window=20, num_std=2):
     data['BB_perc'] = (data[col_c] - data['LowerBand']) / (data['UpperBand'] - data['LowerBand'] + 1e-9)
 
     # 이동평균선
-    data['MA5'] = data[col_c].rolling(window=5).mean()
-    data['MA10'] = data[col_c].rolling(window=10).mean()
+    data['MA5'] =c.rolling(window=5).mean()
+    data['MA10'] =c.rolling(window=10).mean()
     data['MA5_slope'] = data['MA5'].diff()
     data['MA10_slope'] = data['MA10'].diff()
     data['MA20_slope'] = data['MA20'].diff()
 
     # 거래량 증감률
-    data['Volume_change'] = data[col_v].pct_change().replace([np.inf, -np.inf], 0).fillna(0)
+    data['Volume_change'] = v.pct_change().replace([np.inf, -np.inf], 0).fillna(0) # 거래 중지등의 사건에 극단적 노이즈
+
+    vol = v.replace(0, np.nan)              # 0은 로그 불가 → NaN
+    data['Vol_logdiff'] = np.log(vol).diff()
 
     # 당일 변동폭 (고가-저가 비율)
-    data['day_range_pct'] = (data[col_h] - data[col_l]) / (data[col_l] + 1e-9)
+    data['day_range_pct'] = (h - l) / (l + 1e-9)
 
     # 캔들패턴 (양봉/음봉, 장대양봉 등)
     # data['is_bullish'] = (data[col_c] > data['시가']).astype(int) # 양봉이면 1, 음봉이면 0
@@ -411,15 +496,82 @@ def add_technical_features(data, window=20, num_std=2):
     # data['long_bullish'] = ((data[col_c] - data['시가']) / data['시가'] > 0.02).astype(int)
 
     # 최근 N일간 등락률
-    # data['chg_5d'] = (data[col_c] / data[col_c].shift(5)) - 1
+    # data['chg_5d'] = (data[col_c] /c.shift(5)) - 1
     # 현재가 vs 이동평균(MA) 괴리율
     data['ma10_gap'] = (data[col_c] - data['MA10']) / data['MA10']
     # 거래량 급증 신호
-    data['volume_ratio'] = data[col_v] / data[col_v].rolling(20).mean()
+    data['volume_ratio'] = v / v.rolling(20).mean()
 
 
     # === 추가 지표 ===
+    # MACD
+    """
+    단기(12일)·장기(26일) 이동평균 차이로 추세 방향을 측정. 0 이상이면 상승세, 0 이하이면 하락세
+    MACD가 0선 위에서 골든크로스 유지 → 상승추세 지속 가능성 ↑
+    
+    단기 EMA(12)와 장기 EMA(26)의 차이로 추세 방향을 잡고, 시그널선(9 EMA)과 비교해 매수/매도 신호를 확인.
+    MACD > Signal → 매수 우위
+    MACD < Signal → 매도 우위
+    0선 위에서 골든크로스 = 강한 매수 신호, 0선 아래에서 데드크로스 = 강한 매도 신호    
+    """
+    macd_line, macd_signal, macd_hist = compute_macd(c, 12, 26, 9)
+    data['MACD'] = macd_line
+    data['MACD_signal'] = macd_signal
+    data['MACD_hist'] = macd_hist
 
+    # +DI / -DI / ADX
+    """
+    ADX(14) — 평균 방향성 지수 (Average Directional Index)
+    추세 강도만 측정 (방향 아님). 25 이상이면 강한 추세.
+    30~40 이상이면 추세 신뢰 가능. 다만 너무 높으면(50 이상) 과열로 볼 수도 있음
+    
+    ADX는 추세 강도를 나타내고, +DI / -DI는 상승/하락 에너지를 비교.
+    ADX > 25 → 뚜렷한 추세 존재
+    +DI > -DI → 상승 추세, -DI > +DI → 하락 추세
+    ADX가 높다고 해서 방향을 말해주진 않음 (강한 상승일 수도, 강한 하락일 수도 있음)
+    """
+    plus_di, minus_di, adx = compute_di_adx(h, l, c, 14)
+    data['PlusDI'] = plus_di
+    data['MinusDI'] = minus_di
+    data['ADX14'] = adx
+
+    # ATR
+    """
+    ATR(14) — 평균진폭범위 (Average True Range)
+    변동성 지표. 값이 높을수록 변동성이 큼
+    """
+    data['ATR14'] = compute_atr(h, l, c, 14)
+
+    """
+    CCI(14) — 상품채널지수 (Commodity Channel Index)
+    100 이상이면 과매수, 강세장 지속
+    -100 이하 과매도, 약세장 진입 신호
+    
+    단기 모멘텀 변화를 잘 포착하지만, 노이즈가 많음
+    """
+    data['CCI14'] = compute_cci(h, l, c, 14)
+
+    """
+    Ultimate Oscillator
+    
+    단기·중기·장기 모멘텀을 종합한 지표. RSI/스토캐스틱보다 안정적.
+    50 이상 → 매수 우위 
+    50 이하 → 매도 고려
+    70 이상 → 과매수 가능
+    30 이하 → 과매도 가능
+    """
+    data['UltimateOsc'] = compute_ultimate_osc(h, l, c, 7, 14, 28)
+
+    # ROC (percent)
+    """
+    ROC (Rate of Change)
+    매수세(황소)와 매도세(곰) 힘을 비교. 양수면 매수세 우위
+    추세의 속도 확인
+    """
+    data['ROC12_pct'] = compute_roc(c, 12, pct=True)
+
+    # 안전 처리
+    data.replace([np.inf, -np.inf], np.nan, inplace=True)
 
 
     return data
