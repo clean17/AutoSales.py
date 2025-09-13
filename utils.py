@@ -123,7 +123,7 @@ def drop_trading_halt_rows(data: pd.DataFrame):
     col_c = _col(d, '종가',   'Close')
     col_v = _col(d, '거래량', 'Volume')
 
-    # 1) OHLCV 전부 존재
+    # 1) OHLCV 전부 존재w
     notna = d[[col_o, col_h, col_l, col_c, col_v]].notna().all(axis=1)
     # 2) 가격이 0보다 큼(데이터 공급사에 따라 0으로 채워지는 경우 방지)
     positive_price = d[[col_o, col_h, col_l, col_c]].gt(0).all(axis=1)
@@ -263,18 +263,18 @@ def get_russell1000_tickers():
 # 주식 데이터(시가, 고가, 저가, 종가, 거래량)와 재무 데이터(PER)를 가져온다 > pandas.DataFrame 객체
 def fetch_stock_data(ticker, fromdate, todate):
     ohlcv = stock.get_market_ohlcv_by_date(fromdate=fromdate, todate=todate, ticker=ticker)
-    # fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker)
-    #
-    # # 결측치 처리 (PER, PBR)
-    # for col in ['PER', 'PBR']:
-    #     if col not in fundamental.columns:
-    #         fundamental[col] = 0
-    #     else:
-    #         fundamental[col] = fundamental[col].fillna(0)
-    #
-    # # 두 컬럼 모두 DataFrame으로 합치기
-    # data = pd.concat([ohlcv, fundamental[['PER', 'PBR']]], axis=1)
-    return ohlcv
+    fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker)
+
+    # 결측치 처리 (PER, PBR)
+    for col in ['PER', 'PBR']:
+        if col not in fundamental.columns:
+            fundamental[col] = 0
+        else:
+            fundamental[col] = fundamental[col].fillna(0)
+
+    # 두 컬럼 모두 DataFrame으로 합치기
+    data = pd.concat([ohlcv, fundamental[['PER', 'PBR']]], axis=1)
+    return data
 
 # 미국 주식 데이터를 가져오는 함수
 def fetch_stock_data_us(ticker, fromdate, todate):
@@ -293,20 +293,20 @@ def fetch_stock_data_us(ticker, fromdate, todate):
         elif ticker in stock_data.columns.get_level_values(0):
             stock_data.columns = stock_data.columns.droplevel(0)
 
-    # # PER/PBR 정보 try-except로 예외처리
-    # per_value, pbr_value = 0, 0
-    # try:
-    #     stock_info = yf.Ticker(ticker).info
-    #     per_value = stock_info.get('trailingPE', 0)
-    #     pbr_value = stock_info.get('priceToBook', 0)
-    # except Exception as e:
-    #     print(f"[{ticker}] info 조회 오류: {e}")
-    #
-    # stock_data['PER'] = per_value
-    # stock_data['PBR'] = pbr_value
+    # PER/PBR 정보 try-except로 예외처리
+    per_value, pbr_value = 0, 0
+    try:
+        stock_info = yf.Ticker(ticker).info
+        per_value = stock_info.get('trailingPE', 0)
+        pbr_value = stock_info.get('priceToBook', 0)
+    except Exception as e:
+        print(f"[{ticker}] info 조회 오류: {e}")
+
+    stock_data['PER'] = per_value
+    stock_data['PBR'] = pbr_value
 
     # 이제 컬럼명만 남겼으니 정상적으로 슬라이싱 가능
-    # stock_data = stock_data[['Open', 'High', 'Low', 'Close', 'Volume']].fillna(0)
+    stock_data = stock_data[['Open', 'High', 'Low', 'Close', 'Volume', 'PER', 'PBR']].fillna(0)
     return stock_data
 
 
