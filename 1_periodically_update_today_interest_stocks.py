@@ -135,7 +135,7 @@ for count, ticker in enumerate(tickers):
         res = requests.post(
             'https://chickchick.shop/func/stocks/info',
             json={"stock_name": str(ticker)},
-            timeout=5
+            timeout=10
         )
         json_data = res.json()
         product_code = json_data["result"][0]["data"]["items"][0]["productCode"]
@@ -162,6 +162,8 @@ for count, ticker in enumerate(tickers):
     """
     # 지난 5거래일 평균 거래대금(오늘 제외: -6:-1), 오늘값: -1
     avg5 = trading_value.iloc[-6:-1].mean()
+    if avg5 == 0.0:
+        avg5 = trading_value.iloc[-21:-1].mean()
     # print('avg', avg5)
     today_val = trading_value.iloc[-1]
     # print('today', today_val)
@@ -200,6 +202,9 @@ for count, ticker in enumerate(tickers):
     plt.close()
 
 
+    ratio = today_val / avg5 * 100
+    ratio = round(ratio, 2)
+
     if condition_passed:
         # 부합하면 결과에 저장 (상승률, 종목명, 코드)}
         change_pct_today = round(change_pct_today, 2)
@@ -230,12 +235,6 @@ for count, ticker in enumerate(tickers):
 
 
     if condition_passed2:
-        ratio = today_val / avg5 * 100
-        # print('ratio', ratio)
-        # 결과: (배수, 종목명, 코드, 오늘거래대금, 5일평균거래대금)
-
-        ratio = round(ratio, 2)
-
         try:
             requests.post(
                 'https://chickchick.shop/func/stocks/interest',
