@@ -109,6 +109,34 @@ def compute_roc(close, length=12, pct=True):
     return r * 100 if pct else r
 
 
+
+
+def drop_trading_halt_rows(data: pd.DataFrame):
+    """OHLCV 기준으로 거래정지/비정상 바를 제거한 DataFrame과 제거된 인덱스를 반환"""
+    d = data.copy()
+    d = d.replace([np.inf, -np.inf], np.nan)
+
+    # 한국/영문 칼럼 자동 식별
+    col_o = _col(d, '시가',   'Open')
+    col_h = _col(d, '고가',   'High')
+    col_l = _col(d, '저가',   'Low')
+    col_c = _col(d, '종가',   'Close')
+    col_v = _col(d, '거래량', 'Volume')
+
+    # 1) OHLCV 전부 존재
+    notna = d[[col_o, col_h, col_l, col_c, col_v]].notna().all(axis=1)
+    # 2) 가격이 0보다 큼(데이터 공급사에 따라 0으로 채워지는 경우 방지)
+    positive_price = d[[col_o, col_h, col_l, col_c]].gt(0).all(axis=1)
+    # 3) 거래량 > 0 (거래정지/휴장 등)
+    nonzero_vol = d[col_v].fillna(0) > 0
+    # 4) 고가 >= 저가 (이상치 방지)
+    hl_ok = d[col_h] >= d[col_l]
+
+    valid = notna & positive_price & nonzero_vol & hl_ok
+    removed_idx = d.index[~valid]
+
+    return d.loc[valid].copy(), removed_idx
+
 def get_kor_ticker_list_by_pykrx():
     tickers_kospi = get_safe_ticker_list(market="KOSPI")
     tickers_kosdaq = get_safe_ticker_list(market="KOSDAQ")
@@ -235,17 +263,17 @@ def get_russell1000_tickers():
 # 주식 데이터(시가, 고가, 저가, 종가, 거래량)와 재무 데이터(PER)를 가져온다 > pandas.DataFrame 객체
 def fetch_stock_data(ticker, fromdate, todate):
     ohlcv = stock.get_market_ohlcv_by_date(fromdate=fromdate, todate=todate, ticker=ticker)
-    fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker)
-
-    # 결측치 처리 (PER, PBR)
-    for col in ['PER', 'PBR']:
-        if col not in fundamental.columns:
-            fundamental[col] = 0
-        else:
-            fundamental[col] = fundamental[col].fillna(0)
-
-    # 두 컬럼 모두 DataFrame으로 합치기
-    data = pd.concat([ohlcv, fundamental[['PER', 'PBR']]], axis=1)
+    # fundamental = stock.get_market_fundamental_by_date(fromdate, todate, ticker)
+    #
+    # # 결측치 처리 (PER, PBR)
+    # for col in ['PER', 'PBR']:
+    #     if col not in fundamental.columns:
+    #         fundamental[col] = 0
+    #     else:
+    #         fundamental[col] = fundamental[col].fillna(0)
+    #
+    # # 두 컬럼 모두 DataFrame으로 합치기
+    # data = pd.concat([ohlcv, fundamental[['PER', 'PBR']]], axis=1)
     return data
 
 # 미국 주식 데이터를 가져오는 함수
