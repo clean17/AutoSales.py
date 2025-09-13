@@ -19,7 +19,31 @@ tf.random.set_seed(42)
 random.seed(42)
 
 
+RED = "#E83030"
+BLUE = "#195DE6"
+ORANGE = '#FF9F1C'
+GREEN = '#2E7D32'
+GRAY1 = '#8E8E8E'
+GRAY2 = '#9AA0A6'
 today = datetime.today().strftime('%Y%m%d')
+
+# ----- 공통 유틸 -----
+def _col(df, ko: str, en: str):
+    """한국/영문 칼럼 자동매핑: ko가 있으면 ko, 없으면 en을 반환"""
+    if ko in df.columns: return ko
+    return en
+
+def _ema(s: pd.Series, span: int) -> pd.Series:
+    return s.ewm(span=span, adjust=False).mean()
+
+def _rma(s: pd.Series, length: int) -> pd.Series:
+    # Wilder's moving average
+    alpha = 1 / length
+    return s.ewm(alpha=alpha, adjust=False).mean()
+
+
+
+
 
 def get_kor_ticker_list_by_pykrx():
     tickers_kospi = get_safe_ticker_list(market="KOSPI")
@@ -347,82 +371,59 @@ def invert_scale(scaled_preds, scaler, feature_index=3):
 
 
 def add_technical_features(data, window=20, num_std=2):
+    data = data.copy()
+
+    # 한국/영문 칼럼 자동 식별
+    col_o = _col(data, '시가',   'Open')
+    col_h = _col(data, '고가',   'High')
+    col_l = _col(data, '저가',   'Low')
+    col_c = _col(data, '종가',   'Close')
+    col_v = _col(data, '거래량', 'Volume')
 
     # RSI (14일)
-    data['RSI14'] = compute_rsi(data['종가'])  # 사전에 정의 필요
+    data['RSI14'] = compute_rsi(data[col_c])  # 사전에 정의 필요
 
     # 볼린저밴드 (MA20, STD20, 상단/하단 밴드)
-    data['MA20'] = data['종가'].rolling(window=window).mean()
-    data['STD20'] = data['종가'].rolling(window=window).std()
+    data['MA20'] = data[col_c].rolling(window=window).mean()
+    data['STD20'] = data[col_c].rolling(window=window).std()
     data['UpperBand'] = data['MA20'] + (num_std * data['STD20'])
     data['LowerBand'] = data['MA20'] - (num_std * data['STD20'])
+
     # 볼린저밴드 위치 (0~1)
-    data['BB_perc'] = (data['종가'] - data['LowerBand']) / (data['UpperBand'] - data['LowerBand'] + 1e-9)
+    data['BB_perc'] = (data[col_c] - data['LowerBand']) / (data['UpperBand'] - data['LowerBand'] + 1e-9)
 
     # 이동평균선
-    data['MA5'] = data['종가'].rolling(window=5).mean()
-    data['MA10'] = data['종가'].rolling(window=10).mean()
+    data['MA5'] = data[col_c].rolling(window=5).mean()
+    data['MA10'] = data[col_c].rolling(window=10).mean()
     data['MA5_slope'] = data['MA5'].diff()
     data['MA10_slope'] = data['MA10'].diff()
     data['MA20_slope'] = data['MA20'].diff()
 
     # 거래량 증감률
-    data['Volume_change'] = data['거래량'].pct_change().replace([np.inf, -np.inf], 0).fillna(0)
+    data['Volume_change'] = data[col_v].pct_change().replace([np.inf, -np.inf], 0).fillna(0)
 
     # 당일 변동폭 (고가-저가 비율)
-    data['day_range_pct'] = (data['고가'] - data['저가']) / (data['저가'] + 1e-9)
+    data['day_range_pct'] = (data[col_h] - data[col_l]) / (data[col_l] + 1e-9)
 
     # 캔들패턴 (양봉/음봉, 장대양봉 등)
-    # data['is_bullish'] = (data['종가'] > data['시가']).astype(int) # 양봉이면 1, 음봉이면 0
+    # data['is_bullish'] = (data[col_c] > data['시가']).astype(int) # 양봉이면 1, 음봉이면 0
     # 장대양봉(시가보다 종가가 2% 이상 상승)
-    # data['long_bullish'] = ((data['종가'] - data['시가']) / data['시가'] > 0.02).astype(int)
+    # data['long_bullish'] = ((data[col_c] - data['시가']) / data['시가'] > 0.02).astype(int)
 
     # 최근 N일간 등락률
-    # data['chg_5d'] = (data['종가'] / data['종가'].shift(5)) - 1
+    # data['chg_5d'] = (data[col_c] / data[col_c].shift(5)) - 1
     # 현재가 vs 이동평균(MA) 괴리율
-    data['ma5_gap'] = (data['종가'] - data['MA5']) / data['MA5']
-    data['ma10_gap'] = (data['종가'] - data['MA10']) / data['MA10']
-    data['ma20_gap'] = (data['종가'] - data['MA20']) / data['MA20']
+    data['ma10_gap'] = (data[col_c] - data['MA10']) / data['MA10']
     # 거래량 급증 신호
-    data['volume_ratio'] = data['거래량'] / data['거래량'].rolling(20).mean()
+    data['volume_ratio'] = data[col_v] / data[col_v].rolling(20).mean()
+
+
+    # === 추가 지표 ===
+
+
 
     return data
 
-def add_technical_features_us(data, window=20, num_std=2):
-
-    # RSI (14일)
-    data['RSI14'] = compute_rsi(data['Close'])  # 사전에 정의 필요
-
-    # 볼린저밴드 (MA20, STD20, 상단/하단 밴드)
-    data['MA20'] = data['Close'].rolling(window=window).mean()
-    data['STD20'] = data['Close'].rolling(window=window).std()
-    data['UpperBand'] = data['MA20'] + (num_std * data['STD20'])
-    data['LowerBand'] = data['MA20'] - (num_std * data['STD20'])
-    # 볼린저밴드 위치 (0~1)
-    data['BB_perc'] = (data['Close'] - data['LowerBand']) / (data['UpperBand'] - data['LowerBand'] + 1e-9)
-
-    # 이동평균선
-    data['MA5'] = data['Close'].rolling(window=5).mean()
-    data['MA10'] = data['Close'].rolling(window=10).mean()
-    data['MA5_slope'] = data['MA5'].diff()
-    data['MA10_slope'] = data['MA10'].diff()
-    data['MA20_slope'] = data['MA20'].diff()
-
-    # 거래량 증감률
-    data['Volume_change'] = data['Volume'].pct_change().replace([np.inf, -np.inf], 0).fillna(0)
-
-    # 당일 변동폭 (고가-저가 비율)
-    data['day_range_pct'] = (data['High'] - data['Low']) / (data['Low'] + 1e-9)
-
-    # 캔들패턴 (양봉/음봉, 장대양봉 등)
-    # data['is_bullish'] = (data['Close'] > data['Open']).astype(int) # 양봉이면 1, 음봉이면 0
-    # 장대양봉(시가보다 종가가 2% 이상 상승)
-    # data['long_bullish'] = ((data['Close'] - data['Open']) / data['Open'] > 0.02).astype(int)
-
-    # 현재가 vs 이동평균(MA) 괴리율
-    data['ma10_gap'] = (data['Close'] - data['MA10']) / data['MA10']
-
-    return data
 
 def check_column_types(data, columns):
     for col in columns:
@@ -476,17 +477,7 @@ def get_name_from_usa_ticker(ticker: str) -> Optional[str]:
         print("네트워크/요청 에러:", repr(e))
 
 
-def _col(df, ko: str, en: str):
-    """한국/영문 칼럼 자동매핑: ko가 있으면 ko, 없으면 en을 반환"""
-    if ko in df.columns: return ko
-    return en
 
-RED = "#E83030"
-BLUE = "#195DE6"
-ORANGE = '#FF9F1C'
-GREEN = '#2E7D32'
-GRAY1 = '#8E8E8E'
-GRAY2 = '#9AA0A6'
 
 
 def plot_candles_daily(

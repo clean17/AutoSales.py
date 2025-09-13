@@ -9,7 +9,7 @@ from sklearn.preprocessing import MinMaxScaler
 import matplotlib.pyplot as plt
 from send2trash import send2trash
 from utils import create_lstm_model, create_multistep_dataset, fetch_stock_data_us, get_nasdaq_symbols, \
-    extract_stock_code_from_filenames, get_usd_krw_rate, add_technical_features_us, check_column_types, \
+    extract_stock_code_from_filenames, get_usd_krw_rate, add_technical_features, check_column_types, \
     get_name_from_usa_ticker, plot_candles_daily, plot_candles_weekly
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.model_selection import train_test_split
@@ -61,7 +61,7 @@ today = datetime.today().strftime('%Y%m%d')
 
 # tickers = extract_stock_code_from_filenames(output_dir)
 tickers = get_nasdaq_symbols()
-# tickers=['RKLB']
+# tickers = ['MNKD']
 
 
 # 결과를 저장할 배열
@@ -195,7 +195,7 @@ for count, ticker in enumerate(tickers):
     #     pass
 
     # 2차 생성 feature
-    data = add_technical_features_us(data)
+    data = add_technical_features(data)
 
     # 현재 5일선이 20일선보다 낮으면서 하락중이면 패스
     ma_angle_5 = data['MA5'].iloc[-1] - data['MA5'].iloc[-2]
@@ -318,7 +318,7 @@ for count, ticker in enumerate(tickers):
     avg_future_return = (np.mean(predicted_prices) / last_close - 1) * 100
 
     # 기대 성장률 미만이면 건너뜀
-    if avg_future_return < EXPECTED_GROWTH_RATE:
+    if avg_future_return < EXPECTED_GROWTH_RATE and avg_future_return < 20:
         if avg_future_return > 0:
             print(f"  예상 : {avg_future_return:.2f}%")
         # pass
