@@ -155,6 +155,7 @@ for count, ticker in enumerate(tickers):
         )
         data2 = res2.json()
         market_value = data2["result"]["marketValueKrw"]
+        company_code = data2["result"]["company"]["code"]
         # 시가총액이 500억보다 작으면 패스
         if (market_value < 50_000_000_000):
             # condition_passed = False
@@ -212,6 +213,18 @@ for count, ticker in enumerate(tickers):
     ratio = today_val / avg5 * 100
     ratio = round(ratio, 2)
 
+    try:
+        res = requests.post(
+            'https://chickchick.shop/func/stocks/company',
+            json={"company_code": str(company_code)},
+            timeout=10
+        )
+        json_data = res.json()
+        category = json_data["result"]["majorList"][0]["title"]
+    except Exception as e:
+        print(f"/func/stocks/company 요청 실패: {e}")
+        pass  # 오류
+
     if condition_passed:
         # 부합하면 결과에 저장 (상승률, 종목명, 코드)}
         change_pct_today = round(change_pct_today, 2)
@@ -233,6 +246,7 @@ for count, ticker in enumerate(tickers):
                     "trading_value_change_pct": str(ratio),
                     "image_url": str(final_file_name),
                     "market_value": str(market_value),
+                    "category": str(category),
                 },
                 timeout=5
             )
@@ -261,6 +275,7 @@ for count, ticker in enumerate(tickers):
                     "trading_value_change_pct": str(ratio),
                     "image_url": str(final_file_name),
                     "market_value": str(market_value),
+                    "category": str(category),
                 },
                 timeout=5
             )
