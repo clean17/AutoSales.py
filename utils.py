@@ -274,7 +274,7 @@ def fetch_stock_data(ticker, fromdate, todate):
     #
     # # 두 컬럼 모두 DataFrame으로 합치기
     # data = pd.concat([ohlcv, fundamental[['PER', 'PBR']]], axis=1)
-    return data
+    return ohlcv
 
 # 미국 주식 데이터를 가져오는 함수
 def fetch_stock_data_us(ticker, fromdate, todate):
@@ -293,20 +293,20 @@ def fetch_stock_data_us(ticker, fromdate, todate):
         elif ticker in stock_data.columns.get_level_values(0):
             stock_data.columns = stock_data.columns.droplevel(0)
 
-    # PER/PBR 정보 try-except로 예외처리
-    per_value, pbr_value = 0, 0
-    try:
-        stock_info = yf.Ticker(ticker).info
-        per_value = stock_info.get('trailingPE', 0)
-        pbr_value = stock_info.get('priceToBook', 0)
-    except Exception as e:
-        print(f"[{ticker}] info 조회 오류: {e}")
-
-    stock_data['PER'] = per_value
-    stock_data['PBR'] = pbr_value
+    # # PER/PBR 정보 try-except로 예외처리
+    # per_value, pbr_value = 0, 0
+    # try:
+    #     stock_info = yf.Ticker(ticker).info
+    #     per_value = stock_info.get('trailingPE', 0)
+    #     pbr_value = stock_info.get('priceToBook', 0)
+    # except Exception as e:
+    #     print(f"[{ticker}] info 조회 오류: {e}")
+    #
+    # stock_data['PER'] = per_value
+    # stock_data['PBR'] = pbr_value
 
     # 이제 컬럼명만 남겼으니 정상적으로 슬라이싱 가능
-    stock_data = stock_data[['Open', 'High', 'Low', 'Close', 'Volume', 'PER', 'PBR']].fillna(0)
+    # stock_data = stock_data[['Open', 'High', 'Low', 'Close', 'Volume']].fillna(0)
     return stock_data
 
 
