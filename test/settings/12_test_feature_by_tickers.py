@@ -47,7 +47,7 @@ for ticker in tickers:
         for f in feature_cols:
             flattened_feature_names.append(f"{f}_t{-LOOK_BACK + t + 1}")
 
-    X_for_model = data[feature_cols].fillna(0) # 모델 feature만 NaN을 0으로
+    X_for_model = data.dropna(subset=feature_cols) # 결측 제거
     scaled_data = scaler.fit_transform(X_for_model)
     X, Y = create_multistep_dataset(scaled_data, LOOK_BACK, PREDICTION_PERIOD, 0)
 

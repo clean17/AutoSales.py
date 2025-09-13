@@ -226,7 +226,7 @@ for count, ticker in enumerate(tickers):
         # 'ma10_gap',
     ]
 
-    X_for_model = data[feature_cols].fillna(0) # 모델 feature만 NaN을 0으로
+    X_for_model = data.dropna(subset=feature_cols) # 결측 제거
 #     X_for_model = X_for_model.apply(pd.to_numeric, errors='coerce') # float64여야 함 (object라면 먼저 float 변환 필요)
 #     X_for_model = X_for_model.replace([np.inf, -np.inf], 0) # # inf/-inf 값을 0으로(또는 np.nan으로) 대체
     scaled_data = scaler.fit_transform(X_for_model)

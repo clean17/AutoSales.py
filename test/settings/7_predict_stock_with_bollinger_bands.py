@@ -54,7 +54,7 @@ scaler = MinMaxScaler(feature_range=(0, 1))
 # scaled_data = scaler.fit_transform(data)
 # 모델 입력(feature) 만들 땐 "NaN 없는 행"만 추출해서 사용
 feature_cols = ['시가', '고가', '저가', '종가', '거래량', 'MA20', 'UpperBand', 'LowerBand', 'PER', 'PBR']
-X_for_model = data[feature_cols].fillna(0) # 모델 feature만 NaN을 0으로
+X_for_model = data.dropna(subset=feature_cols) # 결측 제거
 scaled_data = scaler.fit_transform(X_for_model)
 
 

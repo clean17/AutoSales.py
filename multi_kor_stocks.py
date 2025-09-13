@@ -237,7 +237,7 @@ for count, ticker in enumerate(tickers):
         # 'ma10_gap',
     ]
 
-    X_for_model = data[feature_cols].fillna(0) # 모델 feature만 NaN을 0으로
+    X_for_model = data.dropna(subset=feature_cols) # 결측 제거
     # print(np.isfinite(X_for_model).all())  # True면 정상, False면 비정상
     # print(np.where(~np.isfinite(X_for_model)))  # 문제 있는 위치 확인
     scaled_data = scaler.fit_transform(X_for_model) # fit 하면 그 데이터의 min/max만 기억
