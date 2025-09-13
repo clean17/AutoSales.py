@@ -2,14 +2,9 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
-from tensorflow.keras.models import Sequential, load_model
-from tensorflow.keras.layers import LSTM, Dense, Dropout
-import matplotlib.pyplot as plt
-from tensorflow.keras.callbacks import ModelCheckpoint
 import os
 import sys
 import pickle
-from pykrx import stock
 from datetime import datetime, timedelta
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 
@@ -17,7 +12,8 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
 sys.path.append(BASE_DIR)
 
-from utils import create_multistep_dataset, fetch_stock_data, add_technical_features, create_lstm_model
+from utils import create_multistep_dataset, fetch_stock_data, add_technical_features, create_lstm_model, \
+    get_kor_ticker_dict_list, drop_trading_halt_rows
 
 # 시드 고정 테스트
 import numpy as np, tensorflow as tf, random
@@ -33,13 +29,18 @@ DATA_COLLECTION_PERIOD = 400
 PREDICTION_PERIOD = 3
 LOOK_BACK = 15
 
-# 데이터 수집
-tickers = ['006490', '042670', '023160', '006800', '323410', '009540', '034020', '358570', '000155', '035720', '00680K', '035420', '012510']
+# 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+pickle_dir = os.path.join(ROOT_DIR, 'pickle')
 
-ticker_to_name = {ticker: stock.get_market_ticker_name(ticker) for ticker in tickers}
+# 데이터 수집
+tickers = ['008970']
+# tickers = ['008970', '006490', '042670', '023160', '006800', '323410', '009540', '034020', '358570', '000155', '035720', '00680K', '035420', '012510']
+tickers_dict = get_kor_ticker_dict_list()
 
 today = datetime.today().strftime('%Y%m%d')
 # start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y%m%d')
+start_five_date = (datetime.today() - timedelta(days=5)).strftime('%Y%m%d')
 
 for i in range(1):
     # period = DATA_COLLECTION_PERIOD + (10*i)
@@ -53,8 +54,42 @@ for i in range(1):
     total_cnt = 0
 
     for count, ticker in enumerate(tickers):
-        stock_name = ticker_to_name.get(ticker, 'Unknown Stock')
-        data = add_technical_features(fetch_stock_data(ticker, start_date, today))
+        stock_name = tickers_dict.get(ticker, 'Unknown Stock')
+        print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
+
+        # 데이터가 없으면 1년 데이터 요청, 있으면 5일 데이터 요청
+        filepath = os.path.join(pickle_dir, f'{ticker}.pkl')
+        if os.path.exists(filepath):
+            df = pd.read_pickle(filepath)
+            data = fetch_stock_data(ticker, start_five_date, today)
+        else:
+            df = pd.DataFrame()
+            data = fetch_stock_data(ticker, start_date, today)
+
+        # 중복 제거 & 새로운 날짜만 추가
+        if not df.empty:
+            # 기존 날짜 인덱스와 비교하여 새로운 행만 선택
+            new_rows = data.loc[~data.index.isin(df.index)] # ~ (not) : 기존에 없는 날짜만 남김
+            df = pd.concat([df, new_rows])
+        else:
+            df = data
+
+        # 너무 먼 과거 데이터 버리기
+        if len(df) > 280:
+            df = df.iloc[-280:]
+
+        # 파일 저장
+        df.to_pickle(filepath)
+        data = df
+
+
+        # 0) 우선 거래정지/이상치 행 제거
+        data, removed_idx = drop_trading_halt_rows(data)
+        if len(removed_idx) > 0:
+            print(f"거래정지/이상치로 제거된 날짜 수: {len(removed_idx)}")
+
+        data = add_technical_features(data)
+
 
         threshold = 0.1  # 10%
         cols_to_drop = [
@@ -62,15 +97,15 @@ for i in range(1):
             if (data[col].isna().mean() > threshold) or (np.isinf(data[col]).mean() > threshold)
         ]
         if len(cols_to_drop) > 0:
+            data.drop(columns=cols_to_drop, inplace=True, errors='ignore')
             print("Drop candidates:", cols_to_drop)
-            continue
+            # continue
 
-        print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
 
         # 데이터 스케일링
         scaler = MinMaxScaler(feature_range=(0, 1))
         feature_cols = [
-            '종가', '고가', 'PBR', '저가', '거래량',
+            '종가', '고가', '저가', '거래량',
             # 'RSI14',
             'ma10_gap',
         ]
@@ -81,7 +116,12 @@ for i in range(1):
         # feature_cols = [
         #     '종가', '고가', '저가', '거래량'
         # ]
-        X_for_model = data[feature_cols].fillna(0) # 모델 feature NaN을 0으로
+
+        # 0) NaN/inf 정리
+        data = data.replace([np.inf, -np.inf], np.nan)
+        # 1) feature_cols만 남기고, 그 안에서만 dropna
+        feature_cols = [c for c in feature_cols if c in data.columns]
+        X_for_model = data.dropna(subset=feature_cols).loc[:, feature_cols]
         scaled_data = scaler.fit_transform(X_for_model)
 
         # 시계열 데이터를 윈도우로 나누기
@@ -97,7 +137,7 @@ for i in range(1):
                                       lstm_units=[128,64], dense_units=[64,32])
 
         # 콜백 설정
-        from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
+        from tensorflow.keras.callbacks import EarlyStopping
         early_stop = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True) # 10회 동안 개선없으면 종료, 최적의 가중치를 복원
         history = model.fit(X_train, Y_train, batch_size=8, epochs=200,
                             validation_data=(X_val, Y_val),
@@ -108,7 +148,7 @@ for i in range(1):
         # predictions : 검증셋 각 구간(윈도우)에 대해 미래 PREDICTION_PERIOD만큼의 예측치 반환
         # shape: (검증샘플수, 예측일수)
         predictions = model.predict(X_val, verbose=0)
-        # print('predictions (샘플, 예측일)', predictions.shape)
+        print('predictions (샘플, 예측일)', predictions.shape)
 
         # MSE
         mse = mean_squared_error(Y_val, predictions)
