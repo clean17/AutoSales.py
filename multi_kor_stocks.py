@@ -100,7 +100,7 @@ for count, ticker in enumerate(tickers):
     # data = pd.read_pickle(filepath)
     data = df
 
-#     check_column_types(fetch_stock_data(ticker, start_date, today), ['종가', '고가', '저가', '거래량', 'PER', 'PBR']) # 타입과 shape 확인 > Series 가 나와야 한다
+#     check_column_types(fetch_stock_data(ticker, start_date, today), ['종가', '고가', '저가', '거래량', 'PBR']) # 타입과 shape 확인 > Series 가 나와야 한다
 #     continue
 ########################################################################
 

@@ -258,7 +258,7 @@ for count, ticker in enumerate(tickers):
     # print('')
 
 
-    # feature_cols = ['시가', '고가', '저가', '종가', '거래량', 'MA20', 'UpperBand', 'LowerBand', 'PER', 'PBR']
+    # feature_cols = ['시가', '고가', '저가', '종가', '거래량', 'MA20', 'UpperBand', 'LowerBand', 'PBR']
     feature_cols = [
         col_o, col_l, col_h, col_c,
         'Vol_logdiff',

@@ -71,7 +71,8 @@ total_cnt = 0
 is_first_flag = True
 
 for count, ticker in enumerate(tickers):
-    print(f"Processing {count+1}/{len(tickers)} : {ticker}")
+    stock_name = get_name_from_usa_ticker(ticker)
+    print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
 
 
     # 데이터가 없으면 1년 데이터 요청, 있으면 5일 데이터 요청
@@ -105,7 +106,7 @@ for count, ticker in enumerate(tickers):
         print(f"{ticker}: 데이터가 비었거나 'Close' 컬럼이 없습니다. pass.")
         continue
 
-#     check_column_types(fetch_stock_data_us(ticker, start_date_us, end_date), ['Close', 'Open', 'High', 'Low', 'Volume', 'PER', 'PBR']) # 타입과 shape 확인 > Series 가 나와야 한다
+#     check_column_types(fetch_stock_data_us(ticker, start_date_us, end_date), ['Close', 'Open', 'High', 'Low', 'Volume', 'PBR']) # 타입과 shape 확인 > Series 가 나와야 한다
 #     continue
 
     ########################################################################
@@ -323,8 +324,6 @@ for count, ticker in enumerate(tickers):
             print(f"  예상 : {avg_future_return:.2f}%")
         # pass
         continue
-
-    stock_name = get_name_from_usa_ticker(ticker)
 
     # 결과 저장
     results.append((avg_future_return, ticker, stock_name))
