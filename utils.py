@@ -10,6 +10,7 @@ import re
 from typing import Optional
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 
 
 # 시드 고정
@@ -869,3 +870,27 @@ def plot_candles_weekly(
     ax_volume.set_xticklabels(dsw[tick_idx], rotation=0, ha='center')
 
     return fig, ax_price, ax_volume
+
+def regression_metrics(y_true, y_pred):
+    # numpy array 변환
+    y_true = np.array(y_true)
+    y_pred = np.array(y_pred)
+
+    # MSE, RMSE, MAE
+    mse = mean_squared_error(y_true, y_pred)
+    rmse = np.sqrt(mse)
+    mae = mean_absolute_error(y_true, y_pred)
+
+    # MAPE (0 division 방지)
+    mape = np.mean(np.abs((y_true - y_pred) / np.where(y_true == 0, 1, y_true))) * 100
+
+    # R²
+    r2 = r2_score(y_true, y_pred)
+
+    return {
+        "MSE": mse,
+        "RMSE": rmse,
+        "MAE": mae,
+        "MAPE (%)": mape,
+        "R2": r2
+    }
