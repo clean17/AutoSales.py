@@ -52,12 +52,19 @@ for count, ticker in enumerate(tickers):
         data = fetch_stock_data(ticker, start_yesterday, today)
 
     # 중복 제거 & 새로운 날짜만 추가
+    # if not df.empty:
+    #     # 기존 날짜 인덱스와 비교하여 새로운 행만 선택
+    #     new_rows = data.loc[~data.index.isin(df.index)] # ~ (not) : 기존에 없는 날짜만 남김
+    #     df = pd.concat([df, new_rows])
+    # else:
+    #     df = data
+
+    # 중복 제거 & 새로운 날짜만 추가 >> 덮어쓰는 방식으로 수정
     if not df.empty:
-        # 기존 날짜 인덱스와 비교하여 새로운 행만 선택
-        new_rows = data.loc[~data.index.isin(df.index)] # ~ (not) : 기존에 없는 날짜만 남김
-        df = pd.concat([df, new_rows])
-    else:
-        df = data
+        # df와 data를 concat 후, data 값으로 덮어쓰기
+        df = pd.concat([df, data])
+        df = df[~df.index.duplicated(keep='last')]  # 같은 인덱스일 때 data가 남음
+
 
     # 너무 먼 과거 데이터 버리기
     if len(df) > 280:
@@ -175,7 +182,7 @@ for count, ticker in enumerate(tickers):
         condition_passed2 = True
 
     # 그래프 생성
-    fig = plt.figure(figsize=(14, 16), dpi=150)
+    fig = plt.figure(figsize=(16, 18), dpi=150)
     gs = fig.add_gridspec(nrows=4, ncols=1, height_ratios=[3, 1, 3, 1])
 
     ax_d_price = fig.add_subplot(gs[0, 0])

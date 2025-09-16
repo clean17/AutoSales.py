@@ -990,3 +990,42 @@ def pass_filter(metrics, use_restored=True, r2_min=0.6, smape_max=30.0, mape_max
     # print("DEBUG >> R2:", m["R2"], "SMAPE:", m["SMAPE (%)"])  # <- 디버깅
     # return (m["R2"] >= r2_min) and (m["SMAPE (%)"] < smape_max) and (m["MAPE (%)"] < mape_max)
     return (m["R2"] >= r2_min) and (m["SMAPE (%)"] <= smape_max)
+
+
+
+# 5일선이 20일선 아래에서 근접하게 다가옴
+def near_bull_cross_signal(df: pd.DataFrame,
+                           lookback: int = 5,
+                           gap_bp: float = 0.004,    # MA20 대비 0.4% 이내
+                           min_rise_bp: float = 0.002 # delta가 최근 lookback동안 최소 0.2%p 이상 상승
+                           ) -> bool:
+    """
+    df: MA5, MA20 컬럼 포함. 인덱스는 날짜(오름차순).
+    조건:
+      - 현재 MA5 < MA20 (아직 역전 전)
+      - 격차 |MA5-MA20| 가 MA20의 gap_bp 이내
+      - 최근 lookback일 동안 delta가 유의미하게 상승(=붙는 중)
+    """
+    s_ma5 = pd.to_numeric(df['MA5'], errors='coerce')
+    s_ma20 = pd.to_numeric(df['MA20'], errors='coerce')
+    if s_ma5.isna().iloc[-lookback:].any() or s_ma20.isna().iloc[-lookback:].any():
+        return False
+
+    delta = s_ma5 - s_ma20
+    # 아직 아래에 있음
+    if not (delta.iloc[-1] < 0):
+        return False
+
+    # 현재 격차가 충분히 좁은가? (MA20의 퍼센트 기준)
+    tight_now = abs(delta.iloc[-1]) <= (s_ma20.iloc[-1] * gap_bp)
+
+    # 최근 lookback일 동안 delta가 유의미하게 상승(즉, 더 0에 가까워짐)
+    delta_rise = (delta.iloc[-1] - delta.iloc[-lookback]) >= (s_ma20.iloc[-1] * min_rise_bp)
+
+    # 보조: MA5 기울기 양수, MA20 기울기 비양수(완화 가능)
+    ma5_slope = s_ma5.iloc[-1] - s_ma5.iloc[-2]
+    ma20_slope = s_ma20.iloc[-1] - s_ma20.iloc[-2]
+    slope_ok = (ma5_slope > 0) and (ma20_slope <= 0)
+
+    return bool(tight_now and delta_rise and slope_ok)
+
