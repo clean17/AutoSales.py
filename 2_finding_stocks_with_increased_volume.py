@@ -1,7 +1,6 @@
 import os, sys
 import numpy as np
 import pandas as pd
-from pykrx import stock
 from datetime import datetime, timedelta
 import unicodedata
 import requests
@@ -19,7 +18,7 @@ else:
     raise FileNotFoundError("utils.py를 상위 디렉터리에서 찾지 못했습니다.")
 
 from utils import fetch_stock_data, get_kor_ticker_list, get_kor_ticker_dict_list, add_technical_features, \
-    plot_candles_weekly, plot_candles_daily
+    plot_candles_weekly, plot_candles_daily, drop_trading_halt_rows
 
 '''
 거래대금 증가 종목 탐색
@@ -177,11 +176,16 @@ for count, ticker in enumerate(tickers):
     today_val = trading_value.iloc[-1]
     # print('today', today_val)
 
-    # 거래대금 x배 증가 종목 찾기
-    TARGET_VALUE = 10
-    # 0 나눗셈 방지 및 조건 체크
-    if avg5 > 0 and np.isfinite(avg5) and today_val >= TARGET_VALUE * avg5:
-        condition_passed2 = True
+    # # 거래대금 x배 증가 종목 찾기
+    # TARGET_VALUE = 10
+    # # 0 나눗셈 방지 및 조건 체크
+    # if avg5 > 0 and np.isfinite(avg5) and today_val >= TARGET_VALUE * avg5:
+    #     condition_passed2 = True
+
+    data, removed_idx = drop_trading_halt_rows(data)
+    if len(removed_idx) > 0:
+        # print(f"                                                        거래정지/이상치로 제거된 날짜 수: {len(removed_idx)}")
+        pass
 
     # 그래프 생성
     fig = plt.figure(figsize=(14, 16), dpi=150)

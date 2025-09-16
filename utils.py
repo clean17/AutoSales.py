@@ -871,26 +871,122 @@ def plot_candles_weekly(
 
     return fig, ax_price, ax_volume
 
-def regression_metrics(y_true, y_pred):
-    # numpy array 변환
-    y_true = np.array(y_true)
-    y_pred = np.array(y_pred)
+# def regression_metrics(y_true, y_pred):
+#     # numpy array 변환
+#     y_true = np.array(y_true)
+#     y_pred = np.array(y_pred)
+#
+#     # MSE, RMSE, MAE
+#     mse = mean_squared_error(y_true, y_pred)
+#     rmse = np.sqrt(mse)
+#     mae = mean_absolute_error(y_true, y_pred)
+#
+#     # MAPE (0 division 방지)
+#     mape = np.mean(np.abs((y_true - y_pred) / np.where(y_true == 0, 1, y_true))) * 100
+#
+#     # SMAPE
+#     smape = 100 * np.mean(
+#         2.0 * np.abs(y_pred - y_true) / (np.abs(y_true) + np.abs(y_pred) + 1e-8)
+#     )
+#
+#     # R²
+#     r2 = r2_score(y_true, y_pred)
+#
+#     return {
+#         "MSE": mse,
+#         "RMSE": rmse,
+#         "MAE": mae,
+#         "MAPE (%)": mape,
+#         "SMAPE (%)": smape,
+#         "R2": r2
+#     }
 
-    # MSE, RMSE, MAE
-    mse = mean_squared_error(y_true, y_pred)
+
+
+def _to_2d(a):
+    a = np.array(a)
+    return a if a.ndim == 2 else a.reshape(-1, 1)
+
+def _smape(y_true, y_pred, eps=1e-8):
+    y_true = np.array(y_true, dtype=float)
+    y_pred = np.array(y_pred, dtype=float)
+    denom = (np.abs(y_true) + np.abs(y_pred)) + eps
+    return 100.0 * np.mean(2.0 * np.abs(y_pred - y_true) / denom)
+
+def _mape(y_true, y_pred, eps=1e-8):
+    y_true = np.array(y_true, dtype=float)
+    y_pred = np.array(y_pred, dtype=float)
+    denom = np.where(np.abs(y_true) < eps, eps, np.abs(y_true))
+    return 100.0 * np.mean(np.abs((y_true - y_pred) / denom))
+
+def regression_metrics(
+        y_true, y_pred, *,
+        y_scaler=None,          # 타깃 전용 스케일러가 있을 때 사용
+        scaler=None,            # 전체 피처 스케일러(지금 케이스)
+        n_features=None,
+        idx_close=None
+):
+    y_true = _to_2d(y_true)
+    y_pred = _to_2d(y_pred)
+
+    # scaled-space
+    mse  = mean_squared_error(y_true, y_pred)
     rmse = np.sqrt(mse)
-    mae = mean_absolute_error(y_true, y_pred)
+    mae  = mean_absolute_error(y_true, y_pred)
+    mape = _mape(y_true, y_pred)
+    smape = _smape(y_true, y_pred)
+    r2   = r2_score(y_true, y_pred)
 
-    # MAPE (0 division 방지)
-    mape = np.mean(np.abs((y_true - y_pred) / np.where(y_true == 0, 1, y_true))) * 100
+    out = {"scaled": {
+        "MSE": float(mse), "RMSE": float(rmse), "MAE": float(mae),
+        "MAPE (%)": float(mape), "SMAPE (%)": float(smape), "R2": float(r2)
+    }}
 
-    # R²
-    r2 = r2_score(y_true, y_pred)
+    # restore if possible
+    restored_true = restored_pred = None
 
-    return {
-        "MSE": mse,
-        "RMSE": rmse,
-        "MAE": mae,
-        "MAPE (%)": mape,
-        "R2": r2
-    }
+    if y_scaler is not None:
+        restored_true = y_scaler.inverse_transform(y_true)
+        restored_pred = y_scaler.inverse_transform(y_pred)
+
+    elif (scaler is not None) and (n_features is not None) and (idx_close is not None):
+        def inv(part):
+            part = np.array(part)
+            if part.ndim == 2 and part.shape[1] > 1:
+                cols = []
+                for h in range(part.shape[1]):
+                    dummy = np.zeros((part.shape[0], n_features), dtype=float)
+                    dummy[:, idx_close] = part[:, h]
+                    inv_full = scaler.inverse_transform(dummy)
+                    cols.append(inv_full[:, idx_close])
+                return np.column_stack(cols)
+            else:
+                dummy = np.zeros((part.shape[0], n_features), dtype=float)
+                dummy[:, idx_close] = part.ravel()
+                inv_full = scaler.inverse_transform(dummy)
+                return inv_full[:, idx_close].reshape(-1, 1)
+
+        restored_true = inv(y_true)
+        restored_pred = inv(y_pred)
+
+    if restored_true is not None and restored_pred is not None:
+        r_mse  = mean_squared_error(restored_true, restored_pred)
+        r_rmse = np.sqrt(r_mse)
+        r_mae  = mean_absolute_error(restored_true, restored_pred)
+        r_mape = _mape(restored_true, restored_pred)
+        r_smape= _smape(restored_true, restored_pred)
+        r_r2   = r2_score(restored_true, restored_pred)
+
+        out["restored"] = {
+            "MSE": float(r_mse), "RMSE": float(r_rmse), "MAE": float(r_mae),
+            "MAPE (%)": float(r_mape), "SMAPE (%)": float(r_smape), "R2": float(r_r2)
+        }
+
+    return out
+
+
+def pass_filter(metrics, use_restored=True, r2_min=0.6, smape_max=30.0, mape_max=50.0):
+    m = metrics["restored"] if (use_restored and "restored" in metrics) else metrics["scaled"]
+    # print("DEBUG >> R2:", m["R2"], "SMAPE:", m["SMAPE (%)"])  # <- 디버깅
+    # return (m["R2"] >= r2_min) and (m["SMAPE (%)"] < smape_max) and (m["MAPE (%)"] < mape_max)
+    return (m["R2"] >= r2_min) and (m["SMAPE (%)"] <= smape_max)
