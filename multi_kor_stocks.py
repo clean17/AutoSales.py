@@ -1,19 +1,15 @@
 import matplotlib
 matplotlib.use('Agg')
-import os
-import sys
+import os, sys
 import pandas as pd
 from pykrx import stock
 from datetime import datetime, timedelta
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
 import matplotlib.pyplot as plt
-from send2trash import send2trash
-import ast
 from utils import create_lstm_model, create_multistep_dataset, fetch_stock_data, add_technical_features, \
-    get_kor_ticker_list, get_kor_ticker_dict_list, check_column_types, get_safe_ticker_list, plot_candles_daily, \
-    plot_candles_weekly
+    get_kor_ticker_dict_list, plot_candles_daily, plot_candles_weekly, drop_trading_halt_rows, regression_metrics, \
+    pass_filter
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-from sklearn.model_selection import train_test_split
 import requests
 import time
 
@@ -47,24 +43,32 @@ today_us = datetime.today().strftime('%Y-%m-%d')
 start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y%m%d')
 start_five_date = (datetime.today() - timedelta(days=5)).strftime('%Y%m%d')
 
-# pykrx로 종목 리스트 조회
-# tickers = get_kor_ticker_list()
-# ticker_to_name = {ticker: stock.get_market_ticker_name(ticker) for ticker in tickers}
 
 # chickchick.com에서 종목 리스트 조회
 tickers_dict = get_kor_ticker_dict_list()
 tickers = list(tickers_dict.keys())
+tickers = ['204620']
 
-# for file_name in os.listdir(output_dir):
-#     if file_name.startswith(today):
-#         send2trash(os.path.join(output_dir, file_name))
-
-# tickers = ['441270'] # 테스트용
+def _col(df, ko: str, en: str):
+    """한국/영문 칼럼 자동매핑: ko가 있으면 ko, 없으면 en을 반환"""
+    if ko in df.columns: return ko
+    return en
 
 # 결과를 저장할 배열
 results = []
 total_r2 = 0
 total_cnt = 0
+total_smape = 0
+
+# print('==================================================')
+# print("    RMSE, MAE → 예측 오차를 주가 단위(원) 그대로 해석 가능")
+# print("    MAPE (%) → 평균적으로 몇 % 오차가 나는지 직관적")
+# print("      0~10%: 매우 우수, 10~20%: 양호, 20~50%: 보통, 50% 이상: 부정확")
+# print("    SMAPE (%) → SMAPE는 0% ~ 200% 범위를 가지지만, 보통은 0~100% 사이에서 해석")
+# print("      0 ~ 10% → 매우 우수, 10 ~ 20% → 양호 (실사용 가능한 수준), 20 ~ 50% → 보통, 50% 이상 → 부정확")
+# print("    R² → 모델 설명력, 0~1 범위에서 클수록 좋음")
+# print("      0.6: 변동성의 약 60%를 설명")
+# print('==================================================')
 
 # 데이터 가져오는것만 1시간 걸리네
 for count, ticker in enumerate(tickers):
@@ -72,6 +76,27 @@ for count, ticker in enumerate(tickers):
     stock_name = tickers_dict.get(ticker, 'Unknown Stock')
     # stock_name = '파인엠텍' # 테스트용
     print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
+
+
+    # 학습하기전에 요청을 보낸다
+    percent = f'{round((count+1)/len(tickers)*100, 1):.1f}'
+    try:
+        requests.post(
+            'https://chickchick.shop/func/stocks/progress-update/kospi',
+            json={
+                "percent": percent,
+                "count": count+1,
+                "total_count": len(tickers),
+                "ticker": ticker,
+                "stock_name":stock_name,
+                "done": False,
+            },
+            timeout=5
+        )
+    except Exception as e:
+        # logging.warning(f"progress-update 요청 실패: {e}")
+        print(f"progress-update 요청 실패: {e}")
+        pass  # 오류
 
 
     # 데이터가 없으면 1년 데이터 요청, 있으면 5일 데이터 요청
@@ -83,13 +108,13 @@ for count, ticker in enumerate(tickers):
         df = pd.DataFrame()
         data = fetch_stock_data(ticker, start_date, today)
 
-    # 중복 제거 & 새로운 날짜만 추가
+    # 중복 제거 & 새로운 날짜만 추가 >> 덮어쓰는 방식으로 수정
     if not df.empty:
-        # 기존 날짜 인덱스와 비교하여 새로운 행만 선택
-        new_rows = data.loc[~data.index.isin(df.index)] # ~ (not) : 기존에 없는 날짜만 남김
-        df = pd.concat([df, new_rows])
+        # df와 data를 concat 후, data 값으로 덮어쓰기
+        df = pd.concat([df, data])
+        df = df[~df.index.duplicated(keep='last')]  # 같은 인덱스일 때 data가 남음
     else:
-        df = data
+        df = data.copy()
 
     # 너무 먼 과거 데이터 버리기
     if len(df) > 280:
@@ -100,12 +125,17 @@ for count, ticker in enumerate(tickers):
     # data = pd.read_pickle(filepath)
     data = df
 
-#     check_column_types(fetch_stock_data(ticker, start_date, today), ['종가', '고가', '저가', '거래량', 'PBR']) # 타입과 shape 확인 > Series 가 나와야 한다
-#     continue
-########################################################################
+
+    ########################################################################
 
     actual_prices = data['종가'].values # 종가 배열
     last_close = actual_prices[-1]
+
+    # 0) 우선 거래정지/이상치 행 제거
+    data, removed_idx = drop_trading_halt_rows(data)
+    if len(removed_idx) > 0:
+        # print(f"                                                        거래정지/이상치로 제거된 날짜 수: {len(removed_idx)}")
+        pass
 
     # 데이터가 부족하면 패스
     if data.empty or len(data) < 30:
@@ -176,31 +206,26 @@ for count, ticker in enumerate(tickers):
     #     print(f"                                                        4일 전 대비 {rate:.2f}% 하락 → pass")
     #     continue  # 또는 return
 
-    # # 최근 한달 동안의 변동률이 적으면 패스
-    # idx_list = [-5, -10, -15, -20]
-    # pass_flag = True
-    # for idx in idx_list:
-    #     past_close = data['종가'].iloc[idx]
-    #     change = abs(last_close / past_close - 1) * 100
-    #     if change >= 3: # 기준치
-    #         pass_flag = False
-    #         break
-    # if pass_flag:
-    #     print(f"                                                        최근 4주간 가격변동 3% 미만 → pass")
-    #     # continue
-    #     pass
-
-    # # 최근 3일, 2달 평균 거래량 계산, 최근 3일 거래량이 최근 2달 거래량의 15% 안되면 패스
-    # recent_3_avg = data['거래량'][-3:].mean()
-    # recent_2months_avg = data['거래량'][-40:].mean()
-    # if recent_3_avg < recent_2months_avg * 0.15:
-    #     temp = (recent_3_avg/recent_2months_avg * 100)
-    #     # print(f"                                                        최근 3일의 평균거래량이 최근 2달 평균거래량의 15% 미만 → pass : {temp:.2f}%")
-    #     continue
-    #     # pass
 
     # 2차 생성 feature
     data = add_technical_features(data)
+
+    threshold = 0.1  # 10%
+    # isna() : pandas의 결측값(NA) 체크. NaN, None, NaT에 대해 True
+    # mean() : 평균
+    # isinf() : 무한대 체크
+    cols_to_drop = [ # 결측치가 10% 이상인 칼럼
+        col for col in data.columns
+        if (data[col].isna().mean() > threshold) or (np.isinf(data[col]).mean() > threshold)
+    ]
+    if len(cols_to_drop) > 0:
+        # inplace=True : 반환 없이 입력을 그대로 수정
+        # errors='ignore' : 목록에 없는 칼럼 지우면 에러지만 무시
+        data.drop(columns=cols_to_drop, inplace=True, errors='ignore')
+        print("Drop candidates:", cols_to_drop)
+
+    if 'MA20' not in data.columns:
+        continue
 
     # 현재 5일선이 20일선보다 낮으면서 하락중이면 패스
     ma_angle_5 = data['MA5'].iloc[-1] - data['MA5'].iloc[-2]
@@ -221,192 +246,166 @@ for count, ticker in enumerate(tickers):
     #     continue
 
 
-########################################################################
+    ########################################################################
 
 
-    # 데이터셋 생성
-    scaler = MinMaxScaler(feature_range=(0, 1))
-    # scaled_data = scaler.fit_transform(data.values)
-    # feature_cols = [
-    #     '종가', '고가', '저가', '거래량',
-    # ]
-    # ma10_gap 끈게 더 실제와 유사.. ?
+    # 한국/영문 칼럼 자동 식별
+    col_o = _col(df, '시가',   'Open')
+    col_h = _col(df, '고가',   'High')
+    col_l = _col(df, '저가',   'Low')
+    col_c = _col(df, '종가',   'Close')
+    col_v = _col(df, '거래량', 'Volume')
+
+    # 학습에 쓸 피처
     feature_cols = [
-        '종가', '고가', 'PBR', '저가', '거래량',
-        # 'RSI14',
+        col_o, col_l, col_h, col_c,
+        # col_v,
+        'Vol_logdiff',
         # 'ma10_gap',
+        'MA5_slope',
+        # ** col_o, col_l, col_h, col_c, Vol_logdiff, MA5_slope
+        # R-squared_avg :  0.5841392158480752
+        # SMAPE :  42.22468885035757
     ]
 
-    X_for_model = data.dropna(subset=feature_cols) # 결측 제거
-    # print(np.isfinite(X_for_model).all())  # True면 정상, False면 비정상
-    # print(np.where(~np.isfinite(X_for_model)))  # 문제 있는 위치 확인
-    scaled_data = scaler.fit_transform(X_for_model) # fit 하면 그 데이터의 min/max만 기억
-    # 슬라이딩 윈도우로 전체 데이터셋 생성
-    X, Y = create_multistep_dataset(scaled_data, LOOK_BACK, PREDICTION_PERIOD, 0)
-    # print("X.shape:", X.shape) # X.shape: (0,) 데이터가 부족해서 슬라이딩 윈도우로 샘플이 만들어지지 않음
-    # print("Y.shape:", Y.shape)
+    # 0) NaN/inf 정리
+    data = data.replace([np.inf, -np.inf], np.nan)
 
-    # 머신러닝/딥러닝 모델 입력을 위해 학습/검증 분리
-    # 3차원 유지: (n_samples, look_back, n_features)
-    X_train, X_val, y_train, y_val = train_test_split(X, Y, test_size=0.1, shuffle=False)  # 시계열 데이터라면 shuffle=False 권장, random_state는 의미 없음(어차피 순서대로 나누니까)
+    # 1) feature_cols만 남기고 dropna
+    feature_cols = [c for c in feature_cols if c in data.columns]
+    # print('feature_cols', feature_cols)
+    X_df = data.dropna(subset=feature_cols).loc[:, feature_cols]
+
+    # (선택) 상수열 제거
+    const_cols = [c for c in X_df.columns if X_df[c].nunique() <= 1]
+    if const_cols:
+        X_df = X_df.drop(columns=const_cols)
+        feature_cols = [c for c in feature_cols if c not in const_cols]
+
+    # 종가 컬럼 이름/인덱스
+    idx_close = feature_cols.index(col_c)
+
+    # 2) 시계열 분리 후, train만 fit → val/전체 transform
+    split = int(len(X_df) * 0.9)
+    """
+        scaler = MinMaxScaler(feature_range=(0, 1))
+        X_tr_2d = scaler.fit_transform(X_df.iloc[:split].values)   # fit은 train에만
+        X_va_2d = scaler.transform(X_df.iloc[split:].values)
+        X_all_2d = scaler.transform(X_df.values)                   # 전체 transform (누수 아님)
+    """
+    scaler = StandardScaler()                         # ← 변경: StandardScaler
+    X_tr_2d = scaler.fit_transform(X_df.iloc[:split].values)   # fit: 스케일러가 데이터의 통계값을 학습         >> 훈련 세트: 훈련 데이터로만 통계(평균·최대/최소 등)를 학습 + 변환
+    X_va_2d = scaler.transform(X_df.iloc[split:].values)       # transform: 이미 학습된 통계값을 써서 값을 변환 >> 검증/테스트 세트: 훈련에서 배운 통계로만 변환
+    X_all_2d = scaler.transform(X_df.values)                   # 전체 transform (누수 아님)
+
+    # 3) 윈도잉(블록별) → 학습/검증 세트
+    X_train, Y_train = create_multistep_dataset(X_tr_2d, LOOK_BACK, PREDICTION_PERIOD, idx=idx_close)
+    X_val,   Y_val   = create_multistep_dataset(X_va_2d, LOOK_BACK, PREDICTION_PERIOD, idx=idx_close)
+
+    # 4) 안전 체크
+    for name, arr in [('X_train',X_train),('Y_train',Y_train),('X_val',X_val),('Y_val',Y_val)]:
+        assert np.isfinite(arr).all(), f"{name} has NaN/inf: check preprocessing"
+
+    # 5) 최소 샘플 수 확인
     if X_train.shape[0] < 50:
-        # print("                                                        샘플 부족 : ", X_train.shape[0])
         continue
 
-    # 학습하기 직전에 요청을 보낸다
-    percent = f'{round((count+1)/len(tickers)*100, 1):.1f}'
-    try:
-        requests.post(
-            'https://chickchick.shop/func/stocks/progress-update/kospi',
-            json={
-                "percent": percent,
-                "count": count+1,
-                "total_count": len(tickers),
-                "ticker": ticker,
-                "stock_name":stock_name,
-                "done": False,
-            },
-            timeout=5
-        )
-    except Exception as e:
-        # logging.warning(f"progress-update 요청 실패: {e}")
-        print(f"progress-update 요청 실패: {e}")
-        pass  # 오류
+    #######################################################################
 
-    # 모델 생성 및 학습
+    # 6) 모델 생성/학습
     model = create_lstm_model((X_train.shape[1], X_train.shape[2]), PREDICTION_PERIOD,
                               lstm_units=[128,64], dense_units=[64,32])
 
-    # 콜백 설정
     from tensorflow.keras.callbacks import EarlyStopping
     early_stop = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
-    # history = model.fit(X, Y, batch_size=8, epochs=200, validation_split=0.1, shuffle=False, verbose=0, callbacks=[early_stop])
-    history = model.fit(X_train, y_train, batch_size=8, epochs=200,
-                        validation_data=(X_val, y_val),
+    history = model.fit(X_train, Y_train, batch_size=8, epochs=200,
+                        validation_data=(X_val, Y_val),
                         shuffle=False, verbose=0, callbacks=[early_stop])
 
+
     # 모델 평가
-    # val_loss = model.evaluate(X_val, y_val, verbose=1)
+    # val_loss = model.evaluate(X_val, Y_val, verbose=1)
     # print("Validation Loss :", val_loss)
 
-    # X_val : 검증에 쓸 여러 시계열 구간의 집합
-    # predictions : 검증셋 각 구간(윈도우)에 대해 미래 PREDICTION_PERIOD만큼의 예측치 반환
-    # shape: (검증샘플수, 예측일수)
-    predictions = model.predict(X_val, verbose=0)
+    # (선택) 검증 예측
+    """
+        X_val : 검증에 쓸 여러 시계열 구간의 집합
+        preds : 검증셋 각 구간(윈도우)에 대해 미래 PREDICTION_PERIOD만큼의 예측치 반환
+        shape: (검증샘플수, 예측일수)
+    """
+    preds = model.predict(X_val, verbose=0)
 
-    # 학습이 최소한으로 되었는지 확인 후 실제 예측을 시작
-    # R-squared; (0=엉망, 1=완벽)
-    r2 = r2_score(y_val, predictions)
-    if r2 > 0:
-        total_r2 += r2
-        total_cnt += 1
-    # print(f"                                                        R-squared 0.7 미만이면 패스 : {r2:.2f}%")
-    if r2 < 0.62:
-        # print(f"                                                        R-squared 0.7 미만이면 패스 : {r2:.2f}%")
+    #######################################################################
+
+    # ++ 지표 계산: scaled + restored(원 단위)
+    metrics = regression_metrics(
+        Y_val, preds,
+        scaler=scaler,
+        n_features=X_df.shape[1],
+        idx_close=idx_close
+    )
+
+    # print("=== SCALED (표준화 공간) ===")
+    for k,v in metrics["scaled"].items():
+        if k == 'SMAPE (%)':
+            total_smape += v
+        if k == 'R2': # R-squared, (0=엉망, 1=완벽)
+            # print(f"                                                        R-squared 0.6 미만이면 패스 : {r2}")
+            total_r2 += v
+        # print(f"    {k}: {v:.4f}")
+
+    # if "restored" in metrics:
+    #     print("\n=== RESTORED (원 단위) ===")
+    #     for k,v in metrics["restored"].items():
+    #         print(f"    {k}: {v:.4f}")
+
+    ok = pass_filter(metrics, use_restored=False)  # 원 단위 기준으로 필터
+    # print("                                                        PASS 1st filter?" , ok)
+    if not ok:
         continue
 
+    #######################################################################
 
-    # X_input 생성 (마지막 구간)
-    X_input = X[-1:]
-    future_preds = model.predict(X_input, verbose=0).flatten() # 1차원 벡터로 변환
-    # print('future', future_preds)
+    # 7) 마지막 윈도우 1개로 미래 H-step 예측
+    if len(X_df) < LOOK_BACK:
+        raise ValueError("LOOK_BACK보다 데이터가 짧습니다.")
+    n_features = X_all_2d.shape[1]
+    last_window = X_all_2d[-LOOK_BACK:].reshape(1, LOOK_BACK, n_features)
+    future_scaled = model.predict(last_window, verbose=0)[0]        # shape=(H,)
 
-    # 종가 scaler fit (실제 데이터로)
-    close_scaler = MinMaxScaler(feature_range=(0, 1))
-    close_prices = data['종가'].values.reshape(-1, 1) # DataFrame에서 ‘종가’(Close Price) 컬럼의 값을 1차원 배열로 꺼냄
-    close_scaler.fit(close_prices) # close_prices 데이터에서 최소값/최대값을 학습(기억)함 >>  예측값(정규화된 상태)을 실제 가격 단위로 되돌릴 때 필요
+    # 8) 스케일 역변환 (StandardScaler: x = z*scale_[idx] + mean_[idx])
+    mu  = scaler.mean_[idx_close]
+    std = scaler.scale_[idx_close]
+    assert std > 0, "종가 표준편차가 0입니다(상수열?)."
+    predicted_prices = future_scaled * std + mu                     # (H,)
 
-    # 모델 예측값(future_preds)은 정규화된 값임 >> scaler로 실제 가격 단위(원래 스케일)로 되돌림 (역정규화)
-    predicted_prices = close_scaler.inverse_transform(future_preds.reshape(-1, 1)).flatten() # (PREDICTION_PERIOD, )
-
-    # 날짜 처리 : 예측 구간의 미래 날짜 리스트 생성, start는 마지막 날짜 다음 영업일(Business day)부터 시작
-    future_dates = pd.date_range(start=data.index[-1] + pd.Timedelta(days=1), periods=PREDICTION_PERIOD, freq='B')
-    avg_future_return = (np.mean(predicted_prices) / last_close - 1) * 100
+    # 9) 미래 날짜(X_df 기준) + 참고지표, 예측 구간의 미래 날짜 리스트 생성, start는 마지막 날짜 다음 영업일(Business day)부터 시작
+    future_dates = pd.bdate_range(start=X_df.index[-1] + pd.Timedelta(days=1), periods=PREDICTION_PERIOD, freq='B')
+    last_close = X_df[col_c].iloc[-1]
+    avg_future_return = (predicted_prices.mean() / last_close - 1.0) * 100
 
     # 기대 성장률 미만이면 건너뜀
     if avg_future_return < EXPECTED_GROWTH_RATE and avg_future_return < 20:
         if avg_future_return > 0:
             print(f"  예상 : {avg_future_return:.2f}%")
         continue
+        # pass
 
     # 결과 저장
-    results.append((avg_future_return, stock_name))
+    results.append((avg_future_return, stock_name, ticker))
 
     # 기존 파일 삭제
     for file_name in os.listdir(output_dir):
         if file_name.startswith(f"{today}") and stock_name in file_name and ticker in file_name:
-            print(f"Deleting existing file: {file_name}")
+            # print(f"                                                        Deleting existing file: {file_name}")
             os.remove(os.path.join(output_dir, file_name))
 
 
 
+    #######################################################################
 
-#######################################################################
-
-    # # 1. 조건별 색상 결정 (거래량 바 차트)
-    # up = data['종가'] > data['시가']
-    # down = data['종가'] < data['시가']
-    # bar_colors = np.where(up, 'red', np.where(down, 'blue', 'gray'))
-    #
-    # # 2. 인덱스 문자열 컬럼 추가 (x축 통일용)
-    # data_plot = data.copy()
-    # # 인덱스를 명시적으로 DatetimeIndex로 변환
-    # data_plot.index = pd.to_datetime(data_plot.index)
-    # data_plot['date_str'] = data_plot.index.strftime('%Y-%m-%d')
-    #
-    # # data_plot.index가 DatetimeIndex라고 가정
-    # three_months_ago = data_plot.index.max() - pd.DateOffset(months=6)
-    # data_plot_recent = data_plot[data_plot.index >= three_months_ago].copy()
-    # recent_n = len(data_plot_recent)
-    #
-    # # 3. 미래 날짜도 문자열로 변환
-    # future_dates_str = pd.to_datetime(future_dates).strftime('%Y-%m-%d')
-    #
-    # # 4. 그래프 (윗부분: 가격/지표, 아랫부분: 거래량)
-    # fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(16, 8), sharex=True, gridspec_kw={'height_ratios': [3, 1]}, dpi=200)
-    #
-    # # --- 상단: 가격 + 볼린저밴드 + 예측 ---
-    # # 실제 가격
-    # ax1.plot(data_plot_recent['date_str'], actual_prices[-recent_n:], label='실제 가격', marker='s', markersize=6, markeredgecolor='white')
-    #
-    # # 예측 가격 (미래 날짜)
-    # ax1.plot(future_dates_str, predicted_prices, label='예측 가격', linestyle='--', marker='s', markersize=7, markeredgecolor='white', color='tomato')
-    #
-    # # 이동평균, 볼린저밴드, 영역 채우기
-    # if all(x in data_plot_recent.columns for x in ['MA20', 'UpperBand', 'LowerBand']):
-    #     ax1.plot(data_plot_recent['date_str'], data_plot_recent['MA20'], label='20일 이동평균선', alpha=0.8)
-    #     if 'MA5' in data_plot_recent.columns:
-    #         ax1.plot(data_plot_recent['date_str'], data_plot_recent['MA5'], label='5일 이동평균선', alpha=0.8)
-    #     ax1.plot(data_plot_recent['date_str'], data_plot_recent['UpperBand'], label='볼린저밴드 상한선', linestyle='--', alpha=0.8)
-    #     ax1.plot(data_plot_recent['date_str'], data_plot_recent['LowerBand'], label='볼린저밴드 하한선', linestyle='--', alpha=0.8)
-    #     ax1.fill_between(data_plot_recent['date_str'], data_plot_recent['UpperBand'], data_plot_recent['LowerBand'], color='gray', alpha=0.18)
-    #
-    # # 마지막 실제값과 첫 번째 예측값을 점선으로 연결
-    # ax1.plot(
-    #     [data_plot_recent['date_str'].iloc[-1], future_dates_str[0]],
-    #     [actual_prices[-recent_n:][-1], predicted_prices[0]],
-    #     linestyle='dashed', color='tomato', linewidth=1.5
-    # )
-    #
-    # ax1.legend()
-    # ax1.grid(True)
-    # ax1.set_title(f'{today_us}   {stock_name} [ {ticker} ] (Expected Return: {avg_future_return:.2f}%)')
-    #
-    # # --- 하단: 거래량 (양/음/동색 구분) ---
-    # ax2.bar(data_plot_recent['date_str'], data_plot_recent['거래량'], color=bar_colors, alpha=0.65)
-    # ax2.set_ylabel('Volume')
-    # ax2.grid(True)
-    #
-    # # x축 라벨: 10일 단위만 표시 (과도한 라벨 겹침 방지)
-    # tick_idx = np.arange(0, len(data_plot_recent), 10)
-    # ax2.set_xticks(tick_idx)
-    # ax2.set_xticklabels(data_plot_recent['date_str'].iloc[tick_idx])
-    #
-    # plt.setp(ax2.xaxis.get_majorticklabels(), rotation=45)
-
-
-
-    fig = plt.figure(figsize=(14, 16), dpi=150)
+    # 10) 차트로 전달
+    fig = plt.figure(figsize=(14, 10), dpi=150)
     gs = fig.add_gridspec(nrows=4, ncols=1, height_ratios=[3, 1, 3, 1])
 
     # sharex: 여러 서브플롯들이 x축(스케일/눈금/포맷)을 같이 쓸지 말지를 정하는 옵션
@@ -436,8 +435,8 @@ for count, ticker in enumerate(tickers):
 # 정렬 및 출력
 results.sort(reverse=True, key=lambda x: x[0])
 
-for avg_future_return, stock_name in results:
-    print(f"==== [ {avg_future_return:.2f}% ] {stock_name} ====")
+for avg_future_return, stock_name, ticker in results:
+    print(f"==== [ {avg_future_return:.2f}% ] {stock_name} [{ticker}] ====")
 
 try:
     requests.post(
@@ -451,42 +450,41 @@ except Exception as e:
     pass  # 오류
 
 if total_cnt > 0:
-    print('result_r2 : ', total_r2/total_cnt)
+    print('R-squared_avg : ', total_r2/total_cnt)
+    print('SMAPE : ', total_smape/total_cnt)
     print('total_cnt : ', total_cnt)
 
-
-
-
 '''
-    plt.figure(figsize=(16, 8))
-    # 실제 데이터
-    plt.plot(data.index, actual_prices, label='실제 가격')
-    # 예측 데이터
-    plt.plot(future_dates, predicted_prices, label='예측 가격', linestyle='--', marker='o', color='tomato')
+** col_o, col_l, col_h, col_c, col_v, MA5_slope
+R-squared_avg :  0.4977659373816699
+SMAPE :  42.47096208898161
 
-    if all(x in data.columns for x in ['MA20', 'UpperBand', 'LowerBand']):
-        plt.plot(data.index, data['MA20'], label='20일 이동평균선')
-        plt.plot(data.index, data['MA5'], label='5일 이동평균선')
-        plt.plot(data.index, data['UpperBand'], label='볼린저밴드 상한선', linestyle='--') # Upper Band (2σ)
-        plt.plot(data.index, data['LowerBand'], label='볼린저밴드 하한선', linestyle='--') # Lower Band (2σ)
-        plt.fill_between(data.index, data['UpperBand'], data['LowerBand'], color='gray', alpha=0.2)
+** col_o, col_l, col_h, col_c, Vol_logdiff
+R-squared_avg :  0.5149373644545456
+SMAPE :  38.97357753468229
 
-    # 마지막 실제값과 첫 번째 예측값을 점선으로 연결
-    plt.plot(
-        [data.index[-1], future_dates[0]],  # x축: 마지막 실제날짜와 첫 예측날짜
-        [actual_prices[-1], predicted_prices[0]],  # y축: 마지막 실제종가와 첫 예측종가
-        linestyle='dashed', color='gray', linewidth=1.5
-    )
+** col_o, col_l, col_h, col_c, Vol_logdiff, MA5_slope
+R-squared_avg :  0.5841392158480752
+SMAPE :  42.22468885035757
 
-    plt.title(f'{today_us}   {stock_name} [ {ticker} ] (Expected Return: {avg_future_return:.2f}%)')
-    plt.xlabel('Date')
-    plt.ylabel('Price')
-    plt.legend()
-    plt.grid(True)
-    plt.xticks(rotation=45)
+col_o, col_l, col_h, col_c, col_v
+R-squared_avg :  0.3090356026457654
+SMAPE :  46.707108736338114
 
-    final_file_name = f'{today} [ {avg_future_return:.2f}% ] {stock_name} [{ticker}].png'
-    final_file_path = os.path.join(output_dir, final_file_name)
-    plt.savefig(final_file_path)
-    plt.close()
+col_o, col_l, col_h, col_c, col_v, ma10_gap
+R-squared_avg :  0.4127328479977587
+SMAPE :  55.53506462253618
+
+col_o, col_l, col_h, col_c, col_v, ma10_gap, MA5_slope
+R-squared_avg :  0.32810325623131403
+SMAPE :  53.4387975495598
+
+col_o, col_l, col_h, col_c, Vol_logdiff, ma10_gap
+R-squared_avg :  0.4537473651272319
+SMAPE :  47.40394306519242
+
+col_o, col_l, col_h, col_c, Vol_logdiff, ma10_gap, MA5_slope
+R-squared_avg :  0.35143853039638684
+SMAPE :  54.71462795715128
+
 '''
