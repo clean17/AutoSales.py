@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 from send2trash import send2trash
 from utils import create_lstm_model, create_multistep_dataset, fetch_stock_data_us, get_nasdaq_symbols, \
     extract_stock_code_from_filenames, get_usd_krw_rate, add_technical_features, check_column_types, \
-    get_name_from_usa_ticker, plot_candles_daily, plot_candles_weekly
+    get_name_from_usa_ticker, plot_candles_daily, plot_candles_weekly, drop_trading_halt_rows
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.model_selection import train_test_split
 import requests
@@ -84,13 +84,13 @@ for count, ticker in enumerate(tickers):
         df = pd.DataFrame()
         data = fetch_stock_data_us(ticker, start_date_us, end_date)
 
-    # 중복 제거 & 새로운 날짜만 추가
+    # 중복 제거 & 새로운 날짜만 추가 >> 덮어쓰는 방식으로 수정
     if not df.empty:
-        # 기존 날짜 인덱스와 비교하여 새로운 행만 선택
-        new_rows = data.loc[~data.index.isin(df.index)] # ~ (not) : 기존에 없는 날짜만 남김
-        df = pd.concat([df, new_rows])
+        # df와 data를 concat 후, data 값으로 덮어쓰기
+        df = pd.concat([df, data])
+        df = df[~df.index.duplicated(keep='last')]  # 같은 인덱스일 때 data가 남음
     else:
-        df = data
+        df = data.copy()
 
     # 너무 먼 과거 데이터 버리기, 처음 272개
     if len(df) > 280:
@@ -113,6 +113,12 @@ for count, ticker in enumerate(tickers):
 
     actual_prices = data['Close'].values # 최근 종가 배열
     last_close = actual_prices[-1]
+
+    # 0) 우선 거래정지/이상치 행 제거
+    data, removed_idx = drop_trading_halt_rows(data)
+    if len(removed_idx) > 0:
+        # print(f"                                                        거래정지/이상치로 제거된 날짜 수: {len(removed_idx)}")
+        pass
 
     if data.empty or len(data) < 50:
         # print(f"                                                        데이터 부족 → pass")
@@ -198,6 +204,24 @@ for count, ticker in enumerate(tickers):
     # 2차 생성 feature
     data = add_technical_features(data)
 
+    threshold = 0.1  # 10%
+    # isna() : pandas의 결측값(NA) 체크. NaN, None, NaT에 대해 True
+    # mean() : 평균
+    # isinf() : 무한대 체크
+    cols_to_drop = [ # 결측치가 10% 이상인 칼럼
+        col
+        for col in data.columns
+        if (~np.isfinite(pd.to_numeric(data[col], errors='coerce'))).mean() > threshold
+    ]
+    if len(cols_to_drop) > 0:
+        # inplace=True : 반환 없이 입력을 그대로 수정
+        # errors='ignore' : 목록에 없는 칼럼 지우면 에러지만 무시
+        data.drop(columns=cols_to_drop, inplace=True, errors='ignore')
+        print("Drop candidates:", cols_to_drop)
+
+    if 'MA20' not in data.columns:
+        continue
+
     # 현재 5일선이 20일선보다 낮으면서 하락중이면 패스
     ma_angle_5 = data['MA5'].iloc[-1] - data['MA5'].iloc[-2]
     if data['MA5'].iloc[-1] < data['MA20'].iloc[-1] and ma_angle_5 < 0:
@@ -222,12 +246,17 @@ for count, ticker in enumerate(tickers):
     scaler = MinMaxScaler(feature_range=(0, 1))
     # scaled_data = scaler.fit_transform(data.values)
     feature_cols = [
-        'Close', 'High', 'PBR', 'Low', 'Volume',
-        # 'RSI14',
-        # 'ma10_gap',
+        'Close', 'High', 'Low', 'Open', 'Vol_logdiff', 'MA5_slope'
     ]
 
-    X_for_model = data.dropna(subset=feature_cols) # 결측 제거
+    # 0) NaN/inf 정리
+    data = data.replace([np.inf, -np.inf], np.nan)
+
+    # 1) feature_cols만 남기고 dropna
+    feature_cols = [c for c in feature_cols if c in data.columns]
+    # print('feature_cols', feature_cols)
+    X_for_model = data.dropna(subset=feature_cols).loc[:, feature_cols]
+
 #     X_for_model = X_for_model.apply(pd.to_numeric, errors='coerce') # float64여야 함 (object라면 먼저 float 변환 필요)
 #     X_for_model = X_for_model.replace([np.inf, -np.inf], 0) # # inf/-inf 값을 0으로(또는 np.nan으로) 대체
     scaled_data = scaler.fit_transform(X_for_model)

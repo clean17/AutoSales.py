@@ -47,7 +47,7 @@ start_five_date = (datetime.today() - timedelta(days=5)).strftime('%Y%m%d')
 # chickchick.com에서 종목 리스트 조회
 tickers_dict = get_kor_ticker_dict_list()
 tickers = list(tickers_dict.keys())
-tickers = ['204620']
+# tickers = ['204620']
 
 def _col(df, ko: str, en: str):
     """한국/영문 칼럼 자동매핑: ko가 있으면 ko, 없으면 en을 반환"""
@@ -405,7 +405,7 @@ for count, ticker in enumerate(tickers):
     #######################################################################
 
     # 10) 차트로 전달
-    fig = plt.figure(figsize=(14, 10), dpi=150)
+    fig = plt.figure(figsize=(14, 16), dpi=150)
     gs = fig.add_gridspec(nrows=4, ncols=1, height_ratios=[3, 1, 3, 1])
 
     # sharex: 여러 서브플롯들이 x축(스케일/눈금/포맷)을 같이 쓸지 말지를 정하는 옵션
