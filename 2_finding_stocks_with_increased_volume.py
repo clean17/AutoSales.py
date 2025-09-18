@@ -8,6 +8,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import time
 
+print('running 2_finding_stocks_with_increased_volume.py...')
+
 # 자동 탐색 (utils.py를 찾을 때까지 위로 올라가 탐색)
 here = Path(__file__).resolve()
 for parent in [here.parent, *here.parents]:

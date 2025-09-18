@@ -477,6 +477,7 @@ def invert_scale(scaled_preds, scaler, feature_index=3):
 모델이 윈도우 내 패턴을 “요약 벡터”로 바로 보게 되어 학습 안정성·일반화에 보통 도움이 된다
 """
 def add_technical_features(data, window=20, num_std=2):
+    data = data.sort_index()
     data = data.copy()
 
     # 한국/영문 칼럼 자동 식별
@@ -987,7 +988,7 @@ def regression_metrics(
 
 def pass_filter(metrics, use_restored=True, r2_min=0.6, smape_max=30.0, mape_max=50.0):
     m = metrics["restored"] if (use_restored and "restored" in metrics) else metrics["scaled"]
-    # print("DEBUG >> R2:", m["R2"], "SMAPE:", m["SMAPE (%)"])  # <- 디버깅
+    print("DEBUG >> R2:", m["R2"], "SMAPE:", m["SMAPE (%)"])  # <- 디버깅
     # return (m["R2"] >= r2_min) and (m["SMAPE (%)"] < smape_max) and (m["MAPE (%)"] < mape_max)
     return (m["R2"] >= r2_min) and (m["SMAPE (%)"] <= smape_max)
 

@@ -7,6 +7,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import time
 
+print('running 1_periodically_update_today_interest_stocks.py...')
+
 # 자동 탐색 (utils.py를 찾을 때까지 위로 올라가 탐색)
 here = Path(__file__).resolve()
 for parent in [here.parent, *here.parents]:
