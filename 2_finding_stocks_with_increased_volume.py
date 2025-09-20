@@ -8,7 +8,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import time
 
-print('running 2_finding_stocks_with_increased_volume.py...')
+nowTime = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
+print(f'        {nowTime}: running 2_finding_stocks_with_increased_volume.py...')
 
 # 자동 탐색 (utils.py를 찾을 때까지 위로 올라가 탐색)
 here = Path(__file__).resolve()
@@ -53,7 +54,8 @@ for count, ticker in enumerate(tickers):
     condition_passed2 = True
     time.sleep(0.1)  # x00ms 대기
     stock_name = tickers_dict.get(ticker, 'Unknown Stock')
-    # print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
+    if count % 100 == 0:
+        print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
 
 
     # 데이터가 없으면 1년 데이터 요청, 있으면 5일 데이터 요청
@@ -67,11 +69,6 @@ for count, ticker in enumerate(tickers):
         # df와 data를 concat 후, data 값으로 덮어쓰기
         df = pd.concat([df, data])
         df = df[~df.index.duplicated(keep='last')]  # 같은 인덱스일 때 data가 남음
-
-
-    # 너무 먼 과거 데이터 버리기
-    if len(df) > 280:
-        df = df.iloc[-280:]
 
     data = df
     # print(data)
@@ -150,10 +147,15 @@ for count, ticker in enumerate(tickers):
         json_data = res.json()
         product_code = json_data["result"][0]["data"]["items"][0]["productCode"]
 
+    except Exception as e:
+        print(f"info 요청 실패: {e}")
+        pass  # 오류
+
+    try:
         res2 = requests.post(
             'https://chickchick.shop/func/stocks/overview',
             json={"product_code": str(product_code)},
-            timeout=5
+            timeout=10
         )
         data2 = res2.json()
         market_value = data2["result"]["marketValueKrw"]
@@ -164,7 +166,7 @@ for count, ticker in enumerate(tickers):
             continue
 
     except Exception as e:
-        print(f"info 요청 실패: {e}")
+        print(f"overview 요청 실패: {e}")
         pass  # 오류
 
 
@@ -224,7 +226,7 @@ for count, ticker in enumerate(tickers):
         res = requests.post(
             'https://chickchick.shop/func/stocks/company',
             json={"company_code": str(company_code)},
-            timeout=10
+            timeout=15
         )
         json_data = res.json()
         category = json_data["result"]["majorList"][0]["title"]
@@ -259,7 +261,7 @@ for count, ticker in enumerate(tickers):
             )
         except Exception as e:
             # logging.warning(f"progress-update 요청 실패: {e}")
-            print(f"progress-update 요청 실패: {e}")
+            print(f"progress-update 요청 실패-1: {e}")
             pass  # 오류
 
 
@@ -288,7 +290,7 @@ for count, ticker in enumerate(tickers):
             )
         except Exception as e:
             # logging.warning(f"progress-update 요청 실패: {e}")
-            print(f"progress-update 요청 실패: {e}")
+            print(f"progress-update 요청 실패-2: {e}")
             pass  # 오류
 
 

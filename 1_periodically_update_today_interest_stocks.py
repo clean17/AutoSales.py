@@ -7,7 +7,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import time
 
-print('running 1_periodically_update_today_interest_stocks.py...')
+nowTime = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
+print(f'        {nowTime}: running 1_periodically_update_today_interest_stocks.py...')
 
 # 자동 탐색 (utils.py를 찾을 때까지 위로 올라가 탐색)
 here = Path(__file__).resolve()
@@ -66,11 +67,6 @@ for count, ticker in enumerate(tickers):
         # df와 data를 concat 후, data 값으로 덮어쓰기
         df = pd.concat([df, data])
         df = df[~df.index.duplicated(keep='last')]  # 같은 인덱스일 때 data가 남음
-
-
-    # 너무 먼 과거 데이터 버리기
-    if len(df) > 280:
-        df = df.iloc[-280:]
 
     data = df
 
@@ -149,10 +145,15 @@ for count, ticker in enumerate(tickers):
         json_data = res.json()
         product_code = json_data["result"][0]["data"]["items"][0]["productCode"]
 
+    except Exception as e:
+        print(f"info 요청 실패: {e}")
+        pass  # 오류
+
+    try:
         res2 = requests.post(
             'https://chickchick.shop/func/stocks/overview',
             json={"product_code": str(product_code)},
-            timeout=5
+            timeout=10
         )
         data2 = res2.json()
         market_value = data2["result"]["marketValueKrw"]
@@ -162,7 +163,7 @@ for count, ticker in enumerate(tickers):
             continue
 
     except Exception as e:
-        print(f"info 요청 실패: {e}")
+        print(f"overview 요청 실패: {e}")
         pass  # 오류
 
 
