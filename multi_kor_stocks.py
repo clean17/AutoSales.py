@@ -27,9 +27,7 @@ os.makedirs(output_dir, exist_ok=True)
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
 root_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(=루트)
 pickle_dir = os.path.join(root_dir, 'pickle')
-
-# pickle 폴더가 없으면 자동 생성 (이미 있으면 무시)
-os.makedirs(pickle_dir, exist_ok=True)
+os.makedirs(pickle_dir, exist_ok=True) # 없으면 생성
 
 PREDICTION_PERIOD = 3
 LOOK_BACK = 15
@@ -117,8 +115,8 @@ for count, ticker in enumerate(tickers):
         df = data.copy()
 
     # 너무 먼 과거 데이터 버리기
-    if len(df) > 280:
-        df = df.iloc[-280:]
+    if len(df) > 300:
+        df = df.iloc[-300:]
 
     # 파일 저장
     df.to_pickle(filepath)
@@ -222,7 +220,7 @@ for count, ticker in enumerate(tickers):
         # inplace=True : 반환 없이 입력을 그대로 수정
         # errors='ignore' : 목록에 없는 칼럼 지우면 에러지만 무시
         data.drop(columns=cols_to_drop, inplace=True, errors='ignore')
-        print("Drop candidates:", cols_to_drop)
+        # print("    Drop candidates:", cols_to_drop)
 
     if 'MA20' not in data.columns:
         continue
@@ -276,17 +274,17 @@ for count, ticker in enumerate(tickers):
     # print('feature_cols', feature_cols)
     X_df = data.dropna(subset=feature_cols).loc[:, feature_cols]
 
-    # (선택) 상수열 제거
-    const_cols = [c for c in X_df.columns if X_df[c].nunique() <= 1]
-    if const_cols:
-        X_df = X_df.drop(columns=const_cols)
-        feature_cols = [c for c in feature_cols if c not in const_cols]
+    # (선택) 상수열 제거 >> 선택한 지표에서는 가능성이 없음
+    # const_cols = [c for c in X_df.columns if X_df[c].nunique() <= 1]
+    # if const_cols:
+    #     X_df = X_df.drop(columns=const_cols)
+    #     feature_cols = [c for c in feature_cols if c not in const_cols]
 
     # 종가 컬럼 이름/인덱스
     idx_close = feature_cols.index(col_c)
 
     # 2) 시계열 분리 후, train만 fit → val/전체 transform
-    split = int(len(X_df) * 0.9)
+    split = int(len(X_df) * 0.8)
     """
         scaler = MinMaxScaler(feature_range=(0, 1))
         X_tr_2d = scaler.fit_transform(X_df.iloc[:split].values)   # fit은 train에만
@@ -314,13 +312,14 @@ for count, ticker in enumerate(tickers):
 
     # 6) 모델 생성/학습
     model = create_lstm_model((X_train.shape[1], X_train.shape[2]), PREDICTION_PERIOD,
-                              lstm_units=[128,64], dense_units=[64,32])
+                              lstm_units=[32], dropout=0.05, dense_units=[16])
 
-    from tensorflow.keras.callbacks import EarlyStopping
+    from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
     early_stop = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
+    rlrop = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5)
     history = model.fit(X_train, Y_train, batch_size=8, epochs=200,
                         validation_data=(X_val, Y_val),
-                        shuffle=False, verbose=0, callbacks=[early_stop])
+                        shuffle=False, verbose=0, callbacks=[early_stop, rlrop])
 
 
     # 모델 평가
@@ -352,6 +351,7 @@ for count, ticker in enumerate(tickers):
         if k == 'R2': # R-squared, (0=엉망, 1=완벽)
             # print(f"                                                        R-squared 0.6 미만이면 패스 : {r2}")
             total_r2 += v
+            total_cnt += 1
         # print(f"    {k}: {v:.4f}")
 
     # if "restored" in metrics:
@@ -359,7 +359,7 @@ for count, ticker in enumerate(tickers):
     #     for k,v in metrics["restored"].items():
     #         print(f"    {k}: {v:.4f}")
 
-    ok = pass_filter(metrics, use_restored=False)  # 원 단위 기준으로 필터
+    ok = pass_filter(metrics, use_restored=True, r2_min=0.6, smape_max=8.0)  # 원 단위 기준으로 필터, SMAPE 30으로 필터링하려면 무조건 restored 값으로
     # print("                                                        PASS 1st filter?" , ok)
     if not ok:
         continue
@@ -374,10 +374,19 @@ for count, ticker in enumerate(tickers):
     future_scaled = model.predict(last_window, verbose=0)[0]        # shape=(H,)
 
     # 8) 스케일 역변환 (StandardScaler: x = z*scale_[idx] + mean_[idx])
-    mu  = scaler.mean_[idx_close]
-    std = scaler.scale_[idx_close]
-    assert std > 0, "종가 표준편차가 0입니다(상수열?)."
-    predicted_prices = future_scaled * std + mu                     # (H,)
+    if hasattr(scaler, "scale_"):
+        assert scaler.scale_[idx_close] != 0, "종가 스케일이 0입니다(상수열?)."
+
+    if isinstance(scaler, StandardScaler):
+        mu  = scaler.mean_[idx_close]
+        std = scaler.scale_[idx_close]         # 표준편차
+        predicted_prices = future_scaled * std + mu                     # (H,)
+
+    elif isinstance(scaler, MinMaxScaler):
+        # MinMax는 transform이 X_scaled = X * scale_ + min_  (sklearn 구현)
+        offset = scaler.min_[idx_close]        # feature_range 보정 포함된 오프셋
+        scl    = scaler.scale_[idx_close]
+        predicted_prices = (future_scaled - offset) / scl
 
     # 9) 미래 날짜(X_df 기준) + 참고지표, 예측 구간의 미래 날짜 리스트 생성, start는 마지막 날짜 다음 영업일(Business day)부터 시작
     future_dates = pd.bdate_range(start=X_df.index[-1] + pd.Timedelta(days=1), periods=PREDICTION_PERIOD, freq='B')
@@ -386,8 +395,9 @@ for count, ticker in enumerate(tickers):
 
     # 기대 성장률 미만이면 건너뜀
     if avg_future_return < EXPECTED_GROWTH_RATE and avg_future_return < 20:
-        if avg_future_return > 0:
-            print(f"  예상 : {avg_future_return:.2f}%")
+        print(f"  예상 : {avg_future_return:.2f}%")
+        # if avg_future_return > 0:
+        #     print(f"  예상 : {avg_future_return:.2f}%")
         continue
         # pass
 

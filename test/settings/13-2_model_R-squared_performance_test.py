@@ -82,10 +82,6 @@ for i in range(1):
         else:
             df = data
 
-        # 너무 먼 과거 데이터 버리기
-        if len(df) > 280:
-            df = df.iloc[-280:]
-
         # 파일 저장
         df.to_pickle(filepath)
         data = df
