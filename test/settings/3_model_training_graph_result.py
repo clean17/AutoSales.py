@@ -1,9 +1,10 @@
-from pykrx import stock
-from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout
-from tensorflow.keras.callbacks import EarlyStopping
+from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
 import matplotlib.pyplot as plt
+import os, sys
+import pandas as pd
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
 
 # 시드 고정 테스트
 import numpy as np, tensorflow as tf, random
@@ -11,22 +12,42 @@ np.random.seed(42)
 tf.random.set_seed(42)
 random.seed(42)
 
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
+sys.path.append(BASE_DIR)
+pickle_dir = os.path.join(BASE_DIR, 'pickle')
+
+from utils import create_multistep_dataset, add_technical_features, create_lstm_model, get_kor_ticker_dict_list, \
+    drop_trading_halt_rows, fetch_stock_data
+
 # 데이터 수집
-ticker = '000660'
-data = stock.get_market_ohlcv_by_date("2024-06-01", "2025-06-08", ticker)
+ticker = '000660' # 하이닉스
+filepath = os.path.join(pickle_dir, f'{ticker}.pkl')
+data = pd.read_pickle(filepath)
 
-# 필요한 컬럼 선택 및 NaN 값 처리
-data = data[['시가', '고가', '저가', '종가', '거래량']].fillna(0)
+# 2차 생성 feature
+data = add_technical_features(data)
 
-'''
-pykrx 데이터가 훨씬 세세하다 (모델 예측이 더 잘나온다)
-'''
+feature_cols = [
+    '시가', '저가', '고가', '종가',
+    'Vol_logdiff',
+    # 'MA5_slope',
+]
 
+# NaN/inf 정리
+data = data.replace([np.inf, -np.inf], np.nan)
+# feature_cols만 남기고 dropna
+feature_cols = [c for c in feature_cols if c in data.columns]
+X_df = data.dropna(subset=feature_cols).loc[:, feature_cols]
+
+idx_close = feature_cols.index('종가')
 
 # 데이터 스케일링
 scaler = MinMaxScaler(feature_range=(0, 1))
-scaled_data = scaler.fit_transform(data)
 
+
+scaler_X = MinMaxScaler().fit(X_df)          # 또는 ColumnTransformer 등
+scaled_data = scaler_X.fit_transform(X_df)
+scaler_y = MinMaxScaler().fit(scaled_data[:, [idx_close]])
 # 시계열 데이터를 윈도우로 나누기
 def create_dataset(dataset, look_back):
     X, Y = [], []
@@ -35,8 +56,13 @@ def create_dataset(dataset, look_back):
         Y.append(dataset[i + look_back, 3])  # 종가(Close) 예측
     return np.array(X), np.array(Y)
 
-look_back = 20
+idx_close = feature_cols.index('종가')
+look_back = 15
+
 X, Y = create_dataset(scaled_data, look_back)
+# X, Y = create_multistep_dataset(scaled_data, look_back, 1, idx_close)
+print(X.shape) # (272, 15, 34)
+print(Y.shape) # (272,)
 
 # 학습 데이터와 테스트 데이터 분리
 train_size = int(len(X) * 0.8)
@@ -101,19 +127,18 @@ Train Actual과 Train Predict과 매우 유사하면 잘 학습되었다.
 train_predict = model.predict(X_train)
 test_predict = model.predict(X_test)
 
-# 예측값 역변환
-train_predict = scaler.inverse_transform(np.concatenate((np.zeros((train_predict.shape[0], 3)), train_predict, np.zeros((train_predict.shape[0], 1))), axis=1))[:,3]
-test_predict = scaler.inverse_transform(np.concatenate((np.zeros((test_predict.shape[0], 3)), test_predict, np.zeros((test_predict.shape[0], 1))), axis=1))[:,3]
-
-Y_train_actual = scaler.inverse_transform(np.concatenate((np.zeros((Y_train.shape[0], 3)), Y_train.reshape(-1, 1), np.zeros((Y_train.shape[0], 1))), axis=1))[:,3]
-Y_test_actual = scaler.inverse_transform(np.concatenate((np.zeros((Y_test.shape[0], 3)), Y_test.reshape(-1, 1), np.zeros((Y_test.shape[0], 1))), axis=1))[:,3]
+# 예측 역변환
+train_predict_inv = scaler_y.inverse_transform(train_predict.reshape(-1,1)).ravel()
+test_predict_inv  = scaler_y.inverse_transform(test_predict.reshape(-1,1)).ravel()
+Y_train_actual    = scaler_y.inverse_transform(Y_train.reshape(-1,1)).ravel()
+Y_test_actual     = scaler_y.inverse_transform(Y_test.reshape(-1,1)).ravel()
 
 # 시각화
 plt.figure(figsize=(10, 5))
 plt.plot(Y_train_actual, label='Train Actual')
 plt.plot(range(len(Y_train_actual), len(Y_train_actual) + len(Y_test_actual)), Y_test_actual, label='Test Actual')
-plt.plot(train_predict, label='Train Predict')
-plt.plot(range(len(Y_train_actual), len(Y_train_actual) + len(test_predict)), test_predict, label='Test Predict')
+plt.plot(train_predict_inv, label='Train Predict')
+plt.plot(range(len(Y_train_actual), len(Y_train_actual) + len(test_predict_inv)), test_predict_inv, label='Test Predict')
 plt.title('Stock Price Prediction')
 plt.xlabel('Time')
 plt.ylabel('Price')
