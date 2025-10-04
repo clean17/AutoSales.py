@@ -65,36 +65,19 @@ for i in range(1):
         stock_name = tickers_dict.get(ticker, 'Unknown Stock')
         print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
 
-        # 데이터가 없으면 1년 데이터 요청, 있으면 5일 데이터 요청
+        # 1. 데이터 수집
         filepath = os.path.join(pickle_dir, f'{ticker}.pkl')
-        if os.path.exists(filepath):
-            df = pd.read_pickle(filepath)
-            data = fetch_stock_data(ticker, start_five_date, today)
-        else:
-            df = pd.DataFrame()
-            data = fetch_stock_data(ticker, start_date, today)
+        data = pd.read_pickle(filepath)
 
-        # 중복 제거 & 새로운 날짜만 추가
-        if not df.empty:
-            # 기존 날짜 인덱스와 비교하여 새로운 행만 선택
-            new_rows = data.loc[~data.index.isin(df.index)] # ~ (not) : 기존에 없는 날짜만 남김
-            df = pd.concat([df, new_rows])
-        else:
-            df = data
-
-        # 파일 저장
-        df.to_pickle(filepath)
-        data = df
-
-
-        # 0) 우선 거래정지/이상치 행 제거
+        # 1-1. 우선 거래정지/이상치 행 제거
         data, removed_idx = drop_trading_halt_rows(data)
-        if len(removed_idx) > 0:
-            print(f"거래정지/이상치로 제거된 날짜 수: {len(removed_idx)}")
+        # if len(removed_idx) > 0:
+        #     print(f"거래정지/이상치로 제거된 날짜 수: {len(removed_idx)}")
 
+        # 2. 2차 생성 feature
         data = add_technical_features(data)
 
-
+        # 3. 결측 제거
         threshold = 0.1  # 10%
         # isna() : pandas의 결측값(NA) 체크. NaN, None, NaT에 대해 True
         # mean() : 평균
