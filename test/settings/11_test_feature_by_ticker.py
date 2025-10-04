@@ -1,3 +1,8 @@
+"""
+피쳐들중에서 예측에 가장 많이 사용하는 가중치 출력
+낮은 사용률 필터링용이지 중요 피쳐 조합이 성능이 좋다는건 아니다
+"""
+
 import os, sys, re
 import numpy as np
 import pandas as pd
@@ -358,15 +363,16 @@ for count, ticker in enumerate(tickers):
     # feature_cols = ['시가', '고가', '저가', '종가', '거래량', 'MA20', 'UpperBand', 'LowerBand', 'PBR']
     feature_cols = [
         col_o, col_l, col_h, col_c,
-        '등락률',
         'Vol_logdiff',
-        'MA5_slope',
+        'RSI14',
         'CCI14',
-        'STD20', 'UpperBand', 'LowerBand',
-        # 'MACD', 'MACD_signal', 'MACD_hist',
         'UltimateOsc',
+        'ATR14',
+
+        # 'STD20', 'UpperBand', 'LowerBand',
+        # 'MA5_slope',
         # 'ROC12_pct',
-        # 'ATR14',
+        # 'MACD', 'MACD_signal', 'MACD_hist',
     ]
 
     # LSTM 준비 (권장 파이프라인)
