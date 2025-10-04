@@ -1,6 +1,16 @@
+# Could not load dynamic library 'cudart64_110.dll'; dlerror: cudart64_110.dll not found / Skipping registering GPU devices... 안나오게
+import os
+# 1) GPU 완전 비활성화
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+# 2) C++ 백엔드 로그 레벨 낮추기 (0=INFO, 1=WARNING, 2=ERROR, 3=FATAL)
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+
+
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import os, sys
 import pandas as pd
@@ -19,128 +29,174 @@ pickle_dir = os.path.join(BASE_DIR, 'pickle')
 from utils import create_multistep_dataset, add_technical_features, create_lstm_model, get_kor_ticker_dict_list, \
     drop_trading_halt_rows, fetch_stock_data
 
-# 데이터 수집
+# 1. 데이터 수집
 ticker = '000660' # 하이닉스
+ticker = '042670' # 하이닉스
 filepath = os.path.join(pickle_dir, f'{ticker}.pkl')
 data = pd.read_pickle(filepath)
 
-# 2차 생성 feature
-data = add_technical_features(data)
+# 1-1. 우선 거래정지/이상치 행 제거
+data, removed_idx = drop_trading_halt_rows(data)
+if len(removed_idx) > 0:
+    print(f"거래정지/이상치로 제거된 날짜 수: {len(removed_idx)}")
 
+# 2. 2차 생성 feature
+# print('first', data)
+data = add_technical_features(data)
+# print(data.columns) # 칼럼 헤더 전체 출력
+
+# 3. 결측 제거
+threshold = 0.1  # 10%
+# isna() : pandas의 결측값(NA) 체크. NaN, None, NaT에 대해 True
+# mean() : 평균
+# isinf() : 무한대 체크
+cols_to_drop = [ # 결측치가 10% 이상인 칼럼
+    col
+    for col in data.columns
+    if (~np.isfinite(pd.to_numeric(data[col], errors='coerce'))).mean() > threshold
+]
+if len(cols_to_drop) > 0:
+    # inplace=True : 반환 없이 입력을 그대로 수정
+    # errors='ignore' : 목록에 없는 칼럼 지우면 에러지만 무시
+    data.drop(columns=cols_to_drop, inplace=True, errors='ignore')
+    print("Drop candidates:", cols_to_drop)
+
+# 혹시라도 1D가 되었다면 강제 2D 복원
+def ensure_2d(y):
+    return y.reshape(-1, 1) if y.ndim == 1 else y
+
+
+# ---- 전처리: NaN/inf 제거 및 피처 선택 ----
 feature_cols = [
-    '시가', '저가', '고가', '종가',
-    'Vol_logdiff',
-    # 'MA5_slope',
+    '시가', '고가', '저가', '종가', 'Vol_logdiff',
+    '등락률',
+    'MA5_slope',
+    'CCI14',
+    # 'STD20', 'UpperBand', 'LowerBand',
+    'UltimateOsc',
+
+    # 'MACD', 'MACD_signal', 'MACD_hist',
+    # 'ROC12_pct',
+    # 'RSI14',
+    # 'ATR14',
 ]
 
-# NaN/inf 정리
-data = data.replace([np.inf, -np.inf], np.nan)
-# feature_cols만 남기고 dropna
-feature_cols = [c for c in feature_cols if c in data.columns]
-X_df = data.dropna(subset=feature_cols).loc[:, feature_cols]
+# 4. 피쳐, 무한대 필터링
+cols = [c for c in feature_cols if c in data.columns]  # 순서 보존
+df = data.loc[:, cols].replace([np.inf, -np.inf], np.nan)
+X_df = df.dropna()
+
+print('데이터 첫번째 날짜', X_df[feature_cols].first_valid_index())
+sub = X_df[feature_cols].sort_index()
+out = sub.reset_index().rename(columns={'index':'date'})
+print(out.head(1).to_string(index=False)) # 첫번째 날짜 출력
 
 idx_close = feature_cols.index('종가')
+# print('idx_close', idx_close)
 
-# 데이터 스케일링
-scaler = MinMaxScaler(feature_range=(0, 1))
+# 5. 스케일링, 시점 마스크
+split = int(len(X_df) * 0.8)
+scaler_X = StandardScaler().fit(X_df.iloc[:split])  # 원시 train 구간만, 중복 윈도우 때문에 같은 시점 행이 여러 번 들어가는 왜곡 방지
+X_all_2d = scaler_X.transform(X_df)                 # 전체 변환 (누수 없음)
 
+LOOK_BACK = 15
+N_FUTURE = 3
 
-scaler_X = MinMaxScaler().fit(X_df)          # 또는 ColumnTransformer 등
-scaled_data = scaler_X.fit_transform(X_df)
-scaler_y = MinMaxScaler().fit(scaled_data[:, [idx_close]])
-# 시계열 데이터를 윈도우로 나누기
-def create_dataset(dataset, look_back):
-    X, Y = [], []
-    for i in range(len(dataset) - look_back):
-        X.append(dataset[i:i + look_back])
-        Y.append(dataset[i + look_back, 3])  # 종가(Close) 예측
-    return np.array(X), np.array(Y)
+# 이미 스케일된 데이터셋
+X_all, Y_all, t0 = create_multistep_dataset(X_all_2d, LOOK_BACK, N_FUTURE, idx=idx_close, return_t0=True)
 
-idx_close = feature_cols.index('종가')
-look_back = 15
+train_mask = (t0 + N_FUTURE - 1) < split
+val_mask   = (t0 >= split)
 
-X, Y = create_dataset(scaled_data, look_back)
-# X, Y = create_multistep_dataset(scaled_data, look_back, 1, idx_close)
-print(X.shape) # (272, 15, 34)
-print(Y.shape) # (272,)
+print("    001 X_____.shape:", X_all.shape, "    Y_____.shape:", Y_all.shape)
 
-# 학습 데이터와 테스트 데이터 분리
-train_size = int(len(X) * 0.8)
-X_train, X_test = X[:train_size], X[train_size:]
-Y_train, Y_test = Y[:train_size], Y[train_size:]
+X_train, Y_train = X_all[train_mask], Y_all[train_mask]
+X_val,   Y_val   = X_all[val_mask],   Y_all[val_mask]
 
-'''
-Dense 레이어의 역할
-모든 입력 뉴런이 모든 출력 뉴런과 연결되어 있는 층
-복잡한 패턴을 비선형적으로 조합해서 결과값(예측, 분류, 회귀 등)을 만든다.
+# ---- Train/Test split (스케일러는 Train으로만 fit) ----
+Y_train = ensure_2d(Y_train)
+Y_val  = ensure_2d(Y_val)
+print("    002 X_tr__.shape:", X_train.shape, "    Y_tr__.shape:", Y_train.shape)
 
-Dense(32) → Dense(16) → Dense(1): 복잡한 문제, 더 높은 표현력 필요할 때
+# ---- y 스케일링: Train으로만 fit ---- (타깃이 수익률이면 생략 가능)
+scaler_y = StandardScaler().fit(Y_train)
+y_train_scaled = scaler_y.transform(Y_train)
+y_test_scaled  = scaler_y.transform(Y_val)
+print("    003 y_tr_s.shape:", y_train_scaled.shape, "         y_te_s.shape:", y_test_scaled.shape)
 
-Dense(32) → Dense(1): 간단하거나 빠르게 실험할 때
+# ---- 모델 ----
+model = Sequential([
+    LSTM(32, return_sequences=False, input_shape=(X_train.shape[1], X_train.shape[2])),
+    # Dropout(0.1),
+    # LSTM(16, return_sequences=False),
+    # Dropout(0.3),
+    # Dense(32, activation='relu'),
+    # Dense(16, activation='relu'),
+    Dense(16, activation='relu'),
+    Dense(N_FUTURE)
+])
 
-Dropout 0.2/0.3 비교 테스트 필요
-'''
-# 모델 생성
-model = Sequential()
+from tensorflow.keras.losses import Huber
 
-model.add(LSTM(128, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])))
-model.add(Dropout(0.3))
-model.add(LSTM(64, return_sequences=False))
-model.add(Dropout(0.3))
+# 타깃이 표준화되어 있다면:
+loss = Huber(delta=1.0)    # Y를 표준화했으면 δ=1.0 권장
 
-# model.add(LSTM(64, return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])))
-# model.add(Dropout(0.2))
-# model.add(LSTM(32, return_sequences=False))
-# model.add(Dropout(0.2))
+# 타깃이 가격(표준화 안 함)이라면: δ를 MAE 규모로
+# 예) 학습 초반에 추정한 MAE ~ 3000원 이라면 대략 δ=3000 부근부터 탐색
+# loss = Huber(delta=3000.0)
 
-model.add(Dense(32, activation='relu'))
-model.add(Dense(16, activation='relu'))
-model.add(Dense(1))
-model.compile(optimizer='adam', loss='mean_squared_error')
+model.compile(optimizer='adam', loss=loss, metrics=['mse','mae'])
+# model.compile(optimizer='adam', loss='mean_squared_error')
 
-# 모델 학습
 early_stop = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
-model.fit(X_train, Y_train, batch_size=16, epochs=200, verbose=0, shuffle=False, validation_data=(X_test, Y_test), callbacks=[early_stop])
+model.fit(
+    X_train, y_train_scaled,
+    batch_size=16, epochs=200, verbose=0, shuffle=False,
+    validation_data=(X_val, y_test_scaled),
+    callbacks=[early_stop]
+)
 
-'''
-Train Actual (훈련 실제 값):
-- 훈련 데이터에 대한 실제 종가 값을 나타냅니다.
-- 주식 데이터의 훈련 기간 동안의 실제 주가 변동을 보여줍니다.
+# ---- 예측 & 역변환(원래 가격 스케일) ----
+train_pred_scaled = model.predict(X_train, verbose=0) # (N, H)
+test_pred_scaled  = model.predict(X_val, verbose=0)
+print("    004 tr_p_s.shape:", train_pred_scaled.shape, "         te_p_s.shape:", test_pred_scaled.shape)
 
-Test Actual (테스트 실제 값):
-- 테스트 데이터에 대한 실제 종가 값을 나타냅니다.
-- 주식 데이터의 테스트 기간 동안의 실제 주가 변동을 보여줍니다.
-- 그래프에서 Y_train_actual 데이터 뒤에 이어져서 나타납니다.
+# inverse_transform는 2D를 기대
+train_pred = scaler_y.inverse_transform(train_pred_scaled)   # (N_tr, 3)
+test_pred  = scaler_y.inverse_transform(test_pred_scaled)    # (N_te, 3)
+print("    005 __tr_p.shape:", train_pred.shape, "         __te_p.shape:", test_pred.shape)
+"""
+train_pred, test_pred **역스케일된 ‘가격 단위’**이고, shape은 (N, 3):
+열 0: t+1 예측 종가
+열 1: t+2 예측 종가
+열 2: t+3 예측 종가
+"""
 
-Train Predict (훈련 예측 값):
-- 훈련 데이터에 대한 모델의 예측 값을 나타냅니다.
-- 모델이 훈련 데이터로 학습한 결과를 보여줍니다.
+# ---- 시각화 ----
+# 2) 실제값도 2D (이미 Y_train/Y_test가 (N,3) 형태)
+y_train_real = Y_train   # (N_tr, 3)
+y_test_real  = Y_val    # (N_te, 3)
 
-Test Predict (테스트 예측 값):
-- 테스트 데이터에 대한 모델의 예측 값을 나타냅니다.
-- 모델이 새로운 데이터(테스트 데이터)에서 예측한 결과를 보여줍니다.
-- 그래프에서 Y_train_actual 데이터 뒤에 이어져서 나타납니다.
+# 3) h=1(다음날)만 비교해서 그리기
+h = 0   # 0->t+1, 1->t+2, 2->t+3
+plt.figure(figsize=(10,5))
+offset = len(y_train_real)
 
-Train Actual과 Train Predict과 매우 유사하면 잘 학습되었다.
-'''
-# 예측
-train_predict = model.predict(X_train)
-test_predict = model.predict(X_test)
+plt.plot(range(0, offset),               y_train_real[:, h], label=f'Train Actual (h={h+1})', linewidth=1)
+plt.plot(range(offset, offset+len(y_test_real)), y_test_real[:,  h], label=f'Test  Actual (h={h+1})',  linewidth=1, alpha=0.7)
 
-# 예측 역변환
-train_predict_inv = scaler_y.inverse_transform(train_predict.reshape(-1,1)).ravel()
-test_predict_inv  = scaler_y.inverse_transform(test_predict.reshape(-1,1)).ravel()
-Y_train_actual    = scaler_y.inverse_transform(Y_train.reshape(-1,1)).ravel()
-Y_test_actual     = scaler_y.inverse_transform(Y_test.reshape(-1,1)).ravel()
+plt.plot(range(0, offset),               train_pred[:, h],   label=f'Train Pred   (h={h+1})')
+plt.plot(range(offset, offset+len(y_test_real)), test_pred[:,  h],   label=f'Test  Pred    (h={h+1})')
 
-# 시각화
-plt.figure(figsize=(10, 5))
-plt.plot(Y_train_actual, label='Train Actual')
-plt.plot(range(len(Y_train_actual), len(Y_train_actual) + len(Y_test_actual)), Y_test_actual, label='Test Actual')
-plt.plot(train_predict_inv, label='Train Predict')
-plt.plot(range(len(Y_train_actual), len(Y_train_actual) + len(test_predict_inv)), test_predict_inv, label='Test Predict')
-plt.title('Stock Price Prediction')
-plt.xlabel('Time')
-plt.ylabel('Price')
-plt.legend()
-plt.show()
+plt.title(f'LSTM Prediction — look_back={LOOK_BACK}, horizon h={h+1}')
+plt.xlabel('Sample index'); plt.ylabel('Price'); plt.legend(); plt.tight_layout()
+plt.savefig('prediction_h2.png', dpi=150)
+
+
+
+
+"""
+Keras LSTM은 입력 shape을 (batch, timesteps, features) 로 받는다
+X가 바로 LSTM의 입력에 맞는 3D 텐서
+
+"""
