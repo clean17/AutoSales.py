@@ -10,7 +10,7 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
 import matplotlib
-matplotlib.use("Agg")
+# matplotlib.use("Agg") # plt.show() 에서 사용안함
 import matplotlib.pyplot as plt
 import os, sys
 import pandas as pd
@@ -68,6 +68,23 @@ if len(cols_to_drop) > 0:
 def ensure_2d(y):
     return y.reshape(-1, 1) if y.ndim == 1 else y
 
+def inverse_close_matrix(Y_xscale: np.ndarray,
+                         scaler_X,
+                         n_features: int,
+                         idx_close: int) -> np.ndarray:
+    """
+    Y_xscale: (N, H)  # X-스케일의 '종가' 값들
+    scaler_X: X에 fit했던 StandardScaler
+    n_features: X의 피처 개수 (X_train.shape[2])
+    idx_close: 종가 컬럼 인덱스 (X의 피처 순서 기준)
+    반환: (N, H) 원 단위(가격)
+    """
+    N, H = Y_xscale.shape
+    Z = np.zeros((N*H, n_features), dtype=float)
+    Z[:, idx_close] = Y_xscale.reshape(-1)
+    raw = scaler_X.inverse_transform(Z)[:, idx_close]
+    return raw.reshape(N, H)
+
 # 25.10.05
 """
 '시가', '고가', '저가', '종가', 'Vol_logdiff',
@@ -79,7 +96,7 @@ def ensure_2d(y):
 # ---- 전처리: NaN/inf 제거 및 피처 선택 ----
 feature_cols = [
     '시가', '고가', '저가', '종가', 'Vol_logdiff',
-    # 'RSI14', # ATR, CCI 같이 쓰지마
+    'RSI14', # ATR, CCI 같이 쓰지마
 
 
 
@@ -99,10 +116,10 @@ cols = [c for c in feature_cols if c in data.columns]  # 순서 보존
 df = data.loc[:, cols].replace([np.inf, -np.inf], np.nan)
 X_df = df.dropna()
 
-print('데이터 첫번째 날짜', X_df[feature_cols].first_valid_index())
-sub = X_df[feature_cols].sort_index()
-out = sub.reset_index().rename(columns={'index':'date'})
-print(out.head(1).to_string(index=False)) # 첫번째 날짜 출력
+# print('데이터 첫번째 날짜', X_df[feature_cols].first_valid_index())
+# sub = X_df[feature_cols].sort_index()
+# out = sub.reset_index().rename(columns={'index':'date'})
+# print(out.head(1).to_string(index=False)) # 첫번째 날짜 출력
 
 idx_close = feature_cols.index('종가')
 # print('idx_close', idx_close)
@@ -115,9 +132,10 @@ X_all_2d = scaler_X.transform(X_df)                 # 전체 변환 (누수 없�
 LOOK_BACK = 15
 N_FUTURE = 3
 
-# 이미 스케일된 데이터셋
+# ↓ 여기서 X_all, Y_all을 '스케일된 X'로부터 만듦
 X_all, Y_all, t0 = create_multistep_dataset(X_all_2d, LOOK_BACK, N_FUTURE, idx=idx_close, return_t0=True)
 
+# 시점 마스크로 분리
 train_mask = (t0 + N_FUTURE - 1) < split
 val_mask   = (t0 >= split)
 
@@ -135,7 +153,7 @@ print("    002 X_tr__.shape:", X_train.shape, "    Y_tr__.shape:", Y_train.shape
 scaler_y = StandardScaler().fit(Y_train)
 y_train_scaled = scaler_y.transform(Y_train)
 y_test_scaled  = scaler_y.transform(Y_val)
-print("    003 y_tr_s.shape:", y_train_scaled.shape, "         y_te_s.shape:", y_test_scaled.shape)
+print("    003 y_tr_s.shape:", y_train_scaled.shape, "        y_te_s.shape:", y_test_scaled.shape)
 
 # ---- 모델 ----
 model = Sequential([
@@ -169,15 +187,16 @@ model.fit(
     callbacks=[early_stop]
 )
 
-# ---- 예측 & 역변환(원래 가격 스케일) ----
+# ---- 예측 (스케일된 출력) ----
 train_pred_scaled = model.predict(X_train, verbose=0) # (N, H)
 test_pred_scaled  = model.predict(X_val, verbose=0)
-print("    004 tr_p_s.shape:", train_pred_scaled.shape, "         te_p_s.shape:", test_pred_scaled.shape)
+print("    004 tr_p_s.shape:", train_pred_scaled.shape, "        te_p_s.shape:", test_pred_scaled.shape)
 
 # inverse_transform는 2D를 기대
-train_pred = scaler_y.inverse_transform(train_pred_scaled)   # (N_tr, 3)
-test_pred  = scaler_y.inverse_transform(test_pred_scaled)    # (N_te, 3)
-print("    005 __tr_p.shape:", train_pred.shape, "         __te_p.shape:", test_pred.shape)
+# y용 표준화 역변환: X-스케일로 되돌림
+train_pred_xscale = scaler_y.inverse_transform(train_pred_scaled)   # (N_tr, 3)
+test_pred_xscale  = scaler_y.inverse_transform(test_pred_scaled)    # (N_te, 3)
+print("    005 __tr_p.shape:", train_pred_xscale.shape, "        __te_p.shape:", test_pred_xscale.shape)
 """
 train_pred, test_pred **역스케일된 ‘가격 단위’**이고, shape은 (N, 3):
 열 0: t+1 예측 종가
@@ -186,24 +205,50 @@ train_pred, test_pred **역스케일된 ‘가격 단위’**이고, shape은 (N
 """
 
 # ---- 시각화 ----
-# 2) 실제값도 2D (이미 Y_train/Y_test가 (N,3) 형태)
-y_train_real = Y_train   # (N_tr, 3)
-y_test_real  = Y_val    # (N_te, 3)
+# 정답도 X-스케일 (Y_train, Y_val) → 그대로 사용
+y_train_xscale = Y_train   # (N_tr, 3)
+y_val_xscale  = Y_val    # (N_te, 3)
+
+# 실제 가격(원 단위)으로 변환 (종가 컬럼만 역변환)
+n_features = X_train.shape[2]
+y_train_price = inverse_close_matrix(y_train_xscale, scaler_X, n_features, idx_close)
+y_val_price   = inverse_close_matrix(y_val_xscale,   scaler_X, n_features, idx_close)
+train_pred_price = inverse_close_matrix(train_pred_xscale, scaler_X, n_features, idx_close)
+test_pred_price  = inverse_close_matrix(test_pred_xscale,  scaler_X, n_features, idx_close)
+
 
 # 3) h=1(다음날)만 비교해서 그리기
 h = 0   # 0->t+1, 1->t+2, 2->t+3
+# plt.figure(figsize=(10,5))
+# offset = len(y_train_xscale)
+#
+# plt.plot(range(0, offset),               y_train_xscale[:, h], label=f'Train Actual (h={h+1})', linewidth=1)
+# plt.plot(range(offset, offset+len(y_val_xscale)), y_val_xscale[:,  h], label=f'Test  Actual (h={h+1})',  linewidth=1, alpha=0.7)
+#
+# plt.plot(range(0, offset),               train_pred_scaled[:, h],   label=f'Train Pred   (h={h+1})')
+# plt.plot(range(offset, offset+len(y_val_xscale)), test_pred_scaled[:,  h],   label=f'Test  Pred    (h={h+1})')
+#
+# plt.title(f'LSTM Prediction — look_back={LOOK_BACK}, horizon h={h+1}')
+# plt.xlabel('Sample index'); plt.ylabel('Price'); plt.legend(); plt.tight_layout()
+# plt.savefig('prediction_h2.png', dpi=150)
+
+
+
+# 2번 역변환 > y축: 실제 종가
+offset = len(y_train_price)
+
 plt.figure(figsize=(10,5))
-offset = len(y_train_real)
+plt.plot(range(0, offset),                       y_train_price[:, h], label=f'Train Actual (h={h+1})', linewidth=1)
+plt.plot(range(offset, offset+len(y_val_price)), y_val_price[:,  h],  label=f'Test  Actual (h={h+1})',  linewidth=1, alpha=0.7)
 
-plt.plot(range(0, offset),               y_train_real[:, h], label=f'Train Actual (h={h+1})', linewidth=1)
-plt.plot(range(offset, offset+len(y_test_real)), y_test_real[:,  h], label=f'Test  Actual (h={h+1})',  linewidth=1, alpha=0.7)
-
-plt.plot(range(0, offset),               train_pred[:, h],   label=f'Train Pred   (h={h+1})')
-plt.plot(range(offset, offset+len(y_test_real)), test_pred[:,  h],   label=f'Test  Pred    (h={h+1})')
+plt.plot(range(0, offset),                       train_pred_price[:, h], label=f'Train Pred (h={h+1})')
+plt.plot(range(offset, offset+len(y_val_price)), test_pred_price[:,  h],  label=f'Test  Pred (h={h+1})')
 
 plt.title(f'LSTM Prediction — look_back={LOOK_BACK}, horizon h={h+1}')
-plt.xlabel('Sample index'); plt.ylabel('Price'); plt.legend(); plt.tight_layout()
-plt.savefig('prediction_h2.png', dpi=150)
+plt.xlabel('Sample index'); plt.ylabel('Price (KRW)'); plt.legend(); plt.tight_layout()
+plt.show()
+
+
 
 
 
