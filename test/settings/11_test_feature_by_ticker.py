@@ -1,14 +1,8 @@
-import matplotlib
-import os
-import sys
-import pandas as pd
-from datetime import datetime, timedelta
-from sklearn.preprocessing import MinMaxScaler, StandardScaler
-import matplotlib.pyplot as plt
-import ast
+import os, sys, re
 import numpy as np
-from sklearn.model_selection import train_test_split
-import re
+import pandas as pd
+from typing import Tuple, Dict, Any, List
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.inspection import permutation_importance
 
@@ -42,6 +36,39 @@ def build_flat_feature_names(feature_cols, look_back):
     for t in range(look_back):
         names += [f"{f}_t{-look_back + t + 1}" for f in feature_cols]
     return names
+
+def make_windows_XY(
+        X_2d: np.ndarray,
+        y_1d: np.ndarray,
+        look_back: int,
+        horizon: int,
+        return_t0: bool = True,
+        target_mode: str = "value"
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    X_2d: (N, F) - 이미 스케일된 X
+    y_1d: (N,)   - 원본 or 스케일된 y (여기서는 원본 권장)
+    target_mode:
+      - "value": y[i + look_back + horizon - 1]
+      - "return": (y[i + look_back + horizon - 1] / y[i + look_back - 1]) - 1
+    """
+    X, Y, t0_list = [], [], []
+    n = len(X_2d)
+    last = n - look_back - horizon + 1
+    for i in range(last):
+        X.append(X_2d[i:i+look_back, :])
+        if target_mode == "value":
+            Y.append(y_1d[i + look_back + horizon - 1])
+        else:  # "return"
+            y_t  = y_1d[i + look_back - 1]
+            y_th = y_1d[i + look_back + horizon - 1]
+            Y.append((y_th / y_t) - 1.0)
+        if return_t0:
+            t0_list.append(i)
+    X = np.asarray(X)
+    Y = np.asarray(Y).reshape(-1, 1)  # (N,1)로 통일
+    t0 = np.asarray(t0_list) if return_t0 else None
+    return X, Y, t0
 
 """
         시계열 데이터를 LSTM 학습에 바로 쓸 수 있도록 준비하는 파이프라인
@@ -120,80 +147,149 @@ def prepare_lstm_data(
     }
     return X_train, y_train, X_val, y_val, meta
 
-def select_top_base_features_via_permutation(
-        data,                      # add_technical_features 적용된 DataFrame
-        feature_cols,              # 원 후보 지표 리스트 (당신이 주신 feature_cols)
-        look_back=60,
-        horizon=1,
-        target_col="Close",        # 또는 "종가"
-        scaler_cls=None,           # 예: MinMaxScaler
-        scaler_kwargs=None,
-        val_ratio=0.1,
-        top_k=10,
-        n_estimators=500,
-        n_repeats=10,
-        random_state=42
-):
+
+def prepare_lstm_data_v2(
+        df: pd.DataFrame,
+        feature_cols: List[str],
+        look_back: int,
+        horizon: int,
+        target_col: str = "Close",     # 또는 "종가"
+        x_scaler_cls = StandardScaler, # 또는 MinMaxScaler
+        x_scaler_kwargs: Dict[str, Any] = None,
+        val_ratio: float = 0.1,
+        dropna: bool = True,
+        target_mode: str = "value",    # "value" | "return"
+        scale_y: bool = False,         # True면 y를 표준화 후 inverse_transform 사용
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, Dict[str, Any]]:
     """
-    1) prepare_lstm_data로 시계열 전처리
-    2) RF 학습 후 검증셋 permutation importance
-    3) flat 이름('feat_t-5') → 원 피처('feat')로 집계하여 합산 중요도 계산
-    4) 합산 기준 Top-K 원 피처 반환
+    반환: X_train(3D), y_train(2D), X_val(3D), y_val(2D), meta(dict)
     """
-    # --- 1) 데이터 준비 (train/val split, scaling, windowing)
-    X_train, y_train, X_val, y_val, meta = prepare_lstm_data(
-        data, feature_cols, look_back=look_back, horizon=horizon,
-        target_col=target_col,
-        scaler_cls=scaler_cls, scaler_kwargs=(scaler_kwargs or {}),
-        val_ratio=val_ratio, dropna=True
+    x_scaler_kwargs = x_scaler_kwargs or {}
+
+    # --- 정렬 & 기본 클렌징 ---
+    df = df.copy().sort_index()
+    cols = [c for c in feature_cols if c in df.columns]
+    # 숫자화 + inf -> NaN -> dropna
+    X_df = (df.loc[:, cols]
+            .apply(pd.to_numeric, errors="coerce")
+            .replace([np.inf, -np.inf], np.nan))
+    tgt = pd.to_numeric(df[target_col], errors="coerce")
+    if dropna:
+        keep = X_df.notna().all(axis=1) & tgt.notna()
+        X_df = X_df.loc[keep]
+        tgt  = tgt.loc[keep]
+
+    # --- 스플릿 인덱스(시계열 비셔플) ---
+    split = int(len(X_df) * (1 - val_ratio))
+
+    # --- X 스케일: Train으로만 fit, 전체 transform ---
+    x_scaler = x_scaler_cls(**x_scaler_kwargs)
+    x_scaler.fit(X_df.iloc[:split])
+    X_all_2d = x_scaler.transform(X_df)  # ndarray
+
+    y_all_1d = tgt.to_numpy()
+
+    # --- 전체 윈도 생성 (X는 스케일된 값; y는 원 단위 또는 수익률) ---
+    X_all, Y_all, t0 = make_windows_XY(
+        X_all_2d, y_all_1d, look_back=look_back, horizon=horizon,
+        return_t0=True, target_mode=target_mode
     )
 
-    # --- 2) RF 학습 (flat으로 변환)
-    n_tr, T, F = X_train.shape
-    n_va = X_val.shape[0]
-    X_rf_tr = X_train.reshape(n_tr, T * F)
-    X_rf_val = X_val.reshape(n_va, T * F)
+    # --- 타깃 '마지막 시점' 기준 마스크 ---
+    train_mask = (t0 + horizon - 1) < split
+    val_mask   = (t0 >= split)
 
-    rf = RandomForestRegressor(n_estimators=n_evaluators if (n_evaluators:=n_estimators) else 500,
-                               random_state=random_state, n_jobs=-1)
-    rf.fit(X_rf_tr, y_train)
+    X_train, Y_train = X_all[train_mask], Y_all[train_mask]
+    X_val,   Y_val   = X_all[val_mask],   Y_all[val_mask]
 
-    # --- 3) Permutation Importance (검증셋)
+    # --- y 스케일 옵션 ---
+    scaler_y = None
+    if scale_y:
+        scaler_y = StandardScaler().fit(Y_train)  # train으로만
+        Y_train = scaler_y.transform(Y_train)
+        Y_val   = scaler_y.transform(Y_val)
+
+    # --- 메타 ---
+    flat_feature_names = build_flat_feature_names(cols, look_back)
+    meta = {
+        "x_scaler": x_scaler,
+        "y_scaler": scaler_y,
+        "feature_cols": cols,
+        "flat_feature_names": flat_feature_names,
+        "look_back": look_back,
+        "horizon": horizon,
+        "split_index": split,
+        "target_col": target_col,
+        "target_mode": target_mode,
+    }
+    return X_train, Y_train, X_val, Y_val, meta
+
+def select_top_base_features_via_permutation(
+        data: pd.DataFrame,
+        feature_cols: List[str],
+        look_back: int = 60,
+        horizon: int = 1,
+        target_col: str = "Close",
+        x_scaler_cls = StandardScaler,         # 또는 MinMaxScaler
+        x_scaler_kwargs: Dict[str, Any] = None,
+        val_ratio: float = 0.1,
+        top_k: int = 10,
+        n_estimators: int = 500,
+        n_repeats: int = 10,
+        random_state: int = 42,
+        target_mode: str = "value",            # "value" | "return"
+        scale_y_for_rf: bool = False           # RF는 y 스케일 불필요 보통 False
+):
+    # 1) 데이터 준비 (권장 파이프라인)
+    X_tr, y_tr, X_va, y_va, meta = prepare_lstm_data_v2(
+        data, feature_cols, look_back=look_back, horizon=horizon,
+        target_col=target_col,
+        x_scaler_cls=x_scaler_cls, x_scaler_kwargs=(x_scaler_kwargs or {}),
+        val_ratio=val_ratio, dropna=True,
+        target_mode=target_mode,
+        scale_y=scale_y_for_rf
+    )
+
+    # 2) RF 학습 (flat)
+    n_tr, T, F = X_tr.shape
+    n_va = X_va.shape[0]
+    X_rf_tr = X_tr.reshape(n_tr, T * F)
+    X_rf_va = X_va.reshape(n_va, T * F)
+
+    rf = RandomForestRegressor(n_estimators=n_estimators, random_state=random_state, n_jobs=-1)
+    rf.fit(X_rf_tr, y_tr.ravel())  # y는 1D로
+
+    # 3) Permutation Importance (검증셋)
     perm = permutation_importance(
-        rf, X_rf_val, y_val,
+        rf, X_rf_va, y_va.ravel(),
         n_repeats=n_repeats,
         random_state=random_state,
         n_jobs=-1
     )
 
     imps = perm.importances_mean                 # (T*F,)
-    flat_names = meta['flat_feature_names']      # 길이 T*F, 예: 'ROC12_pct_t-8'
+    flat_names = meta['flat_feature_names']      # 길이 T*F
 
-    # --- 4) flat -> base feature로 집계
+    # 4) flat → base feature 집계
     base_names = []
     for n in flat_names:
-        m = re.search(r'(.*)_t-?\d+', n)
+        m = re.match(r'(.*)_t-?\d+$', n)
         base_names.append(m.group(1) if m else n)
 
     agg = {}
     for b, imp in zip(base_names, imps):
-        # 음수 중요도는 0으로 클리핑(선택): 안정적 집계를 위해
-        agg[b] = agg.get(b, 0.0) + max(0.0, float(imp))
+        agg[b] = agg.get(b, 0.0) + max(0.0, float(imp))  # 음수 클리핑
 
     agg_s = pd.Series(agg).sort_values(ascending=False).round(4)
-
-    # --- 5) Top-K 원 피처 선택
     top_features = list(agg_s.index[:top_k])
 
-    # 부가 정보(원피처 중요도 테이블)도 함께 반환
     return {
-        "top_features": top_features,      # 최종 선택 원 피처
-        "agg_importance": agg_s,           # 원 피처 합산 중요도 Series
-        "meta": meta,                      # prepare_lstm_data 메타
-        "rf_model": rf,                    # 학습한 RF
-        "perm": perm                       # permutation 결과 원본
+        "top_features": top_features,
+        "agg_importance": agg_s,
+        "meta": meta,
+        "rf_model": rf,
+        "perm": perm
     }
-
 
 
 
@@ -249,58 +345,68 @@ for count, ticker in enumerate(tickers):
     '''
     # NaN/inf를 자동 제거하려면
     # NaN/inf가 전체의 10% 이상인 feature만 자동 drop
-    # threshold = 0.1  # 10%
-    # cols_to_drop = [
-    #     col for col in data.columns
-    #     if (data[col].isna().mean() > threshold) or (np.isinf(data[col]).mean() > threshold)
-    # ]
-    # print("Drop candidates:", cols_to_drop)
-    # print('')
+    threshold = 0.1  # 10%
+    cols_to_drop = [
+        col for col in data.columns
+        if (data[col].isna().mean() > threshold) or (np.isinf(data[col]).mean() > threshold)
+    ]
+    if len(cols_to_drop) > 0:
+        data.drop(columns=cols_to_drop, inplace=True, errors='ignore')
+        print("Drop candidates:", cols_to_drop)
 
 
     # feature_cols = ['시가', '고가', '저가', '종가', '거래량', 'MA20', 'UpperBand', 'LowerBand', 'PBR']
     feature_cols = [
         col_o, col_l, col_h, col_c,
+        '등락률',
         'Vol_logdiff',
-        'ma10_gap',
         'MA5_slope',
+        'CCI14',
+        'STD20', 'UpperBand', 'LowerBand',
+        # 'MACD', 'MACD_signal', 'MACD_hist',
+        'UltimateOsc',
+        # 'ROC12_pct',
+        # 'ATR14',
     ]
 
-    X_train, y_train, X_val, y_val, meta = prepare_lstm_data(
+    # LSTM 준비 (권장 파이프라인)
+    X_train, y_train, X_val, y_val, meta = prepare_lstm_data_v2(
         data, feature_cols, look_back=LOOK_BACK, horizon=H,
-        target_col=col_c,                 # 또는 "ROC12_pct" 같은 수익률 기반 타깃을 직접 쓰셔도 됩니다.
-        scaler_cls=MinMaxScaler, scaler_kwargs={"feature_range": (0,1)},
-        val_ratio=0.1, dropna=True
+        target_col=col_c,
+        x_scaler_cls=StandardScaler, x_scaler_kwargs={},
+        val_ratio=0.1, dropna=True,
+        target_mode="value",   # or "return"
+        scale_y=False
     )
 
+    # === Permutation 기반 Top-K 원 피처 선택 ===
     result = select_top_base_features_via_permutation(
         data=data,
         feature_cols=feature_cols,
         look_back=LOOK_BACK,
-        horizon=H,                     # 3일 뒤만 예측이면, prepare_lstm_data 내부 타깃 인덱스도 i+H 사용하도록 수정되어 있어야 해요
-        target_col=col_c,              # 또는 "Close"
-        scaler_cls=MinMaxScaler,
-        scaler_kwargs={"feature_range": (0,1)},
+        horizon=H,
+        target_col=col_c,
+        x_scaler_cls=StandardScaler, x_scaler_kwargs={},
         val_ratio=0.1,
         top_k=10,
         n_estimators=500,
         n_repeats=10,
-        random_state=42
+        random_state=42,
+        target_mode="value",
+        scale_y_for_rf=False
     )
     # print("top_features : ", result["top_features"])
     # print("agg_importance : ",result["agg_importance"])
 
     agg_s = result["agg_importance"]         # Series: feature -> total_importance (clipped sum)
-    thresh = 0.01                            # 임계치 (너무 높으면 비어질 수 있어요)
+    thresh = 0.02                            # 임계치 (너무 높으면 비어질 수 있어요)
     sel_agg = agg_s[agg_s >= thresh].round(4)
-    print("=== 합산 중요도 (>= 0.01) ===")
+    print(f"=== 합산 중요도 (>= {thresh}) ===")
     print(sel_agg.to_string())
 
     continue
 
     # 3) RF 중요도 분석 (검증 세트 기준)
-    from sklearn.ensemble import RandomForestRegressor
-    from sklearn.inspection import permutation_importance
     n_samples, look_back, n_features = X_val.shape
     X_rf_val = X_val.reshape(n_samples, look_back * n_features)
     X_rf_tr  = X_train.reshape(X_train.shape[0], look_back * n_features)
