@@ -31,7 +31,10 @@ from utils import create_multistep_dataset, add_technical_features, create_lstm_
 
 # 1. 데이터 수집
 ticker = '000660' # 하이닉스
-ticker = '042670' # 하이닉스
+# ticker = '042670'
+# ticker = '006490'
+# ticker = '006800'
+
 filepath = os.path.join(pickle_dir, f'{ticker}.pkl')
 data = pd.read_pickle(filepath)
 
@@ -65,20 +68,30 @@ if len(cols_to_drop) > 0:
 def ensure_2d(y):
     return y.reshape(-1, 1) if y.ndim == 1 else y
 
-
+# 25.10.05
+"""
+'시가', '고가', '저가', '종가', 'Vol_logdiff',
+또는
+'시가', '고가', '저가', '종가', 'Vol_logdiff', 'RSI14'
+설정이 가장 좋은 예측
+2가지 예측을 돌려서 더 좋은거 선택 ? 시간이 오래 걸리나 ?
+"""
 # ---- 전처리: NaN/inf 제거 및 피처 선택 ----
 feature_cols = [
     '시가', '고가', '저가', '종가', 'Vol_logdiff',
-    '등락률',
-    'MA5_slope',
-    'CCI14',
-    # 'STD20', 'UpperBand', 'LowerBand',
-    'UltimateOsc',
+    # 'RSI14', # ATR, CCI 같이 쓰지마
 
-    # 'MACD', 'MACD_signal', 'MACD_hist',
-    # 'ROC12_pct',
-    # 'RSI14',
+
+
+
+    # 'UltimateOsc', # 단독 위험, RSI 또는 이것만, CCI와 사용 금지
+
+    # 'CCI14', # 단독 위험
     # 'ATR14',
+
+    # 'STD20', 'UpperBand', 'LowerBand',
+    # 'MA5_slope',
+    # 'ROC12_pct',
 ]
 
 # 4. 피쳐, 무한대 필터링
