@@ -24,52 +24,9 @@ BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
 sys.path.append(BASE_DIR)
 pickle_dir = os.path.join(BASE_DIR, 'pickle')
 
-from utils import create_multistep_dataset, add_technical_features, create_lstm_model, drop_trading_halt_rows
-
-
-
-
-# ---- StandardScaler만 사용한다면 ----
-def inverse_close_matrix_fast(Y_xscale, scaler_X, idx_close):
-    return Y_xscale * scaler_X.scale_[idx_close] + scaler_X.mean_[idx_close]
-
-def inverse_close_from_Xscale_fast(close_scaled_1d, scaler_X, idx_close):
-    return close_scaled_1d * scaler_X.scale_[idx_close] + scaler_X.mean_[idx_close]
-# -----------------------------------
-
-# 로그수익률을 원 단위로 복원
-def prices_from_logrets(base_close_1d, logrets_2d):
-    base_close_1d = np.asarray(base_close_1d, dtype=float)
-    logrets_2d    = np.asarray(logrets_2d, dtype=float)
-    if base_close_1d.ndim != 1 or logrets_2d.ndim != 2:
-        raise ValueError("shapes must be (N,), (N,H)")
-    if len(base_close_1d) != logrets_2d.shape[0]:
-        raise ValueError("N mismatch between base_close and logrets")
-    return base_close_1d[:, None] * np.exp(np.cumsum(logrets_2d, axis=1))
-
-# 로그수익률 시리즈 만들기
-def log_returns_from_prices(close_1d: np.ndarray) -> np.ndarray:
-    """
-    close_1d: (L,) 원본 종가
-    반환: (L-1,) g_1..g_{L-1},  g_t = log(C_t / C_{t-1})
-    """
-    return np.diff(np.log(close_1d))
-
-# ===== RMSE/개선율 출력 =====
-def rmse(a,b):
-    a = np.asarray(a); b = np.asarray(b)
-    return float(np.sqrt(np.mean((a-b)**2)))
-def improve(m, n, eps=1e-8):
-    n = max(float(n), eps)     # 분모 하한
-    return (1.0 - m/n) * 100.0
-def smape(y, yhat, eps=1e-8):
-    y = np.asarray(y); yhat = np.asarray(yhat)
-    num = np.abs(yhat - y)
-    den = np.abs(yhat) + np.abs(y) + eps
-    return 200.0 * np.mean(num / den)
-
-def nrmse(y, yhat, eps=1e-8):
-    return float(np.sqrt(np.mean((np.asarray(yhat)-np.asarray(y))**2)) / (np.mean(np.abs(y))+eps))
+from utils import create_multistep_dataset, add_technical_features, create_lstm_model, drop_trading_halt_rows, \
+    inverse_close_matrix_fast, inverse_close_from_Xscale_fast, prices_from_logrets, log_returns_from_prices, \
+    rmse, improve, smape, nrmse
 
 
 
@@ -114,10 +71,10 @@ for count, ticker in enumerate(tickers):
 
 
     # ---- 전처리: NaN/inf 제거 및 피처 선택 ----
-    # feature_cols = [
-    #     '시가', '고가', '저가', '종가', 'Vol_logdiff',
-    #     # 'RSI14', # 빼는게 성능이 덜 튀고 안정적
-    # ]
+    feature_cols = [
+        '시가', '고가', '저가', '종가', 'Vol_logdiff',
+        # 'RSI14', # 빼는게 성능이 덜 튀고 안정적
+    ]
 
     # 4. 피쳐, 무한대 필터링
     cols = [c for c in feature_cols if c in data.columns]  # 순서 보존
