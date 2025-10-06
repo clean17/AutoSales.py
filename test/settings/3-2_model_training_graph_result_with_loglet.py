@@ -83,6 +83,7 @@ LOOK_BACK = 15
 N_FUTURE = 3
 
 for count, ticker in enumerate(tickers):
+    print(f"Processing {count + 1}/{len(tickers)} : {ticker}")
     filepath = os.path.join(pickle_dir, f'{ticker}.pkl')
     data = pd.read_pickle(filepath)
 
@@ -100,7 +101,7 @@ for count, ticker in enumerate(tickers):
     # isna() : pandas의 결측값(NA) 체크. NaN, None, NaT에 대해 True
     # mean() : 평균
     # isinf() : 무한대 체크
-    cols_to_drop = [ # 결측치가 10% 이상인 칼럼
+    cols_to_drop = [  # 결측치가 10% 이상인 칼럼
         col
         for col in data.columns
         if (~np.isfinite(pd.to_numeric(data[col], errors='coerce'))).mean() > threshold
@@ -113,21 +114,21 @@ for count, ticker in enumerate(tickers):
 
 
     # ---- 전처리: NaN/inf 제거 및 피처 선택 ----
-    feature_cols = [
-        '시가', '고가', '저가', '종가', 'Vol_logdiff',
-        # 'RSI14', # 빼는게 성능이 덜 튀고 안정적
-    ]
+    # feature_cols = [
+    #     '시가', '고가', '저가', '종가', 'Vol_logdiff',
+    #     # 'RSI14', # 빼는게 성능이 덜 튀고 안정적
+    # ]
 
     # 4. 피쳐, 무한대 필터링
     cols = [c for c in feature_cols if c in data.columns]  # 순서 보존
     df = data.loc[:, cols].replace([np.inf, -np.inf], np.nan)
-    X_df = df.dropna() # X_df는 (정렬/결측처리된) 피처 데이터프레임, '종가' 컬럼 존재
+    X_df = df.dropna()  # X_df는 (정렬/결측처리된) 피처 데이터프레임, '종가' 컬럼 존재
 
     idx_close = cols.index('종가')
     # print('idx_close', idx_close)
 
     # 5. 스케일링, 시점 마스크
-    split = int(len(X_df) * 0.8)
+    split = int(len(X_df) * 0.85)
     scaler_X = StandardScaler().fit(X_df.iloc[:split])  # 원시 train 구간만, 중복 윈도우 때문에 같은 시점 행이 여러 번 들어가는 왜곡 방지
     X_all = scaler_X.transform(X_df)                    # 전체 변환 (누수 없음)
 
@@ -142,7 +143,7 @@ for count, ticker in enumerate(tickers):
 
     # ↓ 여기서 X_all, Y_all을 '스케일된 X'로부터 만듦
     X_tmp, Y_xscale, t0 = create_multistep_dataset(X_all, LOOK_BACK, N_FUTURE, idx=idx_close, return_t0=True)
-    t_end = t0 + LOOK_BACK - 1  # 윈도 끝 인덱스
+    t_end = t0 + LOOK_BACK - 1  # 윈도 끝 인덱스 (입력의 마지막 시점)
     Y_log = np.stack([logret[t: t + N_FUTURE] for t in t_end], axis=0)
 
 
@@ -153,14 +154,46 @@ for count, ticker in enumerate(tickers):
     t0        = t0[:minN]
 
     # 시점 마스크로 분리
-    train_mask = (t0 + N_FUTURE - 1) < split
-    val_mask   = (t0 >= split)
+    # train_mask = (t0 + N_FUTURE - 1) < split
+    # val_mask   = (t0 >= split)
+
+    # # (현재 사용 중인) 마스크 합계/겹침/누락 체크
+    # n_tr = int(np.sum(train_mask))
+    # n_va = int(np.sum(val_mask))
+    # overlap = int(np.sum(train_mask & val_mask))               # 둘 다 True인 곳
+    # gaps    = np.where(~(train_mask | val_mask))[0]            # 둘 다 False인 곳 (누락)
+    #
+    # print(f"train True = {n_tr}")
+    # print(f"valid True = {n_va}")
+    # print(f"합계       = {n_tr + n_va}")
+    # print(f"겹침 수    = {overlap} (0이어야 정상)")
+    # print(f"누락 수    = {len(gaps)} (0이어야 정상)")
+
+    # print('t_end', t_end)
+    t_y_end = t_end + (N_FUTURE - 1)  # 타깃의 마지막 시점
+    # print('t_y_end', t_y_end)
+    train_mask = (t_y_end < split)
+    val_mask = (t_y_end >= split)
+
+    # # 동일한 검증
+    # n_tr2 = int(np.sum(train_mask))
+    # n_va2 = int(np.sum(val_mask))
+    # overlap2 = int(np.sum(train_mask & val_mask))
+    # gaps2    = np.where(~(train_mask | val_mask))[0]
+    #
+    # print("\n[타깃 마지막 시점 기준]")
+    # print(f"train True = {n_tr2}")
+    # print(f"valid True = {n_va2}")
+    # print(f"합계       = {n_tr2 + n_va2}")
+    # print(f"겹침 수    = {overlap2} (0이어야 정상)")
+    # print(f"누락 수    = {len(gaps2)} (0이어야 정상)")
 
     X_train, Y_train = X_tmp[train_mask], Y_log[train_mask]
     X_val,   Y_val   = X_tmp[val_mask],   Y_log[val_mask]
+    # print("    002 X_tr__.shape:", X_train.shape, "    Y_tr__.shape:", Y_train.shape)
 
     # ---- (y_scaler) ----
-    scaler_y_log = StandardScaler().fit(Y_train)   # 로그수익률에 대해
+    scaler_y_log = StandardScaler().fit(Y_train)  # 로그수익률에 대해
     Y_train_s = scaler_y_log.transform(Y_train)
     Y_val_s   = scaler_y_log.transform(Y_val)
     # --------------------
@@ -191,6 +224,7 @@ for count, ticker in enumerate(tickers):
     early_stop  = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
     rlrop       = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, min_lr=1e-6)
 
+
     # ===== 권장 실험 구성 =====
     # - LSTM32: 가벼운 모델 (작은 데이터/빠른 실험)
     # - LSTM64: 밸런스형 (권장 기본)
@@ -199,6 +233,7 @@ for count, ticker in enumerate(tickers):
     def make_huber_per_h(delta_vec, eps=1e-6):
         delta_vec = np.asarray(delta_vec, dtype="float32")
         delta_vec = np.maximum(delta_vec, eps)  # 0 방지
+
         def huber_per_h(y_true, y_pred):
             err = tf.abs(y_true - y_pred)          # (N,H)
             d   = tf.constant(delta_vec, err.dtype) # (H,)
@@ -206,7 +241,9 @@ for count, ticker in enumerate(tickers):
             lin  = d * err - 0.5 * tf.square(d)
             loss = tf.where(err <= d, quad, lin)   # (N,H), broadcasting OK
             return tf.reduce_mean(loss)
+
         return huber_per_h
+
 
     stds = Y_train.std(axis=0)
     loss_fn = make_huber_per_h(2.0 * stds)
@@ -219,7 +256,7 @@ for count, ticker in enumerate(tickers):
         #     "loss": loss_fn,
         #     "delta": ""
         # },
-        "Y_LSTM64": { # 채택.. 가장 안정적이고 평균 성능이 좋음
+        "Y_LSTM64": {  # 채택.. 가장 안정적이고 평균 성능이 좋음
             "lstm_units": [64, 32],
             "dropout": 0.1,
             "dense_units": [32, 16],
@@ -244,9 +281,9 @@ for count, ticker in enumerate(tickers):
         )
         if name.startswith("Y"):
             history = model_v.fit(
-                X_train, Y_train_s, # (y_scaler)
+                X_train, Y_train_s,  # (y_scaler)
                 batch_size=16, epochs=200, verbose=0, shuffle=False,
-                validation_data=(X_val, Y_val_s), # (y_scaler)
+                validation_data=(X_val, Y_val_s),  # (y_scaler)
                 callbacks=[early_stop, rlrop]
             )
         else:
@@ -321,8 +358,8 @@ for count, ticker in enumerate(tickers):
 
     print("\n=== Validation Metrics (원 단위) ===")
     for name, pack in results.items():
-        y_true_p = pack["val_true_price"]   # (N,H)
-        y_pred_p = pack["val_pred_price"]   # (N,H)
+        y_true_p = pack["val_true_price"]  # (N,H)
+        y_pred_p = pack["val_pred_price"]  # (N,H)
 
         # ALL (가격 기준)
         r_all = rmse(y_true_p.reshape(-1), y_pred_p.reshape(-1))
@@ -371,10 +408,6 @@ for count, ticker in enumerate(tickers):
     plt.xlabel('Sample index'); plt.ylabel('Price (KRW)'); plt.legend(); plt.tight_layout()
     plt.savefig(f'{ticker}_{best_name}.png', dpi=150)
     # plt.show()
-
-
-
-
 
 """
 Keras LSTM은 입력 shape을 (batch, timesteps, features) 로 받는다
