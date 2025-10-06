@@ -1,8 +1,17 @@
+# Could not load dynamic library 'cudart64_110.dll'; dlerror: cudart64_110.dll not found / Skipping registering GPU devices... 안나오게
+import os
+# 1) GPU 완전 비활성화
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+# 2) C++ 백엔드 로그 레벨 낮추기 (0=INFO, 1=WARNING, 2=ERROR, 3=FATAL)
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+
 from datetime import datetime, timedelta
 from pykrx import stock
 import pandas as pd
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout
+from tensorflow.keras.losses import Huber
+from tensorflow.keras.optimizers import Adam
 import requests
 import yfinance as yf
 import os
@@ -10,8 +19,8 @@ import re
 from typing import Optional
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score, roc_auc_score, precision_recall_curve, \
+    f1_score
 
 # 시드 고정
 import numpy as np, tensorflow as tf, random
@@ -46,15 +55,6 @@ def _rma(s: pd.Series, length: int) -> pd.Series:
 
 
 # ----- 기본 지표 -----
-# def compute_rsi(prices, period=14):
-#     delta = prices.diff()
-#     up = delta.clip(lower=0)
-#     down = -delta.clip(upper=0)
-#     gain = up.rolling(window=period, min_periods=1).mean()
-#     loss = down.rolling(window=period, min_periods=1).mean()
-#     rs = gain / (loss + 1e-9)
-#     return 100 - (100 / (1 + rs))
-
 def compute_rsi(close: pd.Series, length: int = 14) -> pd.Series:
     delta = close.diff()
     up = delta.clip(lower=0)
@@ -124,7 +124,7 @@ def drop_trading_halt_rows(data: pd.DataFrame):
     col_c = _col(d, '종가',   'Close')
     col_v = _col(d, '거래량', 'Volume')
 
-    # 1) OHLCV 전부 존재w
+    # 1) OHLCV 전부 존재
     notna = d[[col_o, col_h, col_l, col_c, col_v]].notna().all(axis=1)
     # 2) 가격이 0보다 큼(데이터 공급사에 따라 0으로 채워지는 경우 방지)
     positive_price = d[[col_o, col_h, col_l, col_c]].gt(0).all(axis=1)
@@ -330,12 +330,20 @@ def create_dataset(dataset, look_back=30, idx=3):
 - `X.shape`: [샘플 수, look_back, 피처 수]
 - `Y.shape`: [샘플 수, n_future]
 '''
-def create_multistep_dataset(dataset, look_back, n_future, idx=3):
+def create_multistep_dataset(dataset, look_back, n_future, idx=3, return_t0=False):
+    ds = np.asarray(dataset)
+    if ds.ndim == 1:
+        ds = ds.reshape(-1, 1)
     X, Y = [], []
-    for i in range(len(dataset) - look_back - n_future + 1):
-        X.append(dataset[i:i+look_back])
-        # Y는 "종가" 인덱스만 n_future 길이로 슬라이싱!
-        Y.append(dataset[i+look_back:i+look_back+n_future, idx]) # 3번 인덱스; 종가
+    n = len(ds)
+    t0_list = []
+    for i in range(n - look_back - n_future + 1):
+        X.append(ds[i:i+look_back])
+        Y.append(ds[i+look_back:i+look_back+n_future, idx])
+        if return_t0:
+            t0_list.append(i)
+    if return_t0:
+        return np.array(X), np.array(Y), np.array(t0_list)
     return np.array(X), np.array(Y)
 
 
@@ -351,13 +359,16 @@ input_shape = (LOOK_BACK, N_FEATURES)
 '''
 def create_lstm_model(input_shape, n_future,
                       lstm_units=[64, 32], dropout=0.2,
-                      dense_units=[16, 8]):
+                      dense_units=[16, 8],
+                      lr=5e-4, delta=1.0):
     """
-    input_shape: (look_back, feature 수)
-    n_future: 예측할 값 개수
-    lstm_units: LSTM 레이어별 유닛 리스트 (예: [128, 64]면 LSTM 128, LSTM 64)
+    input_shape: (look_back, n_features)
+    n_future: 예측할 horizon 개수
+    lstm_units: LSTM 레이어별 유닛 리스트
     dropout: 각 LSTM 뒤에 붙일 Dropout 비율(리스트로 주면 각각 다르게도 가능)
     dense_units: Dense 레이어별 유닛 리스트
+    lr: Adam 학습률
+    delta: Huber 손실 delta
     """
     model = Sequential()
     for i, units in enumerate(lstm_units):
@@ -366,13 +377,19 @@ def create_lstm_model(input_shape, n_future,
             model.add(LSTM(units, return_sequences=return_seq, input_shape=input_shape))
         else:
             model.add(LSTM(units, return_sequences=return_seq))
-        # Dropout 리스트를 받을 수도 있고, 고정값을 쓸 수도 있음
-        if dropout:
-            model.add(Dropout(dropout if isinstance(dropout, float) else dropout[i]))
+
+        # 드롭아웃: 공통 float 또는 레이어별 리스트 지원
+        if isinstance(dropout, (float, int)) and dropout > 0:
+            model.add(Dropout(float(dropout)))
+        elif isinstance(dropout, (list, tuple)) and i < len(dropout) and dropout[i] > 0:
+            model.add(Dropout(float(dropout[i])))
+
     for units in dense_units:
         model.add(Dense(units, activation='relu'))
+
     model.add(Dense(n_future))
-    model.compile(optimizer='adam', loss='mean_squared_error')
+    # model.compile(optimizer='adam', loss='mean_squared_error')
+    model.compile(optimizer=Adam(lr), loss=Huber(delta=delta))
     return model
 
 
