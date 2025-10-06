@@ -53,7 +53,7 @@ $ pip install -r requirements.txt
 ## CUDA 설치
 https://www.tensorflow.org/install/source?hl=ko#gpu <br>위 링크에서 확인하면 설치된 tensorflow 버전에 따른 사용가능한 cuda 버전을 확인할 수 있다<br>
 
-![img.png](img.png)
+![alt text](src/readme_images/image-5.png)
 cuda download <br> https://developer.nvidia.com/cuda-11-8-0-download-archive?target_os=Windows&target_arch=x86_64&target_version=11&target_type=exe_local <br>
 
 cuDNN 8.6 압축을 풀고 CUDA 설치 디렉토리 내의 `bin`, `include`, `lib` 폴더에 복사한다
@@ -139,7 +139,7 @@ $ python getPredictedBTCbyLSTM.py
 /src/graph (main)
 $ python getPredictedStockByLSTM.py 
 ```
-![alt text](src/readme_images/image-4.png)w
+![alt text](src/readme_images/image-4.png)
 
 ### 리눅스 파이선 3.8 설치
 ```
