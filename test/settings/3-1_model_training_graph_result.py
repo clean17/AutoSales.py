@@ -28,9 +28,6 @@ from utils import create_multistep_dataset, add_technical_features, create_lstm_
 
 
 
-# 혹시라도 1D가 되었다면 강제 2D 복원
-def ensure_2d(y):
-    return y.reshape(-1, 1) if y.ndim == 1 else y
 
 # 스케일된 ‘종가’만 원 단위로 역변환
 def inverse_close_matrix(Y_xscale: np.ndarray,
@@ -50,11 +47,37 @@ def inverse_close_matrix(Y_xscale: np.ndarray,
     raw = scaler_X.inverse_transform(Z)[:, idx_close]
     return raw.reshape(N, H)
 
+# 스케일된 ‘종가’만 원 단위로 역변환
+def inverse_close_from_Xscale(close_scaled_1d, scaler_X, n_features, idx_close):
+    """
+    close_scaled_1d: (N,) — X-스케일의 종가
+    반환: (N,) — 원 단위 종가
+    """
+    Z = np.zeros((len(close_scaled_1d), n_features))
+    Z[:, idx_close] = close_scaled_1d
+    return scaler_X.inverse_transform(Z)[:, idx_close]
+
+# ===== RMSE/개선율 출력 =====
+def rmse(a,b):
+    a = np.asarray(a); b = np.asarray(b)
+    return float(np.sqrt(np.mean((a-b)**2)))
+def improve(m, n, eps=1e-8):
+    n = max(float(n), eps)     # 분모 하한
+    return (1.0 - m/n) * 100.0
+def smape(y, yhat, eps=1e-8):
+    y = np.asarray(y); yhat = np.asarray(yhat)
+    num = np.abs(yhat - y)
+    den = np.abs(yhat) + np.abs(y) + eps
+    return 200.0 * np.mean(num / den)
+
+def nrmse(y, yhat, eps=1e-8):
+    return float(np.sqrt(np.mean((np.asarray(yhat)-np.asarray(y))**2)) / (np.mean(np.abs(y))+eps))
 
 
 # 1. 데이터 수집
 ticker = '000660' # 하이닉스
-tickers = ['000660', '008970', '006490', '042670', '023160', '006800', '323410', '009540', '034020', '358570', '000155', '035720', '00680K', '035420', '012510']
+# tickers = ['000660', '008970', '006490', '042670', '023160', '006800', '323410', '009540', '034020', '358570', '000155', '035720', '00680K', '035420', '012510']
+tickers = ['000660']
 
 LOOK_BACK = 15
 N_FUTURE = 3
@@ -113,23 +136,18 @@ for count, ticker in enumerate(tickers):
     # 5. 스케일링, 시점 마스크
     split = int(len(X_df) * 0.8)
     scaler_X = StandardScaler().fit(X_df.iloc[:split])  # 원시 train 구간만, 중복 윈도우 때문에 같은 시점 행이 여러 번 들어가는 왜곡 방지
-    X_all = scaler_X.transform(X_df)                 # 전체 변환 (누수 없음)
+    X_all = scaler_X.transform(X_df)                    # 전체 변환 (누수 없음)
 
 
     # ↓ 여기서 X_all, Y_all을 '스케일된 X'로부터 만듦
-    X_tmp, Y, t0 = create_multistep_dataset(X_all, LOOK_BACK, N_FUTURE, idx=idx_close, return_t0=True)
-    Y_log = Y
+    X_tmp, Y_xscale, t0 = create_multistep_dataset(X_all, LOOK_BACK, N_FUTURE, idx=idx_close, return_t0=True)
 
     # 시점 마스크로 분리
     train_mask = (t0 + N_FUTURE - 1) < split
     val_mask   = (t0 >= split)
 
-    X_train, Y_train = X_tmp[train_mask], Y_log[train_mask]
-    X_val,   Y_val   = X_tmp[val_mask],   Y_log[val_mask]
-
-    # ---- Train/Test split (스케일러는 Train으로만 fit) ----
-    Y_train = ensure_2d(Y_train)
-    Y_val  = ensure_2d(Y_val)
+    X_train, Y_train = X_tmp[train_mask], Y_xscale[train_mask]
+    X_val,   Y_val   = X_tmp[val_mask],   Y_xscale[val_mask]
 
     # ---- y 스케일링: Train으로만 fit ---- (타깃이 수익률이면 생략 가능)
     scaler_y = StandardScaler().fit(Y_train)
@@ -153,24 +171,24 @@ for count, ticker in enumerate(tickers):
             "dense_units": [16],
             "lr": 5e-4, "delta": 1.0
         },
-        "LSTM32": {
-            "lstm_units": [32,16],
-            "dropout": 0.2,
-            "dense_units": [16, 8],
-            "lr": 3e-4, "delta": 1.0
-        },
-        "LSTM64": {
-            "lstm_units": [64, 32],
-            "dropout": 0.2,
-            "dense_units": [32, 16],
-            "lr": 3e-4, "delta": 1.0
-        },
-        "LSTM128": {
-            "lstm_units": [128, 64],
-            "dropout": 0.2,
-            "dense_units": [64, 32],
-            "lr": 3e-4, "delta": 1.0
-        },
+        # "LSTM32": {
+        #     "lstm_units": [32,16],
+        #     "dropout": 0.2,
+        #     "dense_units": [16, 8],
+        #     "lr": 3e-4, "delta": 1.0
+        # },
+        # "LSTM64": {
+        #     "lstm_units": [64, 32],
+        #     "dropout": 0.2,
+        #     "dense_units": [32, 16],
+        #     "lr": 3e-4, "delta": 1.0
+        # },
+        # "LSTM128": {
+        #     "lstm_units": [128, 64],
+        #     "dropout": 0.2,
+        #     "dense_units": [64, 32],
+        #     "lr": 3e-4, "delta": 1.0
+        # },
     }
 
     results = {}
@@ -223,6 +241,59 @@ for count, ticker in enumerate(tickers):
     # 실제 정답(원 단위)도 준비 (이미 위에서 계산했으면 재사용)
     y_train_price = inverse_close_matrix(Y_train, scaler_X, n_features, idx_close)
     y_val_price   = inverse_close_matrix(Y_val,   scaler_X, n_features, idx_close)
+
+    # ====== 평가 세트용 앵커(기준가격 C_t) ======
+    n_features = X_train.shape[2]
+    base_close_val_scaled = X_val[:, -1, idx_close]
+    base_close_val = inverse_close_from_Xscale(base_close_val_scaled, scaler_X, n_features, idx_close)
+
+    # ====== 나이브 베이스라인 (C_{t+h} = C_t) ======
+    naive_val = np.repeat(base_close_val[:, None], N_FUTURE, axis=1)
+
+    print("\n=== Validation Metrics (원 단위) ===")
+    for name, pack in results.items():
+        y_true_p = y_val_price                     # (N,H) — 정답 가격
+        y_pred_p = pack["val_pred_price"]          # (N,H) — 예측 가격
+
+        # ------ ALL (가격 기준) ------
+        r_all = rmse(y_true_p.reshape(-1), y_pred_p.reshape(-1))
+        r_nv  = rmse(y_true_p.reshape(-1), naive_val.reshape(-1))
+        s_all = smape(y_true_p.reshape(-1), y_pred_p.reshape(-1))
+        nr_all = nrmse(y_true_p.reshape(-1), y_pred_p.reshape(-1))
+
+        # R^2 (참고용)
+        ybar = np.mean(y_true_p)
+        sst  = np.sum((y_true_p - ybar)**2)
+        sse  = np.sum((y_true_p - y_pred_p)**2)
+        r2   = 1.0 - (sse / (sst + 1e-12))
+
+        print(f"[{name}] ALL : RMSE={r_all:.2f} | naive={r_nv:.2f} | 개선={improve(r_all, r_nv):.1f}% "
+              f"| sMAPE={s_all:.2f} | nRMSE={nr_all:.4f} | R^2={r2:.4f}")
+
+        # ------ h별 (가격 기준) ------
+        for h in range(N_FUTURE):
+            r_h  = rmse(y_true_p[:,h], y_pred_p[:,h])
+            r_hn = rmse(y_true_p[:,h], naive_val[:,h])
+            s_h  = smape(y_true_p[:,h], y_pred_p[:,h])
+            nr_h = nrmse(y_true_p[:,h], y_pred_p[:,h])
+
+            # 방향성 적중률 (C_{t+h} - C_t)의 부호 일치 비율
+            true_dir = np.sign(y_true_p[:,h] - base_close_val)
+            pred_dir = np.sign(y_pred_p[:,h] - base_close_val)
+            hit_rate = np.mean(true_dir == pred_dir)
+
+            print(f"    h={h+1}: RMSE={r_h:.2f} | naive={r_hn:.2f} | ratio={r_h/r_hn:.3f} "
+                  f"| 개선={improve(r_h, r_hn):.1f}% | sMAPE={s_h:.2f} | nRMSE={nr_h:.4f} "
+                  f"| HitRate={hit_rate:.3f}")
+
+        # ------ (선택) 로그수익률 기준 평가 ------
+        # 가격 예측을 로그수익률로 변환해, 수익률 공간에서도 비교
+        pred_log = np.log(np.clip(y_pred_p, 1e-12, None) / base_close_val[:, None])
+        true_log = np.log(y_true_p / base_close_val[:, None])
+        rlog_m = rmse(true_log.reshape(-1), pred_log.reshape(-1))
+        rlog_n = rmse(true_log.reshape(-1), np.zeros_like(true_log).reshape(-1))  # 나이브(0수익률)
+        print(f"    [log-returns] RMSE model={rlog_m:.6f} | naive={rlog_n:.6f} | 개선={improve(rlog_m, rlog_n):.1f}%")
+
 
 
     h = 0  # 0->t+1, 1->t+2, 2->t+3
