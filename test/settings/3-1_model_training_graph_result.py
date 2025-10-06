@@ -32,7 +32,7 @@ from utils import create_multistep_dataset, add_technical_features, create_lstm_
 def ensure_2d(y):
     return y.reshape(-1, 1) if y.ndim == 1 else y
 
-# 스케일된 ‘종가’만 원 단위로 역변환하는 도우미
+# 스케일된 ‘종가’만 원 단위로 역변환
 def inverse_close_matrix(Y_xscale: np.ndarray,
                          scaler_X,
                          n_features: int,
@@ -147,23 +147,29 @@ for count, ticker in enumerate(tickers):
     # - LSTM64: 밸런스형 (권장 기본)
     # - LSTM128: 깊고 넓게 (데이터/패턴이 충분할 때만)
     variants = {
-        "LSTM8": {
-            "lstm_units": [8],
-            "dropout": None,
-            "dense_units": [4],
-            "lr": 5e-4, "delta": 1.0
-        },
-        "LSTM16": {
-            "lstm_units": [16],
-            "dropout": None,
-            "dense_units": [8],
-            "lr": 5e-4, "delta": 1.0
-        },
-        "LSTM32": {
+        "LSTM": {
             "lstm_units": [32],
             "dropout": None,
             "dense_units": [16],
             "lr": 5e-4, "delta": 1.0
+        },
+        "LSTM32": {
+            "lstm_units": [32,16],
+            "dropout": 0.2,
+            "dense_units": [16, 8],
+            "lr": 3e-4, "delta": 1.0
+        },
+        "LSTM64": {
+            "lstm_units": [64, 32],
+            "dropout": 0.2,
+            "dense_units": [32, 16],
+            "lr": 3e-4, "delta": 1.0
+        },
+        "LSTM128": {
+            "lstm_units": [128, 64],
+            "dropout": 0.2,
+            "dense_units": [64, 32],
+            "lr": 3e-4, "delta": 1.0
         },
     }
 
@@ -206,7 +212,7 @@ for count, ticker in enumerate(tickers):
             "best_val": best_val,
             "epochs_trained": len(history.history['loss']),
         }
-        print(f" -> best val_loss: {best_val:.6f} / epochs: {results[name]['epochs_trained']}")
+        # print(f" -> best val_loss: {best_val:.6f} / epochs: {results[name]['epochs_trained']}")
 
 
     # ===== 최고 모델 선택 =====
