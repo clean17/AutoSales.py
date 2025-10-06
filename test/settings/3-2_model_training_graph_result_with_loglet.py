@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 import os, sys
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
+import tensorflow as tf
 
 # 시드 고정 테스트
 import numpy as np, tensorflow as tf, random
@@ -114,7 +115,7 @@ for count, ticker in enumerate(tickers):
     # ---- 전처리: NaN/inf 제거 및 피처 선택 ----
     feature_cols = [
         '시가', '고가', '저가', '종가', 'Vol_logdiff',
-        'RSI14',
+        # 'RSI14', # 빼는게 성능이 덜 튀고 안정적
     ]
 
     # 4. 피쳐, 무한대 필터링
@@ -158,6 +159,11 @@ for count, ticker in enumerate(tickers):
     X_train, Y_train = X_tmp[train_mask], Y_log[train_mask]
     X_val,   Y_val   = X_tmp[val_mask],   Y_log[val_mask]
 
+    # ---- (y_scaler) ----
+    scaler_y_log = StandardScaler().fit(Y_train)   # 로그수익률에 대해
+    Y_train_s = scaler_y_log.transform(Y_train)
+    Y_val_s   = scaler_y_log.transform(Y_val)
+    # --------------------
 
     # 1안 (종가 y스케일)
     # y_price_from_xscale_tr = inverse_close_matrix_fast(Y_xscale[train_mask], scaler_X, idx_close)
@@ -189,63 +195,37 @@ for count, ticker in enumerate(tickers):
     # - LSTM32: 가벼운 모델 (작은 데이터/빠른 실험)
     # - LSTM64: 밸런스형 (권장 기본)
     # - LSTM128: 깊고 넓게 (데이터/패턴이 충분할 때만)
-    # variants = {
-    #     "LSTM32": {
-    #         "lstm_units": [32],
-    #         "dropout": None,
-    #         "dense_units": [16],
-    #         "lr": 5e-4, "delta": 1.0
-    #     },
-    #     "LSTM32-2": {
-    #         "lstm_units": [32],
-    #         "dropout": None,
-    #         "dense_units": [16],
-    #         "lr": 3e-4, "delta": 1.0
-    #     },
-    #     "LSTM32-3": {
-    #         "lstm_units": [32],
-    #         "dropout": 0.1,
-    #         "dense_units": [16],
-    #         "lr": 5e-4, "delta": 1.0
-    #     },
-    #     "LSTM32-4": {
-    #         "lstm_units": [32, 16],
-    #         "dropout": 0.2,
-    #         "dense_units": [16, 8],
-    #         "lr": 5e-4, "delta": 1.0
-    #     },
-    #     "LSTM32-5": {
-    #         "lstm_units": [32, 16],
-    #         "dropout": None,
-    #         "dense_units": [16, 8],
-    #         "lr": 5e-4, "delta": 1.0
-    #     },
-    # }
 
+    def make_huber_per_h(delta_vec, eps=1e-6):
+        delta_vec = np.asarray(delta_vec, dtype="float32")
+        delta_vec = np.maximum(delta_vec, eps)  # 0 방지
+        def huber_per_h(y_true, y_pred):
+            err = tf.abs(y_true - y_pred)          # (N,H)
+            d   = tf.constant(delta_vec, err.dtype) # (H,)
+            quad = 0.5 * tf.square(err)
+            lin  = d * err - 0.5 * tf.square(d)
+            loss = tf.where(err <= d, quad, lin)   # (N,H), broadcasting OK
+            return tf.reduce_mean(loss)
+        return huber_per_h
+
+    stds = Y_train.std(axis=0)
+    loss_fn = make_huber_per_h(2.0 * stds)
     variants = {
-        "LSTM32": {
-            "lstm_units": [32,16],
-            "dropout": 0.2,
-            "dense_units": [16, 8],
-            "lr": 3e-4, "delta": 1.0
-        },
-        "LSTM64": {
+        # "LSTM64": {
+        #     "lstm_units": [64, 32],
+        #     "dropout": 0.1,
+        #     "dense_units": [32, 16],
+        #     "lr": 5e-4,
+        #     "loss": loss_fn,
+        #     "delta": ""
+        # },
+        "Y_LSTM64": { # 채택.. 가장 안정적이고 평균 성능이 좋음
             "lstm_units": [64, 32],
-            "dropout": 0.2,
+            "dropout": 0.1,
             "dense_units": [32, 16],
-            "lr": 3e-4, "delta": 1.0
-        },
-        "LSTM128": {
-            "lstm_units": [128, 64],
-            "dropout": 0.2,
-            "dense_units": [64, 32],
-            "lr": 3e-4, "delta": 1.0
-        },
-        "LSTM": {
-            "lstm_units": [32],
-            "dropout": None,
-            "dense_units": [16],
-            "lr": 5e-4, "delta": 1.0
+            "lr": 5e-4,
+            "loss": None,
+            "delta": 1.0
         },
     }
 
@@ -260,18 +240,37 @@ for count, ticker in enumerate(tickers):
             dropout=cfg["dropout"],
             dense_units=cfg["dense_units"],
             lr=cfg["lr"], delta=cfg["delta"],
+            loss=cfg["loss"],
         )
-        history = model_v.fit(
-            X_train, Y_train,
-            batch_size=16, epochs=200, verbose=0, shuffle=False,
-            validation_data=(X_val, Y_val),
-            callbacks=[early_stop, rlrop]
-        )
+        if name.startswith("Y"):
+            history = model_v.fit(
+                X_train, Y_train_s, # (y_scaler)
+                batch_size=16, epochs=200, verbose=0, shuffle=False,
+                validation_data=(X_val, Y_val_s), # (y_scaler)
+                callbacks=[early_stop, rlrop]
+            )
+        else:
+            history = model_v.fit(
+                X_train, Y_train,
+                batch_size=16, epochs=200, verbose=0, shuffle=False,
+                validation_data=(X_val, Y_val),
+                callbacks=[early_stop, rlrop]
+            )
+
 
         # 예측(로그수익률)
         pred_tr_log = model_v.predict(X_train, verbose=0)
         pred_va_log = model_v.predict(X_val,   verbose=0)
 
+        if name.startswith("Y"):
+            # ---- (y_scaler) ----
+            # 2) 예측 → (반드시) 역표준화하여 '원-로그수익률'로 복원
+            pred_tr_log_s = model_v.predict(X_train, verbose=0)
+            pred_va_log_s = model_v.predict(X_val,   verbose=0)
+            # 표준화 해제 (y_scaler)
+            pred_tr_log = scaler_y_log.inverse_transform(pred_tr_log_s)  # ← 누락 금지
+            pred_va_log = scaler_y_log.inverse_transform(pred_va_log_s)
+            # ---------------------
 
         # 로그수익률 → 가격 복원
         price_pred_tr = prices_from_logrets(base_close_train, pred_tr_log)
@@ -295,6 +294,10 @@ for count, ticker in enumerate(tickers):
             close_raw[t_end]
         )
 
+        # (y_scaler) 역표준화 후 수치 확인 (e-10 > 사실상 0)
+        # print("RMSE(true_xscale_vs_true_log) =",
+        #       rmse(inverse_close_matrix(Y_xscale[val_mask], scaler_X, X_tmp.shape[2], idx_close),
+        #            prices_from_logrets(base_close_val, Y_val)))
 
         best_val = min(history.history.get('val_loss', [float('inf')]))
         results[name] = {
@@ -311,8 +314,7 @@ for count, ticker in enumerate(tickers):
 
     # ===== 최고 모델 선택 =====
     best_name = min(results.keys(), key=lambda k: results[k]["best_val"])
-    best_model = results[best_name]["model"]
-    print(f"\n[Best] {best_name} (val_loss={results[best_name]['best_val']:.6f})")
+    # print(f"\n[Best] {best_name} (val_loss={results[best_name]['best_val']:.6f})")
 
     # ===== 나이브 베이스라인(가격 고정: C_{t+h}=C_t) =====
     naive_val = np.repeat(base_close_val[:, None], N_FUTURE, axis=1)
@@ -339,13 +341,14 @@ for count, ticker in enumerate(tickers):
             print(f"    h={h+1}: RMSE={r_h:.2f} | naive={r_hn:.2f} | ratio={r_h/r_hn:.3f} | 개선={improve(r_h, r_hn):.1f}% | sMAPE={s_h:.2f} | nRMSE={nr_h:.4f}")
 
         # (선택) 로그수익률 기준도 하나 출력
-        pred_va_log = results[name]["model"].predict(X_val, verbose=0)
-        ytrue_log   = Y_val
-        ynaive_log  = np.zeros_like(ytrue_log)
+        pred_va_log_s = results[name]["model"].predict(X_val, verbose=0)
+        yhat_log      = scaler_y_log.inverse_transform(pred_va_log_s)  # 역표준화
+        ytrue_log     = Y_val                                          # 원본(비표준화)
+        ynaive_log    = np.zeros_like(ytrue_log)                       # 0수익률 베이스라인
 
-        rlog_m = rmse(ytrue_log.reshape(-1), pred_va_log.reshape(-1))
+        rlog_m = rmse(ytrue_log.reshape(-1), yhat_log.reshape(-1))
         rlog_n = rmse(ytrue_log.reshape(-1), ynaive_log.reshape(-1))
-        print(f"    [log-returns] RMSE model={rlog_m:.6f} | naive={rlog_n:.6f} | 개선={improve(rlog_m, rlog_n):.1f}%")
+        print(f"[log-returns] RMSE model={rlog_m:.6f} | naive={rlog_n:.6f} | 개선={improve(rlog_m, rlog_n):.1f}%")
 
     # ===== 그래프 비교 (h=1 기본) =====
     import matplotlib.pyplot as plt
@@ -366,7 +369,7 @@ for count, ticker in enumerate(tickers):
 
     plt.title(f'Comparison — LSTM units 32/64/128 (log-returns), look_back={LOOK_BACK}, h={h+1}')
     plt.xlabel('Sample index'); plt.ylabel('Price (KRW)'); plt.legend(); plt.tight_layout()
-    plt.savefig(f'{ticker}_{best_name}_4.png', dpi=150)
+    plt.savefig(f'{ticker}_{best_name}.png', dpi=150)
     # plt.show()
 
 
