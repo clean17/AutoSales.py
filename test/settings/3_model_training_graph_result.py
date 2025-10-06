@@ -9,12 +9,14 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
+from tensorflow.keras.losses import Huber
+from tensorflow.keras.optimizers import Adam
 import matplotlib
 # matplotlib.use("Agg") # plt.show() 에서 사용안함
 import matplotlib.pyplot as plt
 import os, sys
 import pandas as pd
-from sklearn.preprocessing import StandardScaler, MinMaxScaler
+from sklearn.preprocessing import StandardScaler
 
 # 시드 고정 테스트
 import numpy as np, tensorflow as tf, random
@@ -29,11 +31,18 @@ pickle_dir = os.path.join(BASE_DIR, 'pickle')
 from utils import create_multistep_dataset, add_technical_features, create_lstm_model, get_kor_ticker_dict_list, \
     drop_trading_halt_rows, fetch_stock_data
 
+
+
 # 1. 데이터 수집
 ticker = '000660' # 하이닉스
 # ticker = '042670'
 # ticker = '006490'
 # ticker = '006800'
+
+LOOK_BACK = 15
+N_FUTURE = 3
+
+
 
 filepath = os.path.join(pickle_dir, f'{ticker}.pkl')
 data = pd.read_pickle(filepath)
@@ -44,7 +53,6 @@ if len(removed_idx) > 0:
     print(f"거래정지/이상치로 제거된 날짜 수: {len(removed_idx)}")
 
 # 2. 2차 생성 feature
-# print('first', data)
 data = add_technical_features(data)
 # print(data.columns) # 칼럼 헤더 전체 출력
 
@@ -68,6 +76,7 @@ if len(cols_to_drop) > 0:
 def ensure_2d(y):
     return y.reshape(-1, 1) if y.ndim == 1 else y
 
+# 스케일된 ‘종가’만 원 단위로 역변환하는 도우미
 def inverse_close_matrix(Y_xscale: np.ndarray,
                          scaler_X,
                          n_features: int,
@@ -98,14 +107,9 @@ feature_cols = [
     '시가', '고가', '저가', '종가', 'Vol_logdiff',
     'RSI14', # ATR, CCI 같이 쓰지마
 
-
-
-
     # 'UltimateOsc', # 단독 위험, RSI 또는 이것만, CCI와 사용 금지
-
     # 'CCI14', # 단독 위험
     # 'ATR14',
-
     # 'STD20', 'UpperBand', 'LowerBand',
     # 'MA5_slope',
     # 'ROC12_pct',
@@ -114,35 +118,27 @@ feature_cols = [
 # 4. 피쳐, 무한대 필터링
 cols = [c for c in feature_cols if c in data.columns]  # 순서 보존
 df = data.loc[:, cols].replace([np.inf, -np.inf], np.nan)
-X_df = df.dropna()
-
-# print('데이터 첫번째 날짜', X_df[feature_cols].first_valid_index())
-# sub = X_df[feature_cols].sort_index()
-# out = sub.reset_index().rename(columns={'index':'date'})
-# print(out.head(1).to_string(index=False)) # 첫번째 날짜 출력
+X_df = df.dropna() # X_df는 (정렬/결측처리된) 피처 데이터프레임, '종가' 컬럼 존재
 
 idx_close = feature_cols.index('종가')
-# print('idx_close', idx_close)
 
 # 5. 스케일링, 시점 마스크
 split = int(len(X_df) * 0.8)
 scaler_X = StandardScaler().fit(X_df.iloc[:split])  # 원시 train 구간만, 중복 윈도우 때문에 같은 시점 행이 여러 번 들어가는 왜곡 방지
-X_all_2d = scaler_X.transform(X_df)                 # 전체 변환 (누수 없음)
+X_all = scaler_X.transform(X_df)                 # 전체 변환 (누수 없음)
 
-LOOK_BACK = 15
-N_FUTURE = 3
 
 # ↓ 여기서 X_all, Y_all을 '스케일된 X'로부터 만듦
-X_all, Y_all, t0 = create_multistep_dataset(X_all_2d, LOOK_BACK, N_FUTURE, idx=idx_close, return_t0=True)
+X_tmp, Y, t0 = create_multistep_dataset(X_all, LOOK_BACK, N_FUTURE, idx=idx_close, return_t0=True)
+Y_log = Y
+print("    001 X_____.shape:", X_tmp.shape, "    Y_____.shape:", Y_log.shape)
 
 # 시점 마스크로 분리
 train_mask = (t0 + N_FUTURE - 1) < split
 val_mask   = (t0 >= split)
 
-print("    001 X_____.shape:", X_all.shape, "    Y_____.shape:", Y_all.shape)
-
-X_train, Y_train = X_all[train_mask], Y_all[train_mask]
-X_val,   Y_val   = X_all[val_mask],   Y_all[val_mask]
+X_train, Y_train = X_tmp[train_mask], Y_log[train_mask]
+X_val,   Y_val   = X_tmp[val_mask],   Y_log[val_mask]
 
 # ---- Train/Test split (스케일러는 Train으로만 fit) ----
 Y_train = ensure_2d(Y_train)
@@ -158,33 +154,20 @@ print("    003 y_tr_s.shape:", y_train_scaled.shape, "        y_te_s.shape:", y_
 # ---- 모델 ----
 model = Sequential([
     LSTM(32, return_sequences=False, input_shape=(X_train.shape[1], X_train.shape[2])),
-    # Dropout(0.1),
-    # LSTM(16, return_sequences=False),
-    # Dropout(0.3),
-    # Dense(32, activation='relu'),
-    # Dense(16, activation='relu'),
     Dense(16, activation='relu'),
     Dense(N_FUTURE)
 ])
 
-from tensorflow.keras.losses import Huber
-
-# 타깃이 표준화되어 있다면:
-loss = Huber(delta=1.0)    # Y를 표준화했으면 δ=1.0 권장
-
-# 타깃이 가격(표준화 안 함)이라면: δ를 MAE 규모로
-# 예) 학습 초반에 추정한 MAE ~ 3000원 이라면 대략 δ=3000 부근부터 탐색
-# loss = Huber(delta=3000.0)
-
-model.compile(optimizer='adam', loss=loss, metrics=['mse','mae'])
+model.compile(optimizer=Adam(5e-4), loss=Huber(delta=1.0))
 # model.compile(optimizer='adam', loss='mean_squared_error')
 
 early_stop = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
+rlrop = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5)
 model.fit(
     X_train, y_train_scaled,
     batch_size=16, epochs=200, verbose=0, shuffle=False,
     validation_data=(X_val, y_test_scaled),
-    callbacks=[early_stop]
+    callbacks=[early_stop, rlrop]
 )
 
 # ---- 예측 (스케일된 출력) ----
@@ -219,33 +202,27 @@ test_pred_price  = inverse_close_matrix(test_pred_xscale,  scaler_X, n_features,
 
 # 3) h=1(다음날)만 비교해서 그리기
 h = 0   # 0->t+1, 1->t+2, 2->t+3
-# plt.figure(figsize=(10,5))
-# offset = len(y_train_xscale)
-#
+plt.figure(figsize=(10,5))
+offset = len(y_train_xscale)
+
 # plt.plot(range(0, offset),               y_train_xscale[:, h], label=f'Train Actual (h={h+1})', linewidth=1)
 # plt.plot(range(offset, offset+len(y_val_xscale)), y_val_xscale[:,  h], label=f'Test  Actual (h={h+1})',  linewidth=1, alpha=0.7)
-#
+
 # plt.plot(range(0, offset),               train_pred_scaled[:, h],   label=f'Train Pred   (h={h+1})')
 # plt.plot(range(offset, offset+len(y_val_xscale)), test_pred_scaled[:,  h],   label=f'Test  Pred    (h={h+1})')
-#
-# plt.title(f'LSTM Prediction — look_back={LOOK_BACK}, horizon h={h+1}')
-# plt.xlabel('Sample index'); plt.ylabel('Price'); plt.legend(); plt.tight_layout()
-# plt.savefig('prediction_h2.png', dpi=150)
-
-
 
 # 2번 역변환 > y축: 실제 종가
-offset = len(y_train_price)
-
-plt.figure(figsize=(10,5))
 plt.plot(range(0, offset),                       y_train_price[:, h], label=f'Train Actual (h={h+1})', linewidth=1)
 plt.plot(range(offset, offset+len(y_val_price)), y_val_price[:,  h],  label=f'Test  Actual (h={h+1})',  linewidth=1, alpha=0.7)
 
 plt.plot(range(0, offset),                       train_pred_price[:, h], label=f'Train Pred (h={h+1})')
 plt.plot(range(offset, offset+len(y_val_price)), test_pred_price[:,  h],  label=f'Test  Pred (h={h+1})')
 
+
 plt.title(f'LSTM Prediction — look_back={LOOK_BACK}, horizon h={h+1}')
+# plt.xlabel('Sample index'); plt.ylabel('Price'); plt.legend(); plt.tight_layout()
 plt.xlabel('Sample index'); plt.ylabel('Price (KRW)'); plt.legend(); plt.tight_layout()
+# plt.savefig('prediction_h2.png', dpi=150)
 plt.show()
 
 
