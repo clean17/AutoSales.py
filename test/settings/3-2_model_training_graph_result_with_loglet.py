@@ -28,59 +28,23 @@ from utils import create_multistep_dataset, add_technical_features, create_lstm_
 
 
 
-# 혹시라도 1D가 되었다면 강제 2D 복원
-def ensure_2d(y):
-    return y.reshape(-1, 1) if y.ndim == 1 else y
+# ---- StandardScaler만 사용한다면 ----
+def inverse_close_matrix_fast(Y_xscale, scaler_X, idx_close):
+    return Y_xscale * scaler_X.scale_[idx_close] + scaler_X.mean_[idx_close]
 
-# 스케일된 ‘종가’만 원 단위로 역변환하는 도우미
-def inverse_close_matrix(Y_xscale: np.ndarray,
-                         scaler_X,
-                         n_features: int,
-                         idx_close: int) -> np.ndarray:
-    """
-    Y_xscale: (N, H)  # X-스케일의 '종가' 값들
-    scaler_X: X에 fit했던 StandardScaler
-    n_features: X의 피처 개수 (X_train.shape[2])
-    idx_close: 종가 컬럼 인덱스 (X의 피처 순서 기준)
-    반환: (N, H) 원 단위(가격)
-    """
-    N, H = Y_xscale.shape
-    Z = np.zeros((N*H, n_features), dtype=float)
-    Z[:, idx_close] = Y_xscale.reshape(-1)
-    raw = scaler_X.inverse_transform(Z)[:, idx_close]
-    return raw.reshape(N, H)
+def inverse_close_from_Xscale_fast(close_scaled_1d, scaler_X, idx_close):
+    return close_scaled_1d * scaler_X.scale_[idx_close] + scaler_X.mean_[idx_close]
+# -----------------------------------
 
-
-def make_future_logret_targets(logret, look_back, n_future):
-    """
-    logret: (L-1,) = g_1..g_{L-1}
-    반환: (N, n_future),  t = look_back-1 .. (L-1)-n_future
-    """
-    Lg = len(logret)                          # = L - 1
-    t_start = look_back - 1
-    t_end_excl = Lg - n_future + 1
-    Y = [logret[t : t + n_future] for t in range(t_start, t_end_excl)]
-    return np.asarray(Y)
-
-# 스케일된 ‘종가’만 원 단위로 역변환하는 도우미
-def inverse_close_from_Xscale(close_scaled_1d, scaler_X, n_features, idx_close):
-    """
-    close_scaled_1d: (N,) — X-스케일의 종가
-    반환: (N,) — 원 단위 종가
-    """
-    Z = np.zeros((len(close_scaled_1d), n_features))
-    Z[:, idx_close] = close_scaled_1d
-    return scaler_X.inverse_transform(Z)[:, idx_close]
-
+# 로그수익률을 원 단위로 복원
 def prices_from_logrets(base_close_1d, logrets_2d):
-    """
-    base_close_1d: (N,)  — 각 샘플의 기준가격 C_t (윈도 마지막 시점의 실제 가격)
-    logrets_2d:    (N,H) — 예측/실제 로그수익률 g_{t+1..t+H}
-    반환:          (N,H) — 복원된 가격 C_{t+1..t+H}
-    """
-    cumg = np.cumsum(logrets_2d, axis=1)  # 각 샘플별로 h=1..H까지 누적 로그수익률 Σg
-    mult = np.exp(cumg)                   # 누적 배율 exp(Σg) = Π exp(g)
-    return base_close_1d[:, None] * mult  # C_t * exp(Σg) → C_{t+h}
+    base_close_1d = np.asarray(base_close_1d, dtype=float)
+    logrets_2d    = np.asarray(logrets_2d, dtype=float)
+    if base_close_1d.ndim != 1 or logrets_2d.ndim != 2:
+        raise ValueError("shapes must be (N,), (N,H)")
+    if len(base_close_1d) != logrets_2d.shape[0]:
+        raise ValueError("N mismatch between base_close and logrets")
+    return base_close_1d[:, None] * np.exp(np.cumsum(logrets_2d, axis=1))
 
 # 로그수익률 시리즈 만들기
 def log_returns_from_prices(close_1d: np.ndarray) -> np.ndarray:
@@ -91,8 +55,9 @@ def log_returns_from_prices(close_1d: np.ndarray) -> np.ndarray:
     return np.diff(np.log(close_1d))
 
 # ===== RMSE/개선율 출력 =====
-def rmse(a,b): return float(np.sqrt(np.mean((np.asarray(a)-np.asarray(b))**2)))
-# def improve(m, n): return (1 - m/n) * 100.0
+def rmse(a,b):
+    a = np.asarray(a); b = np.asarray(b)
+    return float(np.sqrt(np.mean((a-b)**2)))
 def improve(m, n, eps=1e-8):
     n = max(float(n), eps)     # 분모 하한
     return (1.0 - m/n) * 100.0
@@ -111,6 +76,7 @@ def nrmse(y, yhat, eps=1e-8):
 # 1. 데이터 수집
 ticker = '000660' # 하이닉스
 tickers = ['000660', '008970', '006490', '042670', '023160', '006800', '323410', '009540', '034020', '358570', '000155', '035720', '00680K', '035420', '012510']
+tickers = ['000660']
 
 LOOK_BACK = 15
 N_FUTURE = 3
@@ -121,8 +87,8 @@ for count, ticker in enumerate(tickers):
 
     # 1-1. 우선 거래정지/이상치 행 제거
     data, removed_idx = drop_trading_halt_rows(data)
-    if len(removed_idx) > 0:
-        print(f"거래정지/이상치로 제거된 날짜 수: {len(removed_idx)}")
+    # if len(removed_idx) > 0:
+    #     print(f"거래정지/이상치로 제거된 날짜 수: {len(removed_idx)}")
 
     # 2. 2차 생성 feature
     data = add_technical_features(data)
@@ -148,7 +114,7 @@ for count, ticker in enumerate(tickers):
     # ---- 전처리: NaN/inf 제거 및 피처 선택 ----
     feature_cols = [
         '시가', '고가', '저가', '종가', 'Vol_logdiff',
-        # 'RSI14',
+        'RSI14',
     ]
 
     # 4. 피쳐, 무한대 필터링
@@ -156,35 +122,62 @@ for count, ticker in enumerate(tickers):
     df = data.loc[:, cols].replace([np.inf, -np.inf], np.nan)
     X_df = df.dropna() # X_df는 (정렬/결측처리된) 피처 데이터프레임, '종가' 컬럼 존재
 
-    idx_close = feature_cols.index('종가')
+    idx_close = cols.index('종가')
+    # print('idx_close', idx_close)
 
     # 5. 스케일링, 시점 마스크
     split = int(len(X_df) * 0.8)
     scaler_X = StandardScaler().fit(X_df.iloc[:split])  # 원시 train 구간만, 중복 윈도우 때문에 같은 시점 행이 여러 번 들어가는 왜곡 방지
-    X_all = scaler_X.transform(X_df)                 # 전체 변환 (누수 없음)
+    X_all = scaler_X.transform(X_df)                    # 전체 변환 (누수 없음)
 
     # 원본 종가(스케일 전)를 1D ndarray로 확보 (X_df와 같은 인덱스/정렬/필터 상태)
-    close_raw = X_df.iloc[:, idx_close].to_numpy(dtype=float)
+    # close_raw = X_df.iloc[:, idx_close].to_numpy(dtype=float)
+    close_raw = X_df['종가'].to_numpy(float)
     logret = log_returns_from_prices(close_raw)  # 길이 L-1
 
+    # X_all(스케일) 종가 역변환 == close_raw(원본) 일치 여부 (전구간 체크)
+    recon_close = inverse_close_from_Xscale_fast(X_all[:, idx_close], scaler_X, idx_close)
+    # print("max|recon_close - close_raw| =", np.max(np.abs(recon_close - close_raw)))
+
     # ↓ 여기서 X_all, Y_all을 '스케일된 X'로부터 만듦
-    X_tmp, Y, t0 = create_multistep_dataset(X_all, LOOK_BACK, N_FUTURE, idx=idx_close, return_t0=True)
-    Y_log = make_future_logret_targets(logret, LOOK_BACK, N_FUTURE)
+    X_tmp, Y_xscale, t0 = create_multistep_dataset(X_all, LOOK_BACK, N_FUTURE, idx=idx_close, return_t0=True)
+    t_end = t0 + LOOK_BACK - 1  # 윈도 끝 인덱스
+    Y_log = np.stack([logret[t: t + N_FUTURE] for t in t_end], axis=0)
+
 
     minN = min(len(X_tmp), len(Y_log))
-    X = X_tmp[:minN]      # (N, LOOK_BACK, F)
-    Y = Y_log[:minN]      # (N, H)
+    X_tmp     = X_tmp[:minN]      # (N, LOOK_BACK, F)
+    Y_log     = Y_log[:minN]      # (N, H)
+    Y_xscale  = Y_xscale[:minN]
+    t0        = t0[:minN]
 
-    splitN = int(len(X) * 0.8)
-    X_train, X_val = X[:splitN], X[splitN:]
-    Y_train, Y_val = Y[:splitN], Y[splitN:]
+    # 시점 마스크로 분리
+    train_mask = (t0 + N_FUTURE - 1) < split
+    val_mask   = (t0 >= split)
+
+    X_train, Y_train = X_tmp[train_mask], Y_log[train_mask]
+    X_val,   Y_val   = X_tmp[val_mask],   Y_log[val_mask]
+
+
+    # 1안 (종가 y스케일)
+    # y_price_from_xscale_tr = inverse_close_matrix_fast(Y_xscale[train_mask], scaler_X, idx_close)
+    # y_price_from_xscale_va = inverse_close_matrix_fast(Y_xscale[val_mask],   scaler_X, idx_close)
+
+    # z1_tr = X_train[:, -1, idx_close]
+    # z2_tr = X_all[t_end[train_mask], idx_close]
+    # print("train max|z1 - z2| =", np.max(np.abs(z1_tr - z2_tr)))
+    #
+    # z1_va = X_val[:, -1, idx_close]
+    # z2_va = X_all[t_end[val_mask], idx_close]
+    # print("valid max|z1 - z2| =", np.max(np.abs(z1_va - z2_va)))
+
+    # 윈도 마지막 시점 정합성 체크 (학습 데이터셋 vs 원본, 스케일 공간 체크)
+    assert np.allclose(X_train[:, -1, idx_close], X_all[t_end[train_mask], idx_close])
+    assert np.allclose(X_val[:, -1, idx_close],   X_all[t_end[val_mask],   idx_close])
 
     # 기준가격(원 단위): 각 샘플의 윈도 마지막 시점 t의 종가 (원 단위)
-    n_features = X.shape[2]
-    base_close_train_scaled = X_train[:, -1, idx_close]
-    base_close_val_scaled   = X_val[:,   -1, idx_close]
-    base_close_train = inverse_close_from_Xscale(base_close_train_scaled, scaler_X, n_features, idx_close)
-    base_close_val   = inverse_close_from_Xscale(base_close_val_scaled,   scaler_X, n_features, idx_close)
+    base_close_train = inverse_close_from_Xscale_fast(X_all[t_end[train_mask], idx_close], scaler_X, idx_close)
+    base_close_val   = inverse_close_from_Xscale_fast(X_all[t_end[val_mask],   idx_close], scaler_X, idx_close)
 
 
     # ===== 공통 설정 =====
@@ -248,6 +241,12 @@ for count, ticker in enumerate(tickers):
             "dense_units": [64, 32],
             "lr": 3e-4, "delta": 1.0
         },
+        "LSTM": {
+            "lstm_units": [32],
+            "dropout": None,
+            "dense_units": [16],
+            "lr": 5e-4, "delta": 1.0
+        },
     }
 
     results = {}
@@ -273,12 +272,29 @@ for count, ticker in enumerate(tickers):
         pred_tr_log = model_v.predict(X_train, verbose=0)
         pred_va_log = model_v.predict(X_val,   verbose=0)
 
+
         # 로그수익률 → 가격 복원
         price_pred_tr = prices_from_logrets(base_close_train, pred_tr_log)
         price_pred_va = prices_from_logrets(base_close_val,   pred_va_log)
         # 정답(로그수익률 Y)도 가격으로 변환
         price_true_tr = prices_from_logrets(base_close_train, Y_train)
         price_true_va = prices_from_logrets(base_close_val,   Y_val)
+
+
+        # 두 방식이 거의 같은지 수치 확인, 0에 가까우면 동일하다고 판단(e-10으로 끝나면 사실상 0), 1이상 이상 차이가 나면 문제
+        # print("[TRAIN] RMSE(true_xscale_vs_true_log) =", rmse(y_price_from_xscale_tr, price_true_tr))
+        # print("[VALID] RMSE(true_xscale_vs_true_log) =", rmse(y_price_from_xscale_va, price_true_va))
+
+        # 윈도 끝 시점 역변환 후 일치(RMSE), 정렬 어긋난는지 판단, 0 이면 이상없음; (1)+(2)를 합친 종합 체크
+        # print("RMSE(C_t_from_X, C_t_from_raw) =", rmse(
+        #     inverse_close_from_Xscale_fast(X_tmp[:, -1, idx_close], scaler_X, idx_close),
+        #     close_raw[t_end]
+        # ))
+        assert np.allclose(
+            inverse_close_from_Xscale_fast(X_tmp[:, -1, idx_close], scaler_X, idx_close),
+            close_raw[t_end]
+        )
+
 
         best_val = min(history.history.get('val_loss', [float('inf')]))
         results[name] = {
@@ -350,7 +366,7 @@ for count, ticker in enumerate(tickers):
 
     plt.title(f'Comparison — LSTM units 32/64/128 (log-returns), look_back={LOOK_BACK}, h={h+1}')
     plt.xlabel('Sample index'); plt.ylabel('Price (KRW)'); plt.legend(); plt.tight_layout()
-    plt.savefig(f'{ticker}_{best_name}.png', dpi=150)
+    plt.savefig(f'{ticker}_{best_name}_4.png', dpi=150)
     # plt.show()
 
 
