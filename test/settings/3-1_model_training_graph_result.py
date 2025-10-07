@@ -83,6 +83,7 @@ LOOK_BACK = 15
 N_FUTURE = 3
 
 for count, ticker in enumerate(tickers):
+    print(f"Processing {count + 1}/{len(tickers)} : {ticker}")
     filepath = os.path.join(pickle_dir, f'{ticker}.pkl')
     data = pd.read_pickle(filepath)
 
@@ -123,7 +124,7 @@ for count, ticker in enumerate(tickers):
     # ---- 전처리: NaN/inf 제거 및 피처 선택 ----
     feature_cols = [
         '시가', '고가', '저가', '종가', 'Vol_logdiff',
-        'RSI14',
+        # 'RSI14',
     ]
 
     # 4. 피쳐, 무한대 필터링
@@ -134,17 +135,19 @@ for count, ticker in enumerate(tickers):
     idx_close = feature_cols.index('종가')
 
     # 5. 스케일링, 시점 마스크
-    split = int(len(X_df) * 0.8)
+    split = int(len(X_df) * 0.85)
     scaler_X = StandardScaler().fit(X_df.iloc[:split])  # 원시 train 구간만, 중복 윈도우 때문에 같은 시점 행이 여러 번 들어가는 왜곡 방지
     X_all = scaler_X.transform(X_df)                    # 전체 변환 (누수 없음)
 
 
     # ↓ 여기서 X_all, Y_all을 '스케일된 X'로부터 만듦
     X_tmp, Y_xscale, t0 = create_multistep_dataset(X_all, LOOK_BACK, N_FUTURE, idx=idx_close, return_t0=True)
+    t_end = t0 + LOOK_BACK - 1        # 윈도 끝 인덱스 (입력의 마지막 시점)
+    t_y_end = t_end + (N_FUTURE - 1)  # 타깃의 마지막 시점
 
     # 시점 마스크로 분리
-    train_mask = (t0 + N_FUTURE - 1) < split
-    val_mask   = (t0 >= split)
+    train_mask = (t_y_end < split)
+    val_mask   = (t_y_end >= split)
 
     X_train, Y_train = X_tmp[train_mask], Y_xscale[train_mask]
     X_val,   Y_val   = X_tmp[val_mask],   Y_xscale[val_mask]
@@ -164,31 +167,29 @@ for count, ticker in enumerate(tickers):
     # - LSTM32: 가벼운 모델 (작은 데이터/빠른 실험)
     # - LSTM64: 밸런스형 (권장 기본)
     # - LSTM128: 깊고 넓게 (데이터/패턴이 충분할 때만)
+    def make_huber_per_h(delta_vec, eps=1e-6):
+        delta_vec = np.asarray(delta_vec, dtype="float32")
+        delta_vec = np.maximum(delta_vec, eps)
+
+        def huber_per_h(y_true, y_pred):
+            err = tf.abs(y_true - y_pred)                  # (N,H)
+            d   = tf.constant(delta_vec, dtype=err.dtype)  # (H,)
+            quad = 0.5 * tf.square(err)
+            lin  = d * err - 0.5 * tf.square(d)
+            loss = tf.where(err <= d, quad, lin)           # (N,H)
+            return tf.reduce_mean(loss)
+        return huber_per_h
+
+    stds = Y_train.std(axis=0).astype("float32")
+    loss_fn = make_huber_per_h(2.0 * stds)
+
     variants = {
         "LSTM": {
             "lstm_units": [32],
             "dropout": None,
             "dense_units": [16],
-            "lr": 5e-4, "delta": 1.0
+            "lr": 5e-4, "loss": loss_fn, "delta": 1.0
         },
-        # "LSTM32": {
-        #     "lstm_units": [32,16],
-        #     "dropout": 0.2,
-        #     "dense_units": [16, 8],
-        #     "lr": 3e-4, "delta": 1.0
-        # },
-        # "LSTM64": {
-        #     "lstm_units": [64, 32],
-        #     "dropout": 0.2,
-        #     "dense_units": [32, 16],
-        #     "lr": 3e-4, "delta": 1.0
-        # },
-        # "LSTM128": {
-        #     "lstm_units": [128, 64],
-        #     "dropout": 0.2,
-        #     "dense_units": [64, 32],
-        #     "lr": 3e-4, "delta": 1.0
-        # },
     }
 
     results = {}
