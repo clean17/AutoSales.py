@@ -2,14 +2,12 @@ import matplotlib
 matplotlib.use('Agg')
 import os, sys
 import pandas as pd
-from pykrx import stock
 from datetime import datetime, timedelta
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 import matplotlib.pyplot as plt
 from utils import create_lstm_model, create_multistep_dataset, fetch_stock_data, add_technical_features, \
     get_kor_ticker_dict_list, plot_candles_daily, plot_candles_weekly, drop_trading_halt_rows, regression_metrics, \
-    pass_filter
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+    pass_filter, inverse_close_matrix_fast, get_next_business_days
 import requests
 import time
 
@@ -29,11 +27,12 @@ root_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 
 pickle_dir = os.path.join(root_dir, 'pickle')
 os.makedirs(pickle_dir, exist_ok=True) # 없으면 생성
 
-PREDICTION_PERIOD = 3
+N_FUTURE = PREDICTION_PERIOD = 3
 LOOK_BACK = 15
 AVERAGE_TRADING_VALUE = 4_000_000_000 # 평균거래대금 30억
 EXPECTED_GROWTH_RATE = 3
-DATA_COLLECTION_PERIOD = 400 # 샘플 수 = 68(100일 기준) - 20 - 4 + 1 = 45
+DATA_COLLECTION_PERIOD = 700 # 샘플 수 = 68(100일 기준) - 20 - 4 + 1 = 45
+SPLIT      = 0.85
 
 today = datetime.today().strftime('%Y%m%d')
 # today = (datetime.today() - timedelta(days=5)).strftime('%Y%m%d')
@@ -115,8 +114,8 @@ for count, ticker in enumerate(tickers):
         df = data.copy()
 
     # 너무 먼 과거 데이터 버리기
-    if len(df) > 300:
-        df = df.iloc[-300:]
+    if len(df) > 500:
+        df = df.iloc[-500:]
 
     # 파일 저장
     df.to_pickle(filepath)
@@ -208,6 +207,7 @@ for count, ticker in enumerate(tickers):
     # 2차 생성 feature
     data = add_technical_features(data)
 
+    # 결측 제거
     threshold = 0.1  # 10%
     # isna() : pandas의 결측값(NA) 체크. NaN, None, NaT에 대해 True
     # mean() : 평균
@@ -256,49 +256,33 @@ for count, ticker in enumerate(tickers):
 
     # 학습에 쓸 피처
     feature_cols = [
-        col_o, col_l, col_h, col_c,
-        # col_v,
-        'Vol_logdiff',
-        # 'ma10_gap',
-        'MA5_slope',
-        # ** col_o, col_l, col_h, col_c, Vol_logdiff, MA5_slope
-        # R-squared_avg :  0.5841392158480752
-        # SMAPE :  42.22468885035757
+        col_o, col_l, col_h, col_c, 'Vol_logdiff',
     ]
 
-    # 0) NaN/inf 정리
-    data = data.replace([np.inf, -np.inf], np.nan)
-
-    # 1) feature_cols만 남기고 dropna
-    feature_cols = [c for c in feature_cols if c in data.columns]
-    # print('feature_cols', feature_cols)
-    X_df = data.dropna(subset=feature_cols).loc[:, feature_cols]
-
-    # (선택) 상수열 제거 >> 선택한 지표에서는 가능성이 없음
-    # const_cols = [c for c in X_df.columns if X_df[c].nunique() <= 1]
-    # if const_cols:
-    #     X_df = X_df.drop(columns=const_cols)
-    #     feature_cols = [c for c in feature_cols if c not in const_cols]
+    cols = [c for c in feature_cols if c in data.columns]  # 순서 보존
+    df = data.loc[:, cols].replace([np.inf, -np.inf], np.nan)
+    X_df = df.dropna()  # X_df는 (정렬/결측처리된) 피처 데이터프레임, '종가' 컬럼 존재
 
     # 종가 컬럼 이름/인덱스
-    idx_close = feature_cols.index(col_c)
+    idx_close = cols.index(col_c)
 
     # 2) 시계열 분리 후, train만 fit → val/전체 transform
-    split = int(len(X_df) * 0.8)
-    """
-        scaler = MinMaxScaler(feature_range=(0, 1))
-        X_tr_2d = scaler.fit_transform(X_df.iloc[:split].values)   # fit은 train에만
-        X_va_2d = scaler.transform(X_df.iloc[split:].values)
-        X_all_2d = scaler.transform(X_df.values)                   # 전체 transform (누수 아님)
-    """
-    scaler = StandardScaler()                         # ← 변경: StandardScaler
-    X_tr_2d = scaler.fit_transform(X_df.iloc[:split].values)   # fit: 스케일러가 데이터의 통계값을 학습         >> 훈련 세트: 훈련 데이터로만 통계(평균·최대/최소 등)를 학습 + 변환
-    X_va_2d = scaler.transform(X_df.iloc[split:].values)       # transform: 이미 학습된 통계값을 써서 값을 변환 >> 검증/테스트 세트: 훈련에서 배운 통계로만 변환
-    X_all_2d = scaler.transform(X_df.values)                   # 전체 transform (누수 아님)
+    split = int(len(X_df) * SPLIT)
+    scaler_X = StandardScaler().fit(X_df.iloc[:split])  # 원시 train 구간만, 중복 윈도우 때문에 같은 시점 행이 여러 번 들어가는 왜곡 방지
+    X_all = scaler_X.transform(X_df)                    # 전체 변환 (누수 없음)
+
+    # ↓ 여기서 X_all, Y_all을 '스케일된 X'로부터 만듦
+    X_tmp, Y_xscale, t0 = create_multistep_dataset(X_all, LOOK_BACK, N_FUTURE, idx=idx_close, return_t0=True)
+    t_end = t0 + LOOK_BACK - 1        # 윈도 끝 인덱스 (입력의 마지막 시점)
+    t_y_end = t_end + (N_FUTURE - 1)  # 타깃의 마지막 시점
+
+    # 시점 마스크로 분리
+    train_mask = (t_y_end < split)
+    val_mask   = (t_y_end >= split)
 
     # 3) 윈도잉(블록별) → 학습/검증 세트
-    X_train, Y_train = create_multistep_dataset(X_tr_2d, LOOK_BACK, PREDICTION_PERIOD, idx=idx_close)
-    X_val,   Y_val   = create_multistep_dataset(X_va_2d, LOOK_BACK, PREDICTION_PERIOD, idx=idx_close)
+    X_train, Y_train = X_tmp[train_mask], Y_xscale[train_mask]
+    X_val,   Y_val   = X_tmp[val_mask],   Y_xscale[val_mask]
 
     # 4) 안전 체크
     for name, arr in [('X_train',X_train),('Y_train',Y_train),('X_val',X_val),('Y_val',Y_val)]:
@@ -308,40 +292,61 @@ for count, ticker in enumerate(tickers):
     if X_train.shape[0] < 50:
         continue
 
+    # ---- y 스케일링: Train으로만 fit ---- (타깃이 수익률이면 생략 가능)
+    scaler_y = StandardScaler().fit(Y_train)
+    y_train_scaled = scaler_y.transform(Y_train)
+    y_test_scaled  = scaler_y.transform(Y_val)
+
     #######################################################################
 
     # 6) 모델 생성/학습
+    def make_huber_per_h(delta_vec, eps=1e-6):
+        delta_vec = np.asarray(delta_vec, dtype="float32")
+        delta_vec = np.maximum(delta_vec, eps)
+
+        def huber_per_h(y_true, y_pred):
+            err = tf.abs(y_true - y_pred)                  # (N,H)
+            d   = tf.constant(delta_vec, dtype=err.dtype)  # (H,)
+            quad = 0.5 * tf.square(err)
+            lin  = d * err - 0.5 * tf.square(d)
+            loss = tf.where(err <= d, quad, lin)           # (N,H)
+            return tf.reduce_mean(loss)
+        return huber_per_h
+
+    stds = Y_train.std(axis=0).astype("float32")
+    loss_fn = make_huber_per_h(2.0 * stds)
+
+    # 6) 모델 생성/학습
     model = create_lstm_model((X_train.shape[1], X_train.shape[2]), PREDICTION_PERIOD,
-                              lstm_units=[32], dropout=0.05, dense_units=[16])
+                              lstm_units=[32], dropout=None, dense_units=[16], loss=loss_fn)
 
     from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
     early_stop = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
-    rlrop = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5)
-    history = model.fit(X_train, Y_train, batch_size=8, epochs=200,
-                        validation_data=(X_val, Y_val),
-                        shuffle=False, verbose=0, callbacks=[early_stop, rlrop])
+    rlrop = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, min_lr=1e-6)
+    history = model.fit(
+        X_train, y_train_scaled,
+        batch_size=8, epochs=200, verbose=0, shuffle=False,
+        validation_data=(X_val, y_test_scaled),
+        callbacks=[early_stop, rlrop]
+    )
 
 
     # 모델 평가
     # val_loss = model.evaluate(X_val, Y_val, verbose=1)
     # print("Validation Loss :", val_loss)
 
-    # (선택) 검증 예측
-    """
-        X_val : 검증에 쓸 여러 시계열 구간의 집합
-        preds : 검증셋 각 구간(윈도우)에 대해 미래 PREDICTION_PERIOD만큼의 예측치 반환
-        shape: (검증샘플수, 예측일수)
-    """
-    preds = model.predict(X_val, verbose=0)
+    # 예측 (y-스케일)
+    va_pred_s = model.predict(X_val, verbose=0)
 
     #######################################################################
 
     # ++ 지표 계산: scaled + restored(원 단위)
     metrics = regression_metrics(
-        Y_val, preds,
-        scaler=scaler,
+        y_test_scaled, va_pred_s,
+        y_scaler=scaler_y,
+        scaler=scaler_X,
         n_features=X_df.shape[1],
-        idx_close=idx_close
+        idx_close=idx_close,
     )
 
     # print("=== SCALED (표준화 공간) ===")
@@ -359,7 +364,7 @@ for count, ticker in enumerate(tickers):
     #     for k,v in metrics["restored"].items():
     #         print(f"    {k}: {v:.4f}")
 
-    ok = pass_filter(metrics, use_restored=True, r2_min=0.6, smape_max=8.0)  # 원 단위 기준으로 필터, SMAPE 30으로 필터링하려면 무조건 restored 값으로
+    ok = pass_filter(metrics, use_restored=True, r2_min=0.1, smape_max=8.0)  # 원 단위 기준으로 필터, SMAPE 30으로 필터링하려면 무조건 restored 값으로
     # print("                                                        PASS 1st filter?" , ok)
     if not ok:
         continue
@@ -367,29 +372,27 @@ for count, ticker in enumerate(tickers):
     #######################################################################
 
     # 7) 마지막 윈도우 1개로 미래 H-step 예측
-    if len(X_df) < LOOK_BACK:
-        raise ValueError("LOOK_BACK보다 데이터가 짧습니다.")
-    n_features = X_all_2d.shape[1]
-    last_window = X_all_2d[-LOOK_BACK:].reshape(1, LOOK_BACK, n_features)
-    future_scaled = model.predict(last_window, verbose=0)[0]        # shape=(H,)
+    n_features = X_all.shape[1]
+    # X_all[-LOOK_BACK:] : 가장 최근 LOOK_BACK개 시점의 표준화된 피쳐들
+    # last_window : 15일치의 피쳐들을 표준화한 블록
+    last_window = X_all[-LOOK_BACK:].reshape(1, LOOK_BACK, n_features)
+    # print('last_window', last_window)
+    future_y_s  = model.predict(last_window, verbose=0)      # shape=(1,H)
 
-    # 8) 스케일 역변환 (StandardScaler: x = z*scale_[idx] + mean_[idx])
-    if hasattr(scaler, "scale_"):
-        assert scaler.scale_[idx_close] != 0, "종가 스케일이 0입니다(상수열?)."
+    # 8) y-표준화 → X-스케일
+    future_y_x  = scaler_y.inverse_transform(future_y_s)      # shape=(1,H)
+    # print('future_y_x', future_y_x)
 
-    if isinstance(scaler, StandardScaler):
-        mu  = scaler.mean_[idx_close]
-        std = scaler.scale_[idx_close]         # 표준편차
-        predicted_prices = future_scaled * std + mu                     # (H,)
+    future_price = inverse_close_matrix_fast(
+        future_y_x, scaler_X, idx_close
+    ).ravel()  # shape=(H,)
 
-    elif isinstance(scaler, MinMaxScaler):
-        # MinMax는 transform이 X_scaled = X * scale_ + min_  (sklearn 구현)
-        offset = scaler.min_[idx_close]        # feature_range 보정 포함된 오프셋
-        scl    = scaler.scale_[idx_close]
-        predicted_prices = (future_scaled - offset) / scl
+    predicted_prices = future_price
+    # print('predicted_prices', predicted_prices)
 
-    # 9) 미래 날짜(X_df 기준) + 참고지표, 예측 구간의 미래 날짜 리스트 생성, start는 마지막 날짜 다음 영업일(Business day)부터 시작
-    future_dates = pd.bdate_range(start=X_df.index[-1] + pd.Timedelta(days=1), periods=PREDICTION_PERIOD, freq='B')
+    # 9) 다음 영업일 가져오기
+    future_dates = get_next_business_days()
+    # print('future_dates', future_dates)
     last_close = X_df[col_c].iloc[-1]
     avg_future_return = (predicted_prices.mean() / last_close - 1.0) * 100
 
@@ -463,38 +466,3 @@ if total_cnt > 0:
     print('R-squared_avg : ', total_r2/total_cnt)
     print('SMAPE : ', total_smape/total_cnt)
     print('total_cnt : ', total_cnt)
-
-'''
-** col_o, col_l, col_h, col_c, col_v, MA5_slope
-R-squared_avg :  0.4977659373816699
-SMAPE :  42.47096208898161
-
-** col_o, col_l, col_h, col_c, Vol_logdiff
-R-squared_avg :  0.5149373644545456
-SMAPE :  38.97357753468229
-
-** col_o, col_l, col_h, col_c, Vol_logdiff, MA5_slope
-R-squared_avg :  0.5841392158480752
-SMAPE :  42.22468885035757
-
-col_o, col_l, col_h, col_c, col_v
-R-squared_avg :  0.3090356026457654
-SMAPE :  46.707108736338114
-
-col_o, col_l, col_h, col_c, col_v, ma10_gap
-R-squared_avg :  0.4127328479977587
-SMAPE :  55.53506462253618
-
-col_o, col_l, col_h, col_c, col_v, ma10_gap, MA5_slope
-R-squared_avg :  0.32810325623131403
-SMAPE :  53.4387975495598
-
-col_o, col_l, col_h, col_c, Vol_logdiff, ma10_gap
-R-squared_avg :  0.4537473651272319
-SMAPE :  47.40394306519242
-
-col_o, col_l, col_h, col_c, Vol_logdiff, ma10_gap, MA5_slope
-R-squared_avg :  0.35143853039638684
-SMAPE :  54.71462795715128
-
-'''

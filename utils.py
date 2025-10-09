@@ -129,7 +129,7 @@ def nrmse(y, yhat, eps=1e-8):
 # --- 2) 유틸: naive 생성 ---
 def make_naive_preds(y_hist_end, horizon, mode="price"):
     """
-    y_hist_end: (N,) 각 윈도우의 마지막 실제값 y[t-1]
+    y_hist_end: (N,) 각 윈도우의 마지막 실제값 y[t-1]; 각 검증(또는 학습) 윈도우의 마지막 입력 종가 y[t-1]들을 모은 1차원 벡터 (N,)
     horizon: H
     mode:
       - "price": persistence (내일도 오늘과 동일) -> 모든 h에 y[t-1] 반복
@@ -1116,12 +1116,26 @@ def regression_metrics(
         "MAPE (%)": float(mape), "SMAPE (%)": float(smape), "R2": float(r2)
     }}
 
+    # (선택) MASE는 스케일 일관성 맞춰 separate로 계산
+    if y_insample_for_mase is not None:
+        out["scaled"]["MASE"] = float(_mase(y_true, y_pred, y_insample=np.asarray(y_insample_for_mase), m=m))
+
     # restore if possible
     restored_true = restored_pred = None
 
-    if y_scaler is not None:
-        restored_true = y_scaler.inverse_transform(y_true)
-        restored_pred = y_scaler.inverse_transform(y_pred)
+    # --- restore to PRICE if possible (two-step) ---
+    if (y_scaler is not None) and (scaler is not None) and (n_features is not None) and (idx_close is not None):
+        # 1) y-스케일 → X-스케일
+        true_x = y_scaler.inverse_transform(y_true)   # (N,H)
+        pred_x = y_scaler.inverse_transform(y_pred)   # (N,H)
+
+        # 2) X-스케일 → 가격 (close만 채워 역변환)
+        # restored_true = inverse_close_from_scaled(true_x, scaler, n_features, idx_close)
+        # restored_pred = inverse_close_from_scaled(pred_x, scaler, n_features, idx_close)
+
+        # StandardScaler 전용 고속 버전
+        restored_true = inverse_close_matrix_fast(true_x, scaler, idx_close)
+        restored_pred = inverse_close_matrix_fast(pred_x,  scaler, idx_close)
 
     elif (scaler is not None) and (n_features is not None) and (idx_close is not None):
         def inv(part):
@@ -1208,13 +1222,15 @@ def pass_filter_v2(
         # === 추가 가드 ===
         require_naive_improve=True,
         naive_improve_min=0.05,  # 나이브 대비 ≥5% 개선
-        samples_min=30,          # 검증 샘플 최소 개수, 추후 50으로 수정
+        samples_min=50,          # 검증 샘플 최소 개수
         hitrate_min=None,        # 방향성 적중률 가드 (옵션, 예: 0.52)
-        ctx=None                 # (옵션) y_true/y_pred/y_naive 등 추가 컨텍스트
+        ctx=None,                # (옵션) y_true/y_pred/y_naive 등 추가 컨텍스트
 ):
     m = metrics["restored"] if (use_restored and "restored" in metrics) else metrics["scaled"]
     r2     = m["R2"]
     smape  = m["SMAPE (%)"]
+    print(f"    DEBUG >> R2: {r2:.2f} SMAPE: {smape:.2f}") # <- 디버깅
+    # print('    ctx["hitrate"]: ', ctx["hitrate"])
 
     # 0) 기본 컷
     if not np.isfinite(r2) or not np.isfinite(smape):
@@ -1225,6 +1241,7 @@ def pass_filter_v2(
     # 1) 나이브 대비 개선
     if require_naive_improve and ctx is not None and "smape_naive" in ctx:
         smape_naive = ctx["smape_naive"]
+        print(f'    smape_naive: {smape_naive * (1 - naive_improve_min):.2f}')
         if not np.isfinite(smape_naive):
             return False
         # smape가 작을수록 좋음 → (모델 smape) ≤ (나이브 smape)*(1 - 개선율)
@@ -1409,3 +1426,43 @@ def get_next_business_days():
     today_naive  = today_kst.tz_convert('Asia/Seoul').normalize().tz_localize(None)
 
     return bd_kst_naive[bd_kst_naive > today_naive][:3]
+
+# 사용안함
+def effective_trials_for_hitrate(y_true, y_pred, *, y_base=None, space="price", use_horizon=1, thr=None):
+    """
+    반환: (N_eff, mask)  # 그 지평에서 실제로 비교에 쓰인 시행 수
+    - thr: tiny-move 필터(가격 변화율 절대값이 thr 미만이면 제외). 예: 0.003 (0.3%)
+    """
+    import numpy as np
+    y_true = np.asarray(y_true, float)
+    y_pred = np.asarray(y_pred, float)
+    N, H = y_true.shape
+    h_idx = range(H) if use_horizon == "avg" else [int(use_horizon)-1]
+
+    def _mask_for_h(h):
+        if space == "price":
+            if y_base is None: raise ValueError("price space needs y_base")
+            # 변화율(참/예측) 계산해서 tiny-move 제거 옵션
+            if thr is not None:
+                chg_t = (y_true[:,h] - y_base) / y_base
+                chg_p = (y_pred[:,h] - y_base) / y_base
+                mask = np.isfinite(chg_t) & np.isfinite(chg_p) & (np.abs(chg_t) >= thr) & (np.abs(chg_p) >= thr)
+            else:
+                tgt = y_true[:,h] - y_base
+                est = y_pred[:,h] - y_base
+                mask = np.isfinite(tgt) & np.isfinite(est)
+        else:  # return space
+            if thr is not None:
+                mask = np.isfinite(y_true[:,h]) & np.isfinite(y_pred[:,h]) & (np.abs(y_true[:,h]) >= thr) & (np.abs(y_pred[:,h]) >= thr)
+            else:
+                mask = np.isfinite(y_true[:,h]) & np.isfinite(y_pred[:,h])
+        return mask
+
+    masks = [_mask_for_h(h) for h in h_idx]
+    N_eff = [int(m.sum()) for m in masks]
+    return (sum(N_eff)/len(N_eff) if use_horizon == "avg" else N_eff[0]), masks
+
+# 사용안함
+def min_sig_hitrate(N_eff, alpha=0.05):
+    z = 1.96 if alpha == 0.05 else 2.576  # 0.01
+    return 0.5 + z * 0.5 / max(N_eff, 1)**0.5
