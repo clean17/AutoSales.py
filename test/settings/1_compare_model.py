@@ -20,7 +20,7 @@ for parent in [here.parent, *here.parents]:
 else:
     raise FileNotFoundError("utils.py를 상위 디렉터리에서 찾지 못했습니다.")
 
-from utils import invert_scale
+from utils import inverse_close_from_scaled
 
 # 시드 고정 테스트
 import numpy as np, tensorflow as tf, random
@@ -167,8 +167,8 @@ history2 = model.fit(
 
 # 실제 값과 예측 값의 비교, 7 일치 평균 비교, 실제 값으로 복원
 predictions = model.predict(X_val)
-predictions_inv = invert_scale(predictions, scaler)
-Y_val_inv = invert_scale(Y_val, scaler)
+predictions_inv = inverse_close_from_scaled(predictions, scaler)
+Y_val_inv = inverse_close_from_scaled(Y_val, scaler)
 plt.figure(figsize=(10, 5))
 plt.title(f'{ticker} Stock Price Prediction')
 plt.plot(Y_val_inv.mean(axis=1), label='Actual Mean')

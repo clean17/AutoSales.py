@@ -49,6 +49,7 @@ pickle_dir = os.path.join(ROOT_DIR, 'pickle')
 # 데이터 수집
 # tickers = ['006490', '042670', '023160', '006800', '323410', '009540', '034020', '358570', '000155', '035720', '00680K', '035420', '012510']
 # tickers = ['MNKD', 'ESPR', 'ALKS', 'LASR', 'TLRY', 'TSLA', 'SNDL', 'INSG', 'SABR', 'TBPH', 'VFF', 'AVDL', 'EVLV']
+
 tickers_dict = get_kor_ticker_dict_list()
 tickers = list(tickers_dict.keys())
 
@@ -103,24 +104,12 @@ for i in range(1):
 
         # 학습에 쓸 피처
         feature_cols = [
-            col_o, col_l, col_h, col_c,
-            'Vol_logdiff',
-            'ma10_gap',
-            'MA5_slope',
+            col_o, col_l, col_h, col_c, 'Vol_logdiff',
+            # 'RSI14',
         ]
-        # col_o, col_l, col_h, col_c, Vol_logdiff, ma10_gap, MA5_slope
-        # 0) NaN/inf 정리
-        data = data.replace([np.inf, -np.inf], np.nan)
-
-        # 1) feature_cols만 남기고, 그 안에서만 dropna
-        feature_cols = [c for c in feature_cols if c in data.columns]
-        X_df = data.dropna(subset=feature_cols).loc[:, feature_cols]
-
-        # (선택) 상수열 제거: 스케일링/학습 안정화
-        const_cols = [c for c in X_df.columns if X_df[c].nunique() <= 1]
-        if const_cols:
-            X_df = X_df.drop(columns=const_cols)
-            feature_cols = [c for c in feature_cols if c not in const_cols]
+        cols = [c for c in feature_cols if c in data.columns]  # 순서 보존
+        df = data.loc[:, cols].replace([np.inf, -np.inf], np.nan)
+        X_df = df.dropna()
 
         # 2) 시계열 분리 후, train으로만 fit → val은 transform만
         split = int(len(X_df) * 0.9)

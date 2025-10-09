@@ -21,6 +21,8 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score, roc_auc_score, precision_recall_curve, \
     f1_score
+import warnings
+import pandas_market_calendars as mcal
 
 # 시드 고정
 import numpy as np, tensorflow as tf, random
@@ -28,7 +30,7 @@ np.random.seed(42)
 tf.random.set_seed(42)
 random.seed(42)
 
-
+# ----- 그래프 렌더링에 사용되는 상수들 -----
 RED = "#E83030"
 BLUE = "#195DE6"
 ORANGE = '#FF9F1C'
@@ -43,14 +45,142 @@ def _col(df, ko: str, en: str):
     if ko in df.columns: return ko
     return en
 
+# 지수 가중 이동평균(EMA) 계열을 pandas로 계산하는 래퍼
 def _ema(s: pd.Series, span: int) -> pd.Series:
+    """
+    EMA: α=2/(span+1) → 최신값 가중이 더 큼 → 빠른 반응.
+    EMA: 단기 추세/크로스 등 빠른 신호에 유리.
+    """
     return s.ewm(span=span, adjust=False).mean()
 
 def _rma(s: pd.Series, length: int) -> pd.Series:
-    # Wilder's moving average
+    """
+    RMA(Wilder): α=1/length → 더 완만한 평활 → 지연(lag) 더 큼.
+    RMA: RSI의 평균(상승/하락) 계산 등 Wilder 방식 필요할 때 정확한 매칭.
+    """
     alpha = 1 / length
     return s.ewm(alpha=alpha, adjust=False).mean()
 
+
+
+
+def rmse(a,b):
+    a = np.asarray(a); b = np.asarray(b)
+    return float(np.sqrt(np.mean((a-b)**2)))
+
+def improve(m, n, eps=1e-8):
+    n = max(float(n), eps)     # 분모 하한
+    return (1.0 - m/n) * 100.0
+
+# (N, H) 형태로
+def _to_2d(a):
+    a = np.array(a)
+    return a if a.ndim == 2 else a.reshape(-1, 1)
+
+def _smape(y_true, y_pred, eps=1e-8):
+    y_true = np.array(y_true, dtype=float)
+    y_pred = np.array(y_pred, dtype=float)
+    denom = (np.abs(y_true) + np.abs(y_pred)) + eps
+    return 100.0 * np.mean(2.0 * np.abs(y_pred - y_true) / denom)
+
+def smape(y_true, y_pred, eps=1e-12):
+    """
+    y_true, y_pred: (N, H) 또는 (N,) 형태도 허용
+    결측/무한값 제외 후 평균
+    """
+    y_true = np.asarray(y_true, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float)
+    num = np.abs(y_pred - y_true)
+    den = (np.abs(y_true) + np.abs(y_pred)).clip(min=eps)
+    smape = 200.0 * num / den  # %
+    mask = np.isfinite(smape)
+    if not np.any(mask):
+        return np.nan
+    return np.mean(smape[mask])
+
+def _mape(y_true, y_pred, eps=1e-8):
+    y_true = np.array(y_true, dtype=float)
+    y_pred = np.array(y_pred, dtype=float)
+    denom = np.where(np.abs(y_true) < eps, eps, np.abs(y_true))
+    return 100.0 * np.mean(np.abs((y_true - y_pred) / denom))
+
+def _mase(y_true, y_pred, y_insample, m: int = 1, eps: float = 1e-12):
+    """
+    y_true, y_pred : 평가 구간(검증/테스트)의 실제값과 예측값 (1D 또는 2D 가능)
+    y_insample     : 분모 계산용 '훈련(in-sample) 구간'의 실제값(1D)
+    m              : 계절 주기(비계절은 1)
+    """
+    y_true = np.asarray(y_true).reshape(-1)
+    y_pred = np.asarray(y_pred).reshape(-1)
+    y_insample = np.asarray(y_insample).reshape(-1)
+
+    # 분모: in-sample의 계절 차분 기반 MAE
+    if len(y_insample) <= m:
+        return np.nan
+    denom = np.mean(np.abs(y_insample[m:] - y_insample[:-m]))
+    denom = max(denom, eps)
+
+    return np.mean(np.abs(y_true - y_pred)) / denom
+
+def nrmse(y, yhat, eps=1e-8):
+    return float(np.sqrt(np.mean((np.asarray(yhat)-np.asarray(y))**2)) / (np.mean(np.abs(y))+eps))
+
+
+# --- 2) 유틸: naive 생성 ---
+def make_naive_preds(y_hist_end, horizon, mode="price"):
+    """
+    y_hist_end: (N,) 각 윈도우의 마지막 실제값 y[t-1]
+    horizon: H
+    mode:
+      - "price": persistence (내일도 오늘과 동일) -> 모든 h에 y[t-1] 반복
+      - "return": 0 수익률(변화없음) 가정 -> 모든 h에 0
+    return: (N, H)
+    """
+    y_hist_end = np.asarray(y_hist_end, dtype=float).reshape(-1, 1)
+    if mode == "price":
+        return np.repeat(y_hist_end, repeats=horizon, axis=1)
+    elif mode == "return":
+        return np.zeros((y_hist_end.shape[0], horizon), dtype=float)
+    else:
+        raise ValueError("mode must be 'price' or 'return'")
+
+# --- 3) 유틸: hit-rate (방향 적중률) ---
+def hit_rate(y_true, y_pred, *, y_base=None, use_horizon=1, space="price"):
+    """
+    y_true, y_pred: (N, H)
+    y_base: (N,) 가격공간에서 방향을 볼 때 기준값(y[t-1]) 필요
+    use_horizon: 정수 h(1-based) 또는 "avg" (모든 h 평균)
+    space:
+      - "price": 방향 = sign( y_true[:,h-1]-y_base ) vs sign( y_pred[:,h-1]-y_base )
+      - "return": 방향 = sign( y_true[:,h-1] ) vs sign( y_pred[:,h-1] )
+    """
+    y_true = np.asarray(y_true, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float)
+    N, H = y_true.shape
+
+    def _one_h(h_idx):
+        if space == "price":
+            if y_base is None:
+                raise ValueError("price space hit-rate needs y_base (y_hist_end).")
+            tgt = np.sign(y_true[:, h_idx] - y_base)
+            est = np.sign(y_pred[:, h_idx] - y_base)
+        else:  # return space
+            tgt = np.sign(y_true[:, h_idx])
+            est = np.sign(y_pred[:, h_idx])
+        mask = np.isfinite(tgt) & np.isfinite(est)
+        if not np.any(mask):
+            return np.nan
+        return np.mean((tgt[mask] == est[mask]).astype(float))
+
+    if use_horizon == "avg":
+        vals = []
+        for h in range(H):
+            vals.append(_one_h(h))
+        vals = np.array(vals, dtype=float)
+        return float(np.nanmean(vals)) if np.any(np.isfinite(vals)) else np.nan
+    else:
+        h_idx = int(use_horizon) - 1
+        return _one_h(h_idx)
 
 
 
@@ -112,8 +242,8 @@ def compute_roc(close, length=12, pct=True):
 
 
 
+# 거래정지/이상치 행 제거
 def drop_trading_halt_rows(data: pd.DataFrame):
-    """OHLCV 기준으로 거래정지/비정상 바를 제거한 DataFrame과 제거된 인덱스를 반환"""
     d = data.copy()
     d = d.replace([np.inf, -np.inf], np.nan)
 
@@ -138,12 +268,44 @@ def drop_trading_halt_rows(data: pd.DataFrame):
 
     return d.loc[valid].copy(), removed_idx
 
+
+def get_safe_ticker_list(market="KOSPI"):
+    def fetch_tickers_for_date(date):
+        try:
+            tickers = stock.get_market_ticker_list(market=market, date=date)
+            # 데이터가 비어 있다면 예외를 발생시킴
+            if not tickers:
+                raise ValueError("Ticker list is empty")
+            return tickers
+        except (IndexError, ValueError) as e:
+            return []
+
+    # 현재 날짜로 시도
+    today = datetime.now().strftime("%Y%m%d")
+    tickers = fetch_tickers_for_date(today)
+
+    # 첫 번째 시도가 실패한 경우 과거 날짜로 반복 시도
+    if not tickers:
+        print("데이터가 비어 있습니다. 가장 가까운 영업일로 재시도합니다.")
+        for days_back in range(1, 7):
+            previous_day = (datetime.now() - timedelta(days=days_back)).strftime("%Y%m%d")
+            tickers = fetch_tickers_for_date(previous_day)
+            if tickers:  # 성공적으로 데이터를 가져오면 반환
+                return tickers
+
+        print("영업일 데이터를 찾을 수 없습니다.")
+        return []
+
+    return tickers
+
+# pykrx에 종목 리스트를 요청; 과도한 요청 시 IP차단 당한다
 def get_kor_ticker_list_by_pykrx():
     tickers_kospi = get_safe_ticker_list(market="KOSPI")
     tickers_kosdaq = get_safe_ticker_list(market="KOSDAQ")
     tickers = tickers_kospi + tickers_kosdaq
     return tickers
 
+# DB에 저장해놨던 종목 리스트 조회
 def get_kor_ticker_list():
     # tickers_kospi = get_safe_ticker_list(market="KOSPI")
     # tickers_kosdaq = get_safe_ticker_list(market="KOSDAQ")
@@ -179,34 +341,7 @@ def get_kor_interest_ticker_dick_list():
         if "stock_code" in item and "stock_name" in item
     }
 
-def get_safe_ticker_list(market="KOSPI"):
-    def fetch_tickers_for_date(date):
-        try:
-            tickers = stock.get_market_ticker_list(market=market, date=date)
-            # 데이터가 비어 있다면 예외를 발생시킴
-            if not tickers:
-                raise ValueError("Ticker list is empty")
-            return tickers
-        except (IndexError, ValueError) as e:
-            return []
 
-    # 현재 날짜로 시도
-    today = datetime.now().strftime("%Y%m%d")
-    tickers = fetch_tickers_for_date(today)
-
-    # 첫 번째 시도가 실패한 경우 과거 날짜로 반복 시도
-    if not tickers:
-        print("데이터가 비어 있습니다. 가장 가까운 영업일로 재시도합니다.")
-        for days_back in range(1, 7):
-            previous_day = (datetime.now() - timedelta(days=days_back)).strftime("%Y%m%d")
-            tickers = fetch_tickers_for_date(previous_day)
-            if tickers:  # 성공적으로 데이터를 가져오면 반환
-                return tickers
-
-        print("영업일 데이터를 찾을 수 없습니다.")
-        return []
-
-    return tickers
 
 def get_nasdaq_symbols():
     url = "https://api.nasdaq.com/api/screener/stocks?tableonly=true&exchange=NASDAQ&limit=0"
@@ -313,14 +448,15 @@ def fetch_stock_data_us(ticker, fromdate, todate):
 
 
 
-def create_dataset(dataset, look_back=30, idx=3):
-    X, Y = [], []
-    if len(dataset) < look_back:
-        return np.array(X), np.array(Y)  # 빈 배열 반환
-    for i in range(len(dataset) - look_back):
-        X.append(dataset[i:i+look_back, :])
-        Y.append(dataset[i+look_back, idx])  # 종가(Close) 예측
-    return np.array(X), np.array(Y)
+# def create_dataset(dataset, look_back=30, idx=3):
+#     X, Y = [], []
+#     if len(dataset) < look_back:
+#         return np.array(X), np.array(Y)  # 빈 배열 반환
+#     for i in range(len(dataset) - look_back):
+#         X.append(dataset[i:i+look_back, :])
+#         Y.append(dataset[i+look_back, idx])  # 종가(Close) 예측
+#     return np.array(X), np.array(Y)
+
 
 # 시계열 데이터에서 딥러닝 모델 학습용 X, Y(입력, 정답) 세트를 만드는 전형적인 패턴
 '''
@@ -360,7 +496,7 @@ input_shape = (LOOK_BACK, N_FEATURES)
 def create_lstm_model(input_shape, n_future,
                       lstm_units=[64, 32], dropout=0.2,
                       dense_units=[16, 8],
-                      lr=5e-4, delta=1.0):
+                      lr=5e-4, loss=None, delta=1.0):
     """
     input_shape: (look_back, n_features)
     n_future: 예측할 horizon 개수
@@ -389,24 +525,24 @@ def create_lstm_model(input_shape, n_future,
 
     model.add(Dense(n_future))
     # model.compile(optimizer='adam', loss='mean_squared_error')
-    model.compile(optimizer=Adam(lr), loss=Huber(delta=delta))
+    if loss is None:
+        # 기본은 표준 Huber(delta=스칼라)
+        loss = tf.keras.losses.Huber(delta=delta)
+    model.compile(optimizer=Adam(lr), loss=loss)
     return model
 
 
 def create_model(input_shape, n_future):
     model = Sequential([
         LSTM(32, return_sequences=True, input_shape=(input_shape)),
-        Dropout(0.2),
         LSTM(16, return_sequences=False),
-        Dropout(0.2),
         Dense(16, activation='relu'),
-        Dense(8, activation='relu'),
         Dense(n_future)
     ])
     model.compile(optimizer='adam', loss='mean_squared_error')
     return model
 
-
+# 생성된 그래프중에서 해당 날짜의 국장 종목코드만 긁어오는 함수
 def extract_numbers_from_filenames(directory, isToday):
     numbers = []
     today = datetime.today().strftime('%Y%m%d')
@@ -442,6 +578,7 @@ def extract_stock_code_from_filenames(directory):
 
     return stock_codes
 
+# 네이버에서 실시간 원달러 환율을 가져오는 함수
 def get_usd_krw_rate():
     url="https://m.search.naver.com/p/csearch/content/qapirender.nhn?key=calculator&pkid=141&q=%ED%99%98%EC%9C%A8&where=m&u1=keb&u6=standardUnit&u7=0&u3=USD&u4=KRW&u8=down&u2=1"
     response = requests.get(url)
@@ -455,20 +592,41 @@ def get_usd_krw_rate():
     # 못 찾으면 None 반환
     return None
 
+
 # 예측 결과를 실제 값(주가)으로 복원
-def invert_scale(scaled_preds, scaler, feature_index=3):
+def inverse_close_from_scaled(scaled_2d, scaler, n_features, idx_close):
     """
-    scaled_preds: (샘플수, forecast_horizon) - 스케일된 종가 예측 결과
-    scaler: 학습에 사용된 MinMaxScaler 객체
-    feature_index: 종가 컬럼 인덱스(보통 3)
+    scaled_2d: (N,H) 또는 (1,H) 형태의 '스케일된 종가'들
+    스케일러 종류와 무관하게(standard/minmax/robust) 안전하게 역변환
     """
-    inv_preds = []
-    for row in scaled_preds:
-        temp = np.zeros((len(row), scaler.n_features_in_))
-        temp[:, feature_index] = row  # 종가 위치에 예측값 할당
-        inv = scaler.inverse_transform(temp)[:, feature_index]  # 역변환 후 종가만 추출
-        inv_preds.append(inv)
-    return np.array(inv_preds)
+    arr = np.atleast_2d(np.asarray(scaled_2d, float))
+    N, H = arr.shape
+    outs = []
+    for h in range(H):
+        dummy = np.zeros((N, n_features), float)
+        dummy[:, idx_close] = arr[:, h]
+        inv_full = scaler.inverse_transform(dummy)
+        outs.append(inv_full[:, idx_close])
+    return np.column_stack(outs)  # (N,H)
+
+# ---- StandardScaler만 사용한다면 ----
+def inverse_close_matrix_fast(Y_xscale, scaler_X, idx_close):
+    """
+    Y_xscale: (N, H) 형태의 스케일된 종가 행렬... y종가를 X스케일링 한 것
+    scaler_X: StandardScaler 객체 (X에 대해 fit된 것)
+    :return: 원 단위 종가 1D 벡터 반환
+    """
+    return Y_xscale * scaler_X.scale_[idx_close] + scaler_X.mean_[idx_close]
+
+def inverse_close_from_Xscale_fast(close_scaled_1d, scaler_X, idx_close):
+    """
+    close_scaled_1d: (N,) 또는 (H,) 형태의 스케일된 종가 벡터
+    :return: 원 단위 종가 1D 벡터 반환
+    """
+    return close_scaled_1d * scaler_X.scale_[idx_close] + scaler_X.mean_[idx_close]
+# -----------------------------------
+
+
 
 
 """
@@ -478,12 +636,9 @@ def invert_scale(scaled_preds, scaler, feature_index=3):
   MACD·ADX·ROC 같이 추세 지표가 긍정적일 때 신뢰성 높음
   RSI나 STOCH이 중립이거나 과매수 직전일 때 진입 타이밍 좋음
   
-진입(매수): MACD ↑, ADX > 25, ROC 양수, CCI +100 돌파
-  
-보유: MACD·ADX 유지, Ultimate Oscillator 50 이상, ATR 안정
-  
+진입(매수): MACD ↑, ADX > 25, ROC 양수, CCI +100 돌파  
+보유: MACD·ADX 유지, Ultimate Oscillator 50 이상, ATR 안정  
 매도: MACD 하락, ADX 25 이하, CCI·Ultimate Oscillator 꺾임
-
 
 
 추세·모멘텀·변동성” 요약 피처
@@ -505,6 +660,9 @@ def add_technical_features(data, window=20, num_std=2):
     col_v = _col(data, '거래량', 'Volume')
 
     o, h, l, c, v = data[col_o], data[col_h], data[col_l], data[col_c], data[col_v]
+
+    # 1) 타깃(로그수익률)
+    ret1  = np.log(c).diff()
 
     """
     RSI(14) — 상대강도지수 (Relative Strength Index)
@@ -623,13 +781,13 @@ def add_technical_features(data, window=20, num_std=2):
 
     return data
 
-
+# columns 각각에 대해 객체의 파이썬 타입과 shape를 출력
 def check_column_types(data, columns):
     for col in columns:
         print(f"[{col}] type: {type(data[col])}, shape: {data[col].shape}")
 
 
-
+# 미장 한글 종목명 요청
 def get_name_from_usa_ticker(ticker: str) -> Optional[str]:
     TOSSINVEST_API_URL = "https://wts-info-api.tossinvest.com/api/v3/search-all/wts-auto-complete"
 
@@ -678,7 +836,7 @@ def get_name_from_usa_ticker(ticker: str) -> Optional[str]:
 
 
 
-
+# 일봉 캔들 차트
 def plot_candles_daily(
         data: pd.DataFrame,
         show_months: int = 5,
@@ -786,6 +944,7 @@ def plot_candles_daily(
 
     return fig, ax_price, ax_volume
 
+# 주봉 캔들 차트
 def plot_candles_weekly(
         data: pd.DataFrame,
         show_months: int = 12,
@@ -889,70 +1048,67 @@ def plot_candles_weekly(
 
     return fig, ax_price, ax_volume
 
-# def regression_metrics(y_true, y_pred):
-#     # numpy array 변환
-#     y_true = np.array(y_true)
-#     y_pred = np.array(y_pred)
-#
-#     # MSE, RMSE, MAE
-#     mse = mean_squared_error(y_true, y_pred)
-#     rmse = np.sqrt(mse)
-#     mae = mean_absolute_error(y_true, y_pred)
-#
-#     # MAPE (0 division 방지)
-#     mape = np.mean(np.abs((y_true - y_pred) / np.where(y_true == 0, 1, y_true))) * 100
-#
-#     # SMAPE
-#     smape = 100 * np.mean(
-#         2.0 * np.abs(y_pred - y_true) / (np.abs(y_true) + np.abs(y_pred) + 1e-8)
-#     )
-#
-#     # R²
-#     r2 = r2_score(y_true, y_pred)
-#
-#     return {
-#         "MSE": mse,
-#         "RMSE": rmse,
-#         "MAE": mae,
-#         "MAPE (%)": mape,
-#         "SMAPE (%)": smape,
-#         "R2": r2
-#     }
 
 
 
-def _to_2d(a):
-    a = np.array(a)
-    return a if a.ndim == 2 else a.reshape(-1, 1)
 
-def _smape(y_true, y_pred, eps=1e-8):
-    y_true = np.array(y_true, dtype=float)
-    y_pred = np.array(y_pred, dtype=float)
-    denom = (np.abs(y_true) + np.abs(y_pred)) + eps
-    return 100.0 * np.mean(2.0 * np.abs(y_pred - y_true) / denom)
 
-def _mape(y_true, y_pred, eps=1e-8):
-    y_true = np.array(y_true, dtype=float)
-    y_pred = np.array(y_pred, dtype=float)
-    denom = np.where(np.abs(y_true) < eps, eps, np.abs(y_true))
-    return 100.0 * np.mean(np.abs((y_true - y_pred) / denom))
+
+
+# 로그수익률을 원 단위로 복원
+def prices_from_logrets(base_close_1d, logrets_2d):
+    base_close_1d = np.asarray(base_close_1d, dtype=float)
+    logrets_2d    = np.asarray(logrets_2d, dtype=float)
+    if base_close_1d.ndim != 1 or logrets_2d.ndim != 2:
+        raise ValueError("shapes must be (N,), (N,H)")
+    if len(base_close_1d) != logrets_2d.shape[0]:
+        raise ValueError("N mismatch between base_close and logrets")
+    return base_close_1d[:, None] * np.exp(np.cumsum(logrets_2d, axis=1))
+
+# 로그수익률 시리즈 만들기
+def log_returns_from_prices(close_1d: np.ndarray) -> np.ndarray:
+    """
+    close_1d: (L,) 원본 종가
+    반환: (L-1,) g_1..g_{L-1},  g_t = log(C_t / C_{t-1})
+    """
+    return np.diff(np.log(close_1d))
+
+
+
+
 
 def regression_metrics(
-        y_true, y_pred, *,
+        y_true, y_pred, *,      # 정닶, 예측값
         y_scaler=None,          # 타깃 전용 스케일러가 있을 때 사용
         scaler=None,            # 전체 피처 스케일러(지금 케이스)
         n_features=None,
-        idx_close=None
+        idx_close=None,
+        y_insample_for_mase=None,  # ← 추가: MASE 분모용 원단위(또는 같은 스케일) 시계열 1D
+        m: int = 1                 # 계절 주기(없으면 1)
 ):
     y_true = _to_2d(y_true)
     y_pred = _to_2d(y_pred)
 
     # scaled-space
+    """
+    MSE / RMSE / MAE: 스케일 공간에서의 오차 크기
+      표준화(평균0, 표준편차1)라면 RMSE≈1 이면 평균적인 오차, 0.1이면 매우 작음
+      로그수익률 스케일이라면 “로그수익률 차이”의 크기
+    MAPE / SMAPE(%): 스케일 공간의 상대오차. (표준화 스케일에선 해석이 직관적이지 않을 수 있음)
+    R2: 스케일 공간에서의 결정계수. 1에 가까울수록 좋고, 0은 평균 예측과 비슷, 음수면 평균보다 못함
+    """
     mse  = mean_squared_error(y_true, y_pred)
     rmse = np.sqrt(mse)
     mae  = mean_absolute_error(y_true, y_pred)
+    # MAPE/SMAPE는 0 근처 값에 민감합니다(함수 내부에 eps 처리는 있지만 여전히 해석 주의)
     mape = _mape(y_true, y_pred)
     smape = _smape(y_true, y_pred)
+    # MASE는 insample 시계열이 있어야만 계산
+    if y_insample_for_mase is not None:
+        msae = _mase(y_true, y_pred, y_insample=np.asarray(y_insample_for_mase), m=m)
+    else:
+        msae = None
+    # r2는 y의 분산이 작거나 상수에 가까우면 의미가 희석될 수 있음
     r2   = r2_score(y_true, y_pred)
 
     out = {"scaled": {
@@ -988,6 +1144,14 @@ def regression_metrics(
         restored_pred = inv(y_pred)
 
     if restored_true is not None and restored_pred is not None:
+        """
+        MSE / RMSE / MAE: 원 단위(₩) 오차
+          예: RMSE=15,000원이면 1~3일 뒤 예측이 평균 1.5만원 정도 흔들린다는 감각
+        MAPE / SMAPE(%): 가격 기준 상대오차(%). 종목/시점 간 비교가 쉬워 실무에 유용
+          SMAPE는 0~200% 범위, 대칭적이라 극단값에 덜 민감
+        R2: 원 가격 기준의 설명력
+          0.5 이상이면 꽤 유의미, 0~0.3대면 예측이 쉽지 않거나 과소적합/데이터 한계 가능
+        """
         r_mse  = mean_squared_error(restored_true, restored_pred)
         r_rmse = np.sqrt(r_mse)
         r_mae  = mean_absolute_error(restored_true, restored_pred)
@@ -1002,13 +1166,82 @@ def regression_metrics(
 
     return out
 
+"""
+이 두 개만으로는 “나이브보다 낫다”/“과적합 아님”/“라벨 희소성 영향 없음”을 보장 못 한다
 
+왜 불충분한가
+  나이브 대비 우월성이 빠져있음 → 수준 미달 모델도 우연히 R² 0.6 넘을 수 있음
+  표본 수/라벨 분포 미검증 → 분산 큰 구간/희소 라벨에선 지표가 흔들립니다
+  시계열 검증 특수성(롤링/워크포워드) 미반영 → 단일 홀드아웃만 보면 낙관적
+  
+복원된(R², sMAPE) 는 “원 단위(가격)” 기준이라 실전 해석엔 꼭 필요
+  R²: 변동성 설명력. 0에 가까우면 평균값과 비슷, 음수면 평균보다 나쁨. 가격예측은 본질적으로 어려워서 0.1~0.3도 흔함
+  sMAPE: 상대오차(%)라 종목/구간 비교가 쉬움. 해석도 직관적.
+  하지만 이 둘만 보면 과적합/누수/스케일 편향을 놓칠 수 있다
+"""
 def pass_filter(metrics, use_restored=True, r2_min=0.6, smape_max=30.0, mape_max=50.0):
     m = metrics["restored"] if (use_restored and "restored" in metrics) else metrics["scaled"]
-    print("DEBUG >> R2:", m["R2"], "SMAPE:", m["SMAPE (%)"])  # <- 디버깅
+    m_r2 = m["R2"]
+    m_smape = m["SMAPE (%)"]
+    print(f"    DEBUG >> R2: {m_r2:.2f} SMAPE: {m_smape:.2f}") # <- 디버깅
     # return (m["R2"] >= r2_min) and (m["SMAPE (%)"] < smape_max) and (m["MAPE (%)"] < mape_max)
     return (m["R2"] >= r2_min) and (m["SMAPE (%)"] <= smape_max)
 
+"""
+나이브 비교(예: C_{t+h}=C_t)**가 가장 현실적인 기준
+
+복원 지표 (ALL / 각 h별):
+  sMAPE ≤ 8%, R² ≥ 0.1 (데이터/종목에 따라 0.0~0.2 범위로 조정)
+  RMSE_ratio ≤ 0.95 또는 sMAPE_ratio ≤ 0.95 (나이브 대비 ≥5% 개선)
+  HitRate@h ≥ 0.52 (방향성 약간이라도 우위)
+  
+강건성:
+  median sAPE와 P90 sAPE도 같이 보고, 허버 δ는 (타깃 표준편차 × 1~2) 근방으로 튜닝
+  
+이상치에 대비해 강건 지표/손실/클리핑도 함께 쓰도록
+"""
+def pass_filter_v2(
+        metrics, *,              # regression_metrics() 결과
+        use_restored=True,
+        r2_min=0.10,             # 보수적으로 시작 (원단위 R²은 높이기 어려움), 0.0부터 0.2까지 테스트
+        smape_max=8.0,           # 종목/호라이즌에 맞춰 튜닝
+        # === 추가 가드 ===
+        require_naive_improve=True,
+        naive_improve_min=0.05,  # 나이브 대비 ≥5% 개선
+        samples_min=30,          # 검증 샘플 최소 개수, 추후 50으로 수정
+        hitrate_min=None,        # 방향성 적중률 가드 (옵션, 예: 0.52)
+        ctx=None                 # (옵션) y_true/y_pred/y_naive 등 추가 컨텍스트
+):
+    m = metrics["restored"] if (use_restored and "restored" in metrics) else metrics["scaled"]
+    r2     = m["R2"]
+    smape  = m["SMAPE (%)"]
+
+    # 0) 기본 컷
+    if not np.isfinite(r2) or not np.isfinite(smape):
+        return False
+    if r2 < r2_min or smape > smape_max:
+        return False
+
+    # 1) 나이브 대비 개선
+    if require_naive_improve and ctx is not None and "smape_naive" in ctx:
+        smape_naive = ctx["smape_naive"]
+        if not np.isfinite(smape_naive):
+            return False
+        # smape가 작을수록 좋음 → (모델 smape) ≤ (나이브 smape)*(1 - 개선율)
+        if smape > smape_naive * (1 - naive_improve_min):
+            return False
+
+    # 2) 샘플 수 가드
+    if ctx is not None and "n_val" in ctx:
+        if ctx["n_val"] < samples_min:
+            return False
+
+    # 3) 방향성 가드(선택)
+    if hitrate_min is not None and ctx is not None and "hitrate" in ctx:
+        if ctx["hitrate"] < hitrate_min:
+            return False
+
+    return True
 
 
 # 5일선이 20일선 아래에서 근접하게 다가옴
@@ -1047,3 +1280,132 @@ def near_bull_cross_signal(df: pd.DataFrame,
 
     return bool(tight_now and delta_rise and slope_ok)
 
+
+########## 필터링 추가 ##########
+
+
+def _best_f1_threshold(y_true, scores):
+    # 여러 컷을 훑어서 F1 최대가 되는 threshold 선택
+    prec, rec, ths = precision_recall_curve(y_true, scores)
+    f1s = 2*prec*rec / (prec + rec + 1e-12)
+    if len(ths) == 0:
+        # 전부 한 클래스일 때 등
+        return 0.0, float(f1s.max() if len(f1s) else 0.0)
+    i = int(np.nanargmax(f1s))
+    th = ths[min(i, len(ths)-1)]
+    return float(th), float(f1s[i])
+
+def classify_metrics_from_price(preds_scaled, Y_val_scaled, X_val, *,
+                                scaler, n_features, idx_close,
+                                horizon_idx, thresh_ret=0.03):
+    import numpy as np
+    from sklearn.metrics import roc_auc_score
+
+    # --- 복원 ---
+    Yp = inverse_close_from_scaled(preds_scaled, scaler, n_features, idx_close)  # (N,H)
+    Yt = inverse_close_from_scaled(Y_val_scaled, scaler, n_features, idx_close)  # (N,H)
+    cur = inverse_close_from_scaled(X_val[:, -1, idx_close][:, None],
+                                    scaler, n_features, idx_close)[:, 0]
+
+    h = int(np.clip(horizon_idx, 0, Yp.shape[1]-1))
+    ret_true = Yt[:, h] / cur - 1.0
+    ret_pred = Yp[:, h] / cur - 1.0
+
+    y_true = (ret_true >= thresh_ret).astype(int)
+    scores = ret_pred.astype(float)
+
+    pos = int(y_true.sum()); neg = int(y_true.size - pos)
+    if pos == 0 or neg == 0:
+        return {
+            "AUC": np.nan, "F1@opt": 0.0, "th_opt": 0.0,
+            "y_true": y_true, "scores": scores,
+            "ret_true": ret_true, "ret_pred": ret_pred,
+            "single_class": True, "pos": pos, "neg": neg,
+        }
+
+    # --- 분류 지표 ---
+    auc = float(roc_auc_score(y_true, scores))
+    th_opt, f1_opt = _best_f1_threshold(y_true, scores)
+
+    return {
+        "AUC": auc, "F1@opt": float(f1_opt), "th_opt": float(th_opt),
+        "y_true": y_true, "scores": scores,
+        "ret_true": ret_true, "ret_pred": ret_pred,
+        "single_class": False, "pos": pos, "neg": neg,
+    }
+
+
+# def rolling_eval_3ahead(model, X_3d, Y_2d, y_hist_end, y_insample_for_mase):
+def rolling_eval_3ahead(preds, Y_2d, y_hist_end, y_insample_for_mase,
+                            *, scaler=None, n_features=None, idx_close=None):
+    """
+    Y_2d:  (N, 3)          # t+1, t+2, t+3의 실제값
+    y_hist_end: (N,)       # 각 윈도우의 마지막 실제값 y[t-1]
+    y_insample_for_mase: 1D, 훈련(in-sample) 구간의 실제값
+    """
+    y_pred = preds
+
+    # 2) (선택) 복원: scaler가 주어지면 세 값 모두 원가격으로 변환
+    if scaler is not None:
+        Y_2d = inverse_close_from_scaled(Y_2d,  scaler, n_features, idx_close)
+        y_pred = inverse_close_from_scaled(y_pred, scaler, n_features, idx_close)
+        y_hist_end = inverse_close_from_scaled(
+            y_hist_end.reshape(-1,1), scaler, n_features, idx_close
+        )[:,0]
+        # y_insample_for_mase도 원가격 1D로 전달되어야 함
+
+    # 3) 나이브 베이스라인
+    # 나이브: t+1..t+3 모두 y[t-1]로 고정
+    y_naive = np.repeat(y_hist_end.reshape(-1,1), y_pred.shape[1], axis=1)
+    def _metrics(y_t, y_p):
+        mse  = mean_squared_error(y_t.reshape(-1), y_p.reshape(-1))
+        rmse = np.sqrt(mse)
+        mae  = mean_absolute_error(y_t, y_p)
+        mape = _mape(y_t, y_p)
+        smp  = _smape(y_t, y_p)          # 여기 값이 "원가격 기준"이 됨
+        r2   = r2_score(y_t.reshape(-1), y_p.reshape(-1))
+        ms   = _mase(y_t, y_p, y_insample=y_insample_for_mase, m=1)
+        return dict(MAE=mae, RMSE=rmse, R2=r2, sMAPE=smp, MAPE=mape, MASE=ms)
+
+    out = {"model": _metrics(Y_2d, y_pred), "naive": _metrics(Y_2d, y_naive)}
+    return out, (Y_2d, y_pred, y_naive)
+
+# 한국 영업일 가져오는 함수 (주말, 공휴일 제외)
+def get_next_business_days():
+    # (선택) pdc-market-calendars의 break 경고 억제
+    warnings.filterwarnings(
+        "ignore",
+        message=r"\['break_start', 'break_end'\] are discontinued",
+        category=UserWarning,
+        module="pandas_market_calendars"
+    )
+
+    # 1) 한국거래소 캘린더
+    cal = mcal.get_calendar('XKRX')
+
+    # (선택) 단종된 휴장 타임 명시 제거
+    if hasattr(cal, "remove_time"):
+        for t in ("break_start", "break_end"):
+            try:
+                cal.remove_time(t)
+            except Exception:
+                pass
+
+    # 2) 오늘(KST) 기준 스케줄 생성 구간
+    today_kst = pd.Timestamp.today(tz='Asia/Seoul').normalize()
+    start = today_kst - pd.Timedelta(days=14)
+    end   = today_kst + pd.Timedelta(days=14)
+
+    # 3) 스케줄(UTC 인덱스) → KST 변환
+    schedule = cal.schedule(start_date=start, end_date=end)
+    idx_utc = schedule.index
+    if idx_utc.tz is None:
+        idx_utc = idx_utc.tz_localize('UTC')
+    sessions_kst = idx_utc.tz_convert('Asia/Seoul')
+
+    # 4) 날짜(자정)로 정규화 + 타임존 제거 → 오늘 이후 3영업일
+    bd_kst_dates = sessions_kst.normalize()               # still tz-aware (KST, 00:00)
+    bd_kst_naive = bd_kst_dates.tz_localize(None)         # drop tz → tz-naive dates
+    today_naive  = today_kst.tz_convert('Asia/Seoul').normalize().tz_localize(None)
+
+    return bd_kst_naive[bd_kst_naive > today_naive][:3]

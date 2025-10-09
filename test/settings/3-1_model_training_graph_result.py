@@ -23,55 +23,10 @@ BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
 sys.path.append(BASE_DIR)
 pickle_dir = os.path.join(BASE_DIR, 'pickle')
 
-from utils import create_multistep_dataset, add_technical_features, create_lstm_model, drop_trading_halt_rows
+from utils import create_multistep_dataset, add_technical_features, create_lstm_model, drop_trading_halt_rows, \
+    inverse_close_from_Xscale_fast, inverse_close_matrix_fast, rmse, improve, smape, nrmse
 
 
-
-
-
-# 스케일된 ‘종가’만 원 단위로 역변환
-def inverse_close_matrix(Y_xscale: np.ndarray,
-                         scaler_X,
-                         n_features: int,
-                         idx_close: int) -> np.ndarray:
-    """
-    Y_xscale: (N, H)  # X-스케일의 '종가' 값들
-    scaler_X: X에 fit했던 StandardScaler
-    n_features: X의 피처 개수 (X_train.shape[2])
-    idx_close: 종가 컬럼 인덱스 (X의 피처 순서 기준)
-    반환: (N, H) 원 단위(가격)
-    """
-    N, H = Y_xscale.shape
-    Z = np.zeros((N*H, n_features), dtype=float)
-    Z[:, idx_close] = Y_xscale.reshape(-1)
-    raw = scaler_X.inverse_transform(Z)[:, idx_close]
-    return raw.reshape(N, H)
-
-# 스케일된 ‘종가’만 원 단위로 역변환
-def inverse_close_from_Xscale(close_scaled_1d, scaler_X, n_features, idx_close):
-    """
-    close_scaled_1d: (N,) — X-스케일의 종가
-    반환: (N,) — 원 단위 종가
-    """
-    Z = np.zeros((len(close_scaled_1d), n_features))
-    Z[:, idx_close] = close_scaled_1d
-    return scaler_X.inverse_transform(Z)[:, idx_close]
-
-# ===== RMSE/개선율 출력 =====
-def rmse(a,b):
-    a = np.asarray(a); b = np.asarray(b)
-    return float(np.sqrt(np.mean((a-b)**2)))
-def improve(m, n, eps=1e-8):
-    n = max(float(n), eps)     # 분모 하한
-    return (1.0 - m/n) * 100.0
-def smape(y, yhat, eps=1e-8):
-    y = np.asarray(y); yhat = np.asarray(yhat)
-    num = np.abs(yhat - y)
-    den = np.abs(yhat) + np.abs(y) + eps
-    return 200.0 * np.mean(num / den)
-
-def nrmse(y, yhat, eps=1e-8):
-    return float(np.sqrt(np.mean((np.asarray(yhat)-np.asarray(y))**2)) / (np.mean(np.abs(y))+eps))
 
 
 # 1. 데이터 수집
@@ -113,14 +68,6 @@ for count, ticker in enumerate(tickers):
         print("Drop candidates:", cols_to_drop)
 
 
-    # 25.10.05
-    """
-    '시가', '고가', '저가', '종가', 'Vol_logdiff',
-    또는
-    '시가', '고가', '저가', '종가', 'Vol_logdiff', 'RSI14'
-    설정이 가장 좋은 예측
-    2가지 예측을 돌려서 더 좋은거 선택 ? 시간이 오래 걸리나 ?
-    """
     # ---- 전처리: NaN/inf 제거 및 피처 선택 ----
     feature_cols = [
         '시가', '고가', '저가', '종가', 'Vol_logdiff',
@@ -220,8 +167,8 @@ for count, ticker in enumerate(tickers):
         va_pred_x = scaler_y.inverse_transform(va_pred_s)
 
         # X-스케일 -> 원 단위(종가만 역변환)
-        tr_pred_p = inverse_close_matrix(tr_pred_x, scaler_X, n_features, idx_close)  # (N_tr, H)
-        va_pred_p = inverse_close_matrix(va_pred_x, scaler_X, n_features, idx_close)  # (N_va, H)
+        tr_pred_p = inverse_close_matrix_fast(tr_pred_x, scaler_X, idx_close)  # (N_tr, H)
+        va_pred_p = inverse_close_matrix_fast(va_pred_x, scaler_X, idx_close)  # (N_va, H)
 
         best_val = min(history.history.get('val_loss', [float('inf')]))
         results[name] = {
@@ -236,17 +183,16 @@ for count, ticker in enumerate(tickers):
 
     # ===== 최고 모델 선택 =====
     best_name = min(results.keys(), key=lambda k: results[k]["best_val"])
-    best_model = results[best_name]["model"]
-    print(f"\n[Best] {best_name} (val_loss={results[best_name]['best_val']:.6f})")
+    # print(f"\n[Best] {best_name} (val_loss={results[best_name]['best_val']:.6f})")
 
     # 실제 정답(원 단위)도 준비 (이미 위에서 계산했으면 재사용)
-    y_train_price = inverse_close_matrix(Y_train, scaler_X, n_features, idx_close)
-    y_val_price   = inverse_close_matrix(Y_val,   scaler_X, n_features, idx_close)
+    y_train_price = inverse_close_matrix_fast(Y_train, scaler_X, idx_close)
+    y_val_price   = inverse_close_matrix_fast(Y_val,   scaler_X, idx_close)
 
     # ====== 평가 세트용 앵커(기준가격 C_t) ======
     n_features = X_train.shape[2]
     base_close_val_scaled = X_val[:, -1, idx_close]
-    base_close_val = inverse_close_from_Xscale(base_close_val_scaled, scaler_X, n_features, idx_close)
+    base_close_val = inverse_close_from_Xscale_fast(base_close_val_scaled, scaler_X, idx_close)
 
     # ====== 나이브 베이스라인 (C_{t+h} = C_t) ======
     naive_val = np.repeat(base_close_val[:, None], N_FUTURE, axis=1)

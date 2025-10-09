@@ -211,7 +211,7 @@ for count, ticker in enumerate(tickers):
         #     "dense_units": [32, 16],
         #     "lr": 5e-4,
         #     "loss": loss_fn,
-        #     "delta": ""
+        #     "delta": 1.0
         # },
         "Y_LSTM64": {  # 채택.. 가장 안정적이고 평균 성능이 좋음
             "lstm_units": [64, 32],
