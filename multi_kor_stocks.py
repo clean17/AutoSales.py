@@ -1,3 +1,11 @@
+# Could not load dynamic library 'cudart64_110.dll'; dlerror: cudart64_110.dll not found / Skipping registering GPU devices... 안나오게
+import os
+# 1) GPU 완전 비활성화
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+# 2) C++ 백엔드 로그 레벨 낮추기 (0=INFO, 1=WARNING, 2=ERROR, 3=FATAL)
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+
+
 import matplotlib
 matplotlib.use('Agg')
 import os, sys
@@ -7,7 +15,8 @@ from sklearn.preprocessing import StandardScaler, MinMaxScaler
 import matplotlib.pyplot as plt
 from utils import create_lstm_model, create_multistep_dataset, fetch_stock_data, add_technical_features, \
     get_kor_ticker_dict_list, plot_candles_daily, plot_candles_weekly, drop_trading_halt_rows, regression_metrics, \
-    pass_filter, inverse_close_matrix_fast, get_next_business_days
+    pass_filter, inverse_close_matrix_fast, get_next_business_days, make_naive_preds, hit_rate, smape, \
+    pass_filter_v2
 import requests
 import time
 
@@ -364,7 +373,74 @@ for count, ticker in enumerate(tickers):
     #     for k,v in metrics["restored"].items():
     #         print(f"    {k}: {v:.4f}")
 
-    ok = pass_filter(metrics, use_restored=True, r2_min=0.1, smape_max=8.0)  # 원 단위 기준으로 필터, SMAPE 30으로 필터링하려면 무조건 restored 값으로
+
+    # ======================
+    # 여기가 실제 사용 예
+    # 전제:
+    #   Y_val      : (N, H)  검증 실제값 (복원된 가격 또는 수익률)
+    #   y_hist_end : (N,)    각 윈도우 마지막 실제값 (가격공간일 때 필요)
+    #   y_pred_val : (N, H)  모델 예측 (있으면 hitrate 계산에 사용)
+    #   use_restored=True라면 price space로 본다고 가정
+    # ======================
+
+
+    # 나이브: 먼저 X스케일에서 퍼시스턴스 행렬을 만들고 → 가격으로 복원
+    y_hist_end_x = X_val[:, -1, idx_close]                  # (N,)  X-스케일
+    H = Y_val.shape[1] if Y_val.ndim == 2 else 1
+    y_naive_x = make_naive_preds(y_hist_end_x, horizon=H, mode="price")  # (N,H) X-스케일
+
+    # 가격으로 복원
+    Y_val_x = scaler_y.inverse_transform(y_test_scaled)     # (N,H)  y-스케일 -> X-스케일
+    Y_val_price  = inverse_close_matrix_fast(Y_val_x,  scaler_X, idx_close)
+    y_naive_price= inverse_close_matrix_fast(y_naive_x, scaler_X, idx_close)
+
+    # # 3) hit-rate (옵션) — 모델 예측이 있을 때만
+    # try:
+    #     # 4) (옵션) hit-rate도 가격공간 기준이면 베이스도 가격으로
+    #     y_hist_end_price = inverse_close_from_Xscale_fast(y_hist_end_x, scaler_X, idx_close)
+    #     hitrate_val = hit_rate(
+    #         Y_val_price, pred_price,
+    #         y_base=y_hist_end_price,
+    #         # use_horizon=1,   # h=1 기준; 전체 평균 쓰려면 "avg"
+    #         use_horizon="avg",   # h=1 기준; 전체 평균 쓰려면 "avg"
+    #         space="price"
+    #     )
+    # except NameError:
+    #     hitrate_val = None
+
+    # ctx 구성
+    ctx = {
+        "smape_naive": smape(Y_val_price, y_naive_price),
+        "n_val": int(Y_val.shape[0] if Y_val.ndim == 2 else len(Y_val)),
+        "hitrate": None,
+    }
+
+    # ok = pass_filter(metrics, use_restored=True, r2_min=0.1, smape_max=8.0)  # 원 단위 기준으로 필터, SMAPE 30으로 필터링하려면 무조건 restored 값으로
+
+    # # 가격으로 복원 (N,)
+    # y_base_price = y_hist_end_x * scaler_X.scale_[idx_close] + scaler_X.mean_[idx_close]
+    #
+    # # 1) 유효 시행 수(필요시 tiny-move 필터 포함) 계산
+    # N_eff, _ = effective_trials_for_hitrate(
+    #     Y_val_price, pred_price, y_base=y_base_price,
+    #     space="price", use_horizon=1, thr=0.003
+    # )
+    #
+    # # 2) 유의수준(기본 5%)에 맞는 동적 임계치 계산
+    # cut = min_sig_hitrate(N_eff, alpha=0.05)  # 예: N_eff=200이면 cut≈0.569
+    #
+    # # 3) 필터에 적용
+    # # 고정 파라미터와 동적 컷을 함께 쓰고 싶다면 max()로 보수적으로:
+    # dynamic_hitrate_min = cut
+
+    ok = pass_filter_v2(
+        metrics, use_restored=True,
+        r2_min=0.10, smape_max=10.0,
+        require_naive_improve=True,
+        naive_improve_min=0.05,
+        samples_min=30,
+        ctx=ctx
+    )
     # print("                                                        PASS 1st filter?" , ok)
     if not ok:
         continue
@@ -395,10 +471,10 @@ for count, ticker in enumerate(tickers):
     # print('future_dates', future_dates)
     last_close = X_df[col_c].iloc[-1]
     avg_future_return = (predicted_prices.mean() / last_close - 1.0) * 100
+    print(f"  예상 : {avg_future_return:.2f}%")
 
     # 기대 성장률 미만이면 건너뜀
     if avg_future_return < EXPECTED_GROWTH_RATE and avg_future_return < 20:
-        print(f"  예상 : {avg_future_return:.2f}%")
         # if avg_future_return > 0:
         #     print(f"  예상 : {avg_future_return:.2f}%")
         continue

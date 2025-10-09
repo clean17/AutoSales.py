@@ -28,15 +28,13 @@ os.makedirs(output_dir, exist_ok=True)
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
 root_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(=루트)
 pickle_dir = os.path.join(root_dir, 'pickle_us')
-
-# pickle 폴더가 없으면 자동 생성 (이미 있으면 무시)
-os.makedirs(pickle_dir, exist_ok=True)
+os.makedirs(pickle_dir, exist_ok=True) # 없으면 생성
 
 
 
 PREDICTION_PERIOD = 3
 EXPECTED_GROWTH_RATE = 4
-DATA_COLLECTION_PERIOD = 400
+DATA_COLLECTION_PERIOD = 700
 LOOK_BACK = 15
 KR_AVERAGE_TRADING_VALUE = 6_000_000_000
 
@@ -93,8 +91,8 @@ for count, ticker in enumerate(tickers):
         df = data.copy()
 
     # 너무 먼 과거 데이터 버리기, 처음 272개
-    if len(df) > 280:
-        df = df.iloc[-280:]
+    if len(df) > 500:
+        df = df.iloc[-500:]
 
     # 파일 저장
     df.to_pickle(filepath)
