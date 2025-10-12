@@ -1241,11 +1241,12 @@ def pass_filter_v2(
     # 1) 나이브 대비 개선
     if require_naive_improve and ctx is not None and "smape_naive" in ctx:
         smape_naive = ctx["smape_naive"]
-        print(f'    smape_naive: {smape_naive * (1 - naive_improve_min):.2f}')
+        print(f'    min smape_naive: {smape_naive * (1 - naive_improve_min):.2f}')
         if not np.isfinite(smape_naive):
             return False
         # smape가 작을수록 좋음 → (모델 smape) ≤ (나이브 smape)*(1 - 개선율)
-        if smape > smape_naive * (1 - naive_improve_min):
+        eps = 1e-9
+        if smape > smape_naive * (1 - naive_improve_min) + eps:
             return False
 
     # 2) 샘플 수 가드
