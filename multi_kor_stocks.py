@@ -15,8 +15,7 @@ from sklearn.preprocessing import StandardScaler, MinMaxScaler
 import matplotlib.pyplot as plt
 from utils import create_lstm_model, create_multistep_dataset, fetch_stock_data, add_technical_features, \
     get_kor_ticker_dict_list, plot_candles_daily, plot_candles_weekly, drop_trading_halt_rows, regression_metrics, \
-    pass_filter, inverse_close_matrix_fast, get_next_business_days, make_naive_preds, hit_rate, smape, \
-    pass_filter_v2
+    pass_filter, inverse_close_matrix_fast, get_next_business_days, make_naive_preds, smape, pass_filter_v2
 import requests
 import time
 
@@ -41,7 +40,7 @@ LOOK_BACK = 15
 AVERAGE_TRADING_VALUE = 4_000_000_000 # 평균거래대금 30억
 EXPECTED_GROWTH_RATE = 3
 DATA_COLLECTION_PERIOD = 700 # 샘플 수 = 68(100일 기준) - 20 - 4 + 1 = 45
-SPLIT      = 0.85
+SPLIT      = 0.82
 
 today = datetime.today().strftime('%Y%m%d')
 # today = (datetime.today() - timedelta(days=5)).strftime('%Y%m%d')
@@ -54,6 +53,7 @@ start_five_date = (datetime.today() - timedelta(days=5)).strftime('%Y%m%d')
 tickers_dict = get_kor_ticker_dict_list()
 tickers = list(tickers_dict.keys())
 # tickers = ['204620']
+# tickers = ['172670']
 
 def _col(df, ko: str, en: str):
     """한국/영문 칼럼 자동매핑: ko가 있으면 ko, 없으면 en을 반환"""
@@ -65,6 +65,7 @@ results = []
 total_r2 = 0
 total_cnt = 0
 total_smape = 0
+is_first_flag = True
 
 # print('==================================================')
 # print("    RMSE, MAE → 예측 오차를 주가 단위(원) 그대로 해석 가능")
@@ -293,9 +294,14 @@ for count, ticker in enumerate(tickers):
     X_train, Y_train = X_tmp[train_mask], Y_xscale[train_mask]
     X_val,   Y_val   = X_tmp[val_mask],   Y_xscale[val_mask]
 
-    # 4) 안전 체크
-    for name, arr in [('X_train',X_train),('Y_train',Y_train),('X_val',X_val),('Y_val',Y_val)]:
-        assert np.isfinite(arr).all(), f"{name} has NaN/inf: check preprocessing"
+    if is_first_flag:
+        is_first_flag = False
+        print('len(df)', len(df))
+        print("X_train", X_train.shape, "Y_train", Y_train.shape)
+        print("X_val  ", X_val.shape,   " Y_val  ", Y_val.shape)
+
+    X_val_tune, Y_val_tune = X_val[:-1], Y_val[:-1]    # 튜닝/early stopping 전용
+    X_last,     Y_last     = X_val[-1:], Y_val[-1:]    # 마지막 1개(예측 입력 전용; 정답은 개발 중엔 보지 않음)
 
     # 5) 최소 샘플 수 확인
     if X_train.shape[0] < 50:
@@ -304,7 +310,7 @@ for count, ticker in enumerate(tickers):
     # ---- y 스케일링: Train으로만 fit ---- (타깃이 수익률이면 생략 가능)
     scaler_y = StandardScaler().fit(Y_train)
     y_train_scaled = scaler_y.transform(Y_train)
-    y_test_scaled  = scaler_y.transform(Y_val)
+    y_val_tune_scaled = scaler_y.transform(Y_val_tune)
 
     #######################################################################
 
@@ -335,7 +341,7 @@ for count, ticker in enumerate(tickers):
     history = model.fit(
         X_train, y_train_scaled,
         batch_size=8, epochs=200, verbose=0, shuffle=False,
-        validation_data=(X_val, y_test_scaled),
+        validation_data=(X_val_tune, y_val_tune_scaled),
         callbacks=[early_stop, rlrop]
     )
 
@@ -345,13 +351,19 @@ for count, ticker in enumerate(tickers):
     # print("Validation Loss :", val_loss)
 
     # 예측 (y-스케일)
-    va_pred_s = model.predict(X_val, verbose=0)
+    va_pred_s = model.predict(X_val_tune, verbose=0)
+
+    # y-스케일 -> X-스케일
+    va_pred_x = scaler_y.inverse_transform(va_pred_s)
+
+    # X-스케일 -> 원 단위(종가만 역변환)
+    y_pred_price = inverse_close_matrix_fast(va_pred_x, scaler_X, idx_close)  # (N_val, H)
 
     #######################################################################
 
     # ++ 지표 계산: scaled + restored(원 단위)
     metrics = regression_metrics(
-        y_test_scaled, va_pred_s,
+        y_val_tune_scaled, va_pred_s,
         y_scaler=scaler_y,
         scaler=scaler_X,
         n_features=X_df.shape[1],
@@ -384,22 +396,99 @@ for count, ticker in enumerate(tickers):
     # ======================
 
 
-    # 나이브: 먼저 X스케일에서 퍼시스턴스 행렬을 만들고 → 가격으로 복원
-    y_hist_end_x = X_val[:, -1, idx_close]                  # (N,)  X-스케일
-    H = Y_val.shape[1] if Y_val.ndim == 2 else 1
-    y_naive_x = make_naive_preds(y_hist_end_x, horizon=H, mode="price")  # (N,H) X-스케일
+    # 2) 나이브: 먼저 X스케일에서 퍼시스턴스 행렬을 만들고 → 가격으로 복원
+    # (A) 튜닝/평가: 마지막 1개 제외한 Val에 대해서만 지표 산출
+    y_hist_end_x = X_val_tune[:, -1, idx_close]                  # (N,)  X-스케일
+    H = Y_val_tune.shape[1] if Y_val_tune.ndim == 2 else 1
+    y_naive_x = make_naive_preds(y_hist_end_x, horizon=H, mode="price")  # (N_tune, H) X-스케일 기준 naive
 
     # 가격으로 복원
-    Y_val_x = scaler_y.inverse_transform(y_test_scaled)     # (N,H)  y-스케일 -> X-스케일
-    Y_val_price  = inverse_close_matrix_fast(Y_val_x,  scaler_X, idx_close)
-    y_naive_price= inverse_close_matrix_fast(y_naive_x, scaler_X, idx_close)
+    Y_val_tune_x  = scaler_y.inverse_transform(y_val_tune_scaled)     # (N,H)  y-스케일 -> X-스케일
+    Y_val_tune_price = inverse_close_matrix_fast(Y_val_tune_x, scaler_X, idx_close)
+
+    # (선택) 예측도 가격으로 복원해서 hitrate 등에 쓰고 싶으면
+    # pred_x     = scaler_y.inverse_transform(va_pred_s)
+    # pred_price = inverse_close_matrix_fast(pred_x, scaler_X, idx_close)
+
+    y_naive_price = inverse_close_matrix_fast(y_naive_x, scaler_X, idx_close)
+
+    # 2) naive sMAPE
+    smape_naive = smape(Y_val_tune_price , y_naive_price)
+
+    # def smape_per_row(y_true, y_pred):
+    #     # y_true, y_pred: (N, H)  가격
+    #     num = np.abs(y_true - y_pred)
+    #     den = np.abs(y_true) + np.abs(y_pred)
+    #     row_smape = 200 * np.mean(num / np.maximum(den, 1e-12), axis=1)  # (N,)
+    #     return row_smape
+    #
+    # smape_val_row   = smape_per_row(Y_val_tune_price, y_pred_price)    # (N,)
+    # smape_naive_row = smape_per_row(Y_val_tune_price, y_naive_price)   # (N,)
+    #
+    # improve_row = 1.0 - (smape_val_row / smape_naive_row)         # (N,)
+    # print("mean improve:", improve_row.mean())
+    # print("median improve:", np.median(improve_row))
+    # print("pct better:", (improve_row > 0).mean() * 100, "%")
+    #
+    #
+    # def smape_per_h(y_true, y_pred):
+    #     # (N,H) -> (H,)
+    #     num = np.abs(y_true - y_pred)
+    #     den = np.abs(y_true) + np.abs(y_pred)
+    #     return 200 * np.mean(num / np.maximum(den, 1e-12), axis=0)
+    #
+    # smape_val_h   = smape_per_h(Y_val_tune_price, y_pred_price)   # (H,)
+    # smape_naive_h = smape_per_h(Y_val_tune_price, y_naive_price)  # (H,)
+    # print("SMAPE per horizon - model:", smape_val_h)
+    # print("SMAPE per horizon - naive:", smape_naive_h)
+    # print("improve per h:", 1 - (smape_val_h / smape_naive_h))
+
+
+
+    # assert Y_val_tune_price.shape == y_pred_price.shape == y_naive_price.shape
+    # assert np.all(np.isfinite(Y_val_tune_price))
+    # assert np.all(np.isfinite(y_pred_price))
+    # assert np.all(np.isfinite(y_naive_price))
+    #
+    # # 같은 샘플/시점 맞는지 spot-check (몇 개만)
+    # i = 0
+    # print("t0 last_close:", (X_val[i, -1, idx_close]*scaler_X.scale_[idx_close]+scaler_X.mean_[idx_close]))
+    # print("y_true[0]:", Y_val_tune_price[i, 0], "naive[0]:", y_naive_price[i, 0], "pred[0]:", y_pred_price[i, 0])
+    #
+    #
+    # def smape_np(y_true, y_pred):
+    #     num = np.abs(y_true - y_pred)
+    #     den = np.abs(y_true) + np.abs(y_pred)
+    #     return 200 * np.mean(num / np.maximum(den, 1e-12))
+    #
+    # smape_val   = smape_np(Y_val_tune_price, y_pred_price)
+    # smape_naive = smape_np(Y_val_tune_price, y_naive_price)
+    #
+    # # 종목별(또는 샘플별) 개선율
+    # improve = 1 - (smape_val / smape_naive)   # >0 이면 모델이 나이브보다 좋음
+    # print("improve mean:", improve.mean(), "median:", np.median(improve))
+    # print("pct better:", np.mean(improve > 0)*100, "%")
+
+
+    # alpha = 0.5  # 0~1 튜닝
+    # y_pred_price_adj = alpha*y_pred_price + (1-alpha)*y_naive_price
+    #
+    # print('y_pred_price_adj', y_pred_price_adj[0])
+    # print('Y_val_tune_price', Y_val_tune_price[0])
+    #
+    #
+    #
+    # smape_val   = smape(Y_val_tune_price, y_pred_price)
+    # print('smape_val', smape_val)
+    # smape_naive = smape(Y_val_tune_price, y_naive_price)
+    # print('smape_naive', smape_naive)
 
     # # 3) hit-rate (옵션) — 모델 예측이 있을 때만
     # try:
     #     # 4) (옵션) hit-rate도 가격공간 기준이면 베이스도 가격으로
     #     y_hist_end_price = inverse_close_from_Xscale_fast(y_hist_end_x, scaler_X, idx_close)
     #     hitrate_val = hit_rate(
-    #         Y_val_price, pred_price,
+    #         Y_val_tune_price, pred_price,
     #         y_base=y_hist_end_price,
     #         # use_horizon=1,   # h=1 기준; 전체 평균 쓰려면 "avg"
     #         use_horizon="avg",   # h=1 기준; 전체 평균 쓰려면 "avg"
@@ -410,7 +499,7 @@ for count, ticker in enumerate(tickers):
 
     # ctx 구성
     ctx = {
-        "smape_naive": smape(Y_val_price, y_naive_price),
+        "smape_naive": smape_naive,
         "n_val": int(Y_val.shape[0] if Y_val.ndim == 2 else len(Y_val)),
         "hitrate": None,
     }
@@ -422,7 +511,7 @@ for count, ticker in enumerate(tickers):
     #
     # # 1) 유효 시행 수(필요시 tiny-move 필터 포함) 계산
     # N_eff, _ = effective_trials_for_hitrate(
-    #     Y_val_price, pred_price, y_base=y_base_price,
+    #     Y_val_tune_price, pred_price, y_base=y_base_price,
     #     space="price", use_horizon=1, thr=0.003
     # )
     #
@@ -451,17 +540,17 @@ for count, ticker in enumerate(tickers):
     n_features = X_all.shape[1]
     # X_all[-LOOK_BACK:] : 가장 최근 LOOK_BACK개 시점의 표준화된 피쳐들
     # last_window : 15일치의 피쳐들을 표준화한 블록
-    last_window = X_all[-LOOK_BACK:].reshape(1, LOOK_BACK, n_features)
+    last_window = X_last.reshape(1, LOOK_BACK, n_features)   # shape (1, L, F)
     # print('last_window', last_window)
-    future_y_s  = model.predict(last_window, verbose=0)      # shape=(1,H)
+    future_y_s  = model.predict(last_window, verbose=0)      # shape (1, H)  y-스케일
 
     # 8) y-표준화 → X-스케일
-    future_y_x  = scaler_y.inverse_transform(future_y_s)      # shape=(1,H)
+    future_y_x  = scaler_y.inverse_transform(future_y_s)     # y-스케일 -> X-스케일
     # print('future_y_x', future_y_x)
 
     future_price = inverse_close_matrix_fast(
         future_y_x, scaler_X, idx_close
-    ).ravel()  # shape=(H,)
+    ).ravel()  # shape=(H,) 최종 가격 단위
 
     predicted_prices = future_price
     # print('predicted_prices', predicted_prices)
@@ -471,12 +560,12 @@ for count, ticker in enumerate(tickers):
     # print('future_dates', future_dates)
     last_close = X_df[col_c].iloc[-1]
     avg_future_return = (predicted_prices.mean() / last_close - 1.0) * 100
-    print(f"  예상 : {avg_future_return:.2f}%")
+    print(f"  predicted rate of increase : {avg_future_return:.2f}%")
 
     # 기대 성장률 미만이면 건너뜀
     if avg_future_return < EXPECTED_GROWTH_RATE and avg_future_return < 20:
         # if avg_future_return > 0:
-        #     print(f"  예상 : {avg_future_return:.2f}%")
+        #     print(f"  predicted rate of increase : {avg_future_return:.2f}%")
         continue
         # pass
 
