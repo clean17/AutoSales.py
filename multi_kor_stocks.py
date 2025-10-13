@@ -38,9 +38,9 @@ os.makedirs(pickle_dir, exist_ok=True) # 없으면 생성
 N_FUTURE = PREDICTION_PERIOD = 3
 LOOK_BACK = 15
 AVERAGE_TRADING_VALUE = 4_000_000_000 # 평균거래대금 30억
-EXPECTED_GROWTH_RATE = 3
+EXPECTED_GROWTH_RATE = 2
 DATA_COLLECTION_PERIOD = 700 # 샘플 수 = 68(100일 기준) - 20 - 4 + 1 = 45
-SPLIT      = 0.82
+SPLIT      = 0.75
 
 today = datetime.today().strftime('%Y%m%d')
 # today = (datetime.today() - timedelta(days=5)).strftime('%Y%m%d')
@@ -51,8 +51,8 @@ start_five_date = (datetime.today() - timedelta(days=5)).strftime('%Y%m%d')
 
 # chickchick.com에서 종목 리스트 조회
 tickers_dict = get_kor_ticker_dict_list()
-tickers = list(tickers_dict.keys())
-# tickers = ['204620']
+# tickers = list(tickers_dict.keys())
+tickers = ['204620']
 # tickers = ['172670']
 
 def _col(df, ko: str, en: str):
@@ -238,7 +238,7 @@ for count, ticker in enumerate(tickers):
     # 현재 5일선이 20일선보다 낮으면서 하락중이면 패스
     ma_angle_5 = data['MA5'].iloc[-1] - data['MA5'].iloc[-2]
     if data['MA5'].iloc[-1] < data['MA20'].iloc[-1] and ma_angle_5 < 0:
-        # print(f"                                                        5일선이 20일선 보다 낮을 경우 → pass")
+        # print(f"                                                        5일선이 20일선 보다 낮으면서 하락중 → pass")
         continue
         # pass
 
@@ -272,6 +272,7 @@ for count, ticker in enumerate(tickers):
     cols = [c for c in feature_cols if c in data.columns]  # 순서 보존
     df = data.loc[:, cols].replace([np.inf, -np.inf], np.nan)
     X_df = df.dropna()  # X_df는 (정렬/결측처리된) 피처 데이터프레임, '종가' 컬럼 존재
+    close_price = X_df[col_c].to_numpy()
 
     # 종가 컬럼 이름/인덱스
     idx_close = cols.index(col_c)
@@ -352,14 +353,25 @@ for count, ticker in enumerate(tickers):
 
     # 예측 (y-스케일)
     va_pred_s = model.predict(X_val_tune, verbose=0)
-
     # y-스케일 -> X-스케일
     va_pred_x = scaler_y.inverse_transform(va_pred_s)
-
     # X-스케일 -> 원 단위(종가만 역변환)
-    y_pred_price = inverse_close_matrix_fast(va_pred_x, scaler_X, idx_close)  # (N_val, H)
+    pred_price = inverse_close_matrix_fast(va_pred_x, scaler_X, idx_close)  # (N_val, H)
 
     #######################################################################
+
+    # 밸리데이션 인덱스
+    val_idx = np.flatnonzero(val_mask)
+    # 튜닝용 밸리데이션 윈도우(마지막 1개 제외)
+    val_tune_idx = val_idx[:-1]
+    last_val_idx = val_idx[-1]    # 마지막 1개(예측용)
+    split_tune_end = int(t_end[val_tune_idx].max())   # 원시 인덱스 (inclusive)
+    # print('split_tune_end', split_tune_end)
+
+    # 훈련+Val_tune 경계까지 사용(Last/Test 제외). split_tune_end는 직접 계산한 인덱스
+    y_insample_price = close_price[:split_tune_end + 1]  # 길이 > m 필요
+    # print('y_insample_price', y_insample_price)
+
 
     # ++ 지표 계산: scaled + restored(원 단위)
     metrics = regression_metrics(
@@ -368,6 +380,8 @@ for count, ticker in enumerate(tickers):
         scaler=scaler_X,
         n_features=X_df.shape[1],
         idx_close=idx_close,
+        y_insample_for_mase_restored=y_insample_price,  # ★ 여기!
+        m=1  # 예: 주기 5 영업일
     )
 
     # print("=== SCALED (표준화 공간) ===")
@@ -380,11 +394,19 @@ for count, ticker in enumerate(tickers):
             total_cnt += 1
         # print(f"    {k}: {v:.4f}")
 
-    # if "restored" in metrics:
+    if "restored" in metrics:
     #     print("\n=== RESTORED (원 단위) ===")
     #     for k,v in metrics["restored"].items():
     #         print(f"    {k}: {v:.4f}")
+        m_rest = metrics["restored"]
+        mase_price = m_rest.get("MASE", np.nan)
+        smape_price = m_rest.get("SMAPE (%)", np.nan)
+        # print("MASE(price)=", mase_price, "SMAPE(price)=", smape_price)
 
+    # 가드: NaN/Inf는 탈락
+    if not np.isfinite(mase_price):
+        print("    MASE is NaN → fail")
+        continue
 
     # ======================
     # 여기가 실제 사용 예
@@ -395,7 +417,9 @@ for count, ticker in enumerate(tickers):
     #   use_restored=True라면 price space로 본다고 가정
     # ======================
 
-
+    """
+    나이브: 아주 단순한 규칙으로 만든 예측, 베이스 기준
+    """
     # 2) 나이브: 먼저 X스케일에서 퍼시스턴스 행렬을 만들고 → 가격으로 복원
     # (A) 튜닝/평가: 마지막 1개 제외한 Val에 대해서만 지표 산출
     y_hist_end_x = X_val_tune[:, -1, idx_close]                  # (N,)  X-스케일
@@ -406,82 +430,91 @@ for count, ticker in enumerate(tickers):
     Y_val_tune_x  = scaler_y.inverse_transform(y_val_tune_scaled)     # (N,H)  y-스케일 -> X-스케일
     Y_val_tune_price = inverse_close_matrix_fast(Y_val_tune_x, scaler_X, idx_close)
 
-    # (선택) 예측도 가격으로 복원해서 hitrate 등에 쓰고 싶으면
-    # pred_x     = scaler_y.inverse_transform(va_pred_s)
-    # pred_price = inverse_close_matrix_fast(pred_x, scaler_X, idx_close)
-
     y_naive_price = inverse_close_matrix_fast(y_naive_x, scaler_X, idx_close)
+    # print('y_naive_price', y_naive_price)
 
     # 2) naive sMAPE
-    smape_naive = smape(Y_val_tune_price , y_naive_price)
+    smape_naive = smape(Y_val_tune_price, y_naive_price)
+    smape_price = smape(Y_val_tune_price, pred_price)
 
-    # def smape_per_row(y_true, y_pred):
-    #     # y_true, y_pred: (N, H)  가격
-    #     num = np.abs(y_true - y_pred)
-    #     den = np.abs(y_true) + np.abs(y_pred)
-    #     row_smape = 200 * np.mean(num / np.maximum(den, 1e-12), axis=1)  # (N,)
-    #     return row_smape
-    #
-    # smape_val_row   = smape_per_row(Y_val_tune_price, y_pred_price)    # (N,)
-    # smape_naive_row = smape_per_row(Y_val_tune_price, y_naive_price)   # (N,)
-    #
-    # improve_row = 1.0 - (smape_val_row / smape_naive_row)         # (N,)
-    # print("mean improve:", improve_row.mean())
-    # print("median improve:", np.median(improve_row))
-    # print("pct better:", (improve_row > 0).mean() * 100, "%")
-    #
-    #
-    # def smape_per_h(y_true, y_pred):
-    #     # (N,H) -> (H,)
-    #     num = np.abs(y_true - y_pred)
-    #     den = np.abs(y_true) + np.abs(y_pred)
-    #     return 200 * np.mean(num / np.maximum(den, 1e-12), axis=0)
-    #
-    # smape_val_h   = smape_per_h(Y_val_tune_price, y_pred_price)   # (H,)
-    # smape_naive_h = smape_per_h(Y_val_tune_price, y_naive_price)  # (H,)
-    # print("SMAPE per horizon - model:", smape_val_h)
-    # print("SMAPE per horizon - naive:", smape_naive_h)
-    # print("improve per h:", 1 - (smape_val_h / smape_naive_h))
+    # === 2) 윈도우별 sMAPE 배열 ===
+    def smape_rows(y_true, y_pred, eps=1e-12):
+        num = np.abs(y_pred - y_true)
+        den = (np.abs(y_true) + np.abs(y_pred) + eps) / 2.0
+        # 윈도우별(행별) H-step 평균 sMAPE(%)를 반환
+        return (100.0 * (num / den)).mean(axis=1)
+
+    smape_model_rows = smape_rows(Y_val_tune_price, pred_price)    # (N_tune,)
+    smape_naive_rows = smape_rows(Y_val_tune_price, y_naive_price) # (N_tune,)
+
+    median_smape_model = np.nanmedian(smape_model_rows)
+    median_smape_naive = np.nanmedian(smape_naive_rows)
+
+    # 개선비율: 윈도우별로 모델 sMAPE가 나이브보다 작은 비율
+    improved_window_ratio = float(np.mean(smape_model_rows < smape_naive_rows))
+
+    # === 4) 컷오프 규칙에 반영 (예시) ===
+    eps = 1e-9
+    rel_ok = (smape_price <= smape_naive * (1 - 0.03))     # 상대 3% 개선
+    abs_ok = ((smape_naive - smape_price) >= 0.2)          # 절대 0.2pp 개선
+    mase_ok = (mase_price < 1.0 - eps)
+
+    # 1) 베이스라인 격파
+    base_ok = (rel_ok or abs_ok or mase_ok)
+    # 2) 안정성
+    stable_ok = (improved_window_ratio >= 0.60)
+    # 3) (선택) 중앙값 보조
+    median_ok = (median_smape_model <= median_smape_naive)
+
+    # 기본 합격
+    pass_rule = base_ok and stable_ok
+
+    # 표본 수(Val_tune 윈도우 개수, X_val -1)
+    n_tune = int(len(smape_model_rows))
+
+    # 표본 적을 때 완화(옵션)
+    if n_tune < 80:
+        pass_rule = base_ok and (improved_window_ratio >= 0.55)
+
+    # 타이브레이커(옵션)
+    if not pass_rule and base_ok:
+        tiny_margin = 0.05  # 0.05pp 낮으면 통과시겨줌, 마지막 허용선
+        # median_ok를 빼면 타이브레이커가 느슨해지니 권장하지 않음
+        if median_ok and ((smape_naive - smape_price) >= tiny_margin):
+            pass_rule = True
+
+    # 조건 통과 못함 -> pass
+    # if not pass_rule:
+    #     continue
+
+    """
+    어떤 예측을 쓸지(모델/블렌드/나이브) 를 정하기 위한 “안전장치”
+    
+    모델이 나이브보다 항상 좋지 않을 수 있으니, Val_tune에서 모델과 나이브를 가중합(α) 하여 오차가 최소가 되는 α*를 찾는다
+    >> 리스크(큰 실수) 를 줄이고, 평균 성능을 끌어올릴 수 있다
+    
+    Val_tune에서 찾은 α*로 만든 혼합 예측(= blend)이 나이브보다 의미 있게 좋다(절대 0.2pp 또는 상대 3% 이상 개선)면, 
+    운영/최종 예측에서 이 블렌딩을 사용하겠다는 결정
+    """
+    if pass_rule:
+        decision = ("model", 1.0)     # 운영 예측은 모델 그대로
+    else:
+        alphas = np.linspace(0, 1, 21)
+        best = (None, np.inf)
+        for a in alphas:
+            blend = a*pred_price + (1-a)*y_naive_price   # 가격 단위
+            s = smape(Y_val_tune_price, blend)           # % 기준
+            if s < best[1]:
+                best = (a, s)
+        alpha_star, smape_blend = best
+        # 의사결정: blend가 naive보다 최소 0.2pp 또는 3% 상대 개선이면 채택
+        if smape_blend <= min(smape_naive - 0.2, smape_naive*0.97):
+            decision = ("blend", alpha_star)
+        else:
+            decision = ("naive", 0.0)
+    # print("decision:", decision, "alpha*:", alpha_star, "sMAPE_blend:", smape_blend)
 
 
-
-    # assert Y_val_tune_price.shape == y_pred_price.shape == y_naive_price.shape
-    # assert np.all(np.isfinite(Y_val_tune_price))
-    # assert np.all(np.isfinite(y_pred_price))
-    # assert np.all(np.isfinite(y_naive_price))
-    #
-    # # 같은 샘플/시점 맞는지 spot-check (몇 개만)
-    # i = 0
-    # print("t0 last_close:", (X_val[i, -1, idx_close]*scaler_X.scale_[idx_close]+scaler_X.mean_[idx_close]))
-    # print("y_true[0]:", Y_val_tune_price[i, 0], "naive[0]:", y_naive_price[i, 0], "pred[0]:", y_pred_price[i, 0])
-    #
-    #
-    # def smape_np(y_true, y_pred):
-    #     num = np.abs(y_true - y_pred)
-    #     den = np.abs(y_true) + np.abs(y_pred)
-    #     return 200 * np.mean(num / np.maximum(den, 1e-12))
-    #
-    # smape_val   = smape_np(Y_val_tune_price, y_pred_price)
-    # smape_naive = smape_np(Y_val_tune_price, y_naive_price)
-    #
-    # # 종목별(또는 샘플별) 개선율
-    # improve = 1 - (smape_val / smape_naive)   # >0 이면 모델이 나이브보다 좋음
-    # print("improve mean:", improve.mean(), "median:", np.median(improve))
-    # print("pct better:", np.mean(improve > 0)*100, "%")
-
-
-    # alpha = 0.5  # 0~1 튜닝
-    # y_pred_price_adj = alpha*y_pred_price + (1-alpha)*y_naive_price
-    #
-    # print('y_pred_price_adj', y_pred_price_adj[0])
-    # print('Y_val_tune_price', Y_val_tune_price[0])
-    #
-    #
-    #
-    # smape_val   = smape(Y_val_tune_price, y_pred_price)
-    # print('smape_val', smape_val)
-    # smape_naive = smape(Y_val_tune_price, y_naive_price)
-    # print('smape_naive', smape_naive)
 
     # # 3) hit-rate (옵션) — 모델 예측이 있을 때만
     # try:
@@ -497,14 +530,13 @@ for count, ticker in enumerate(tickers):
     # except NameError:
     #     hitrate_val = None
 
-    # ctx 구성
-    ctx = {
-        "smape_naive": smape_naive,
-        "n_val": int(Y_val.shape[0] if Y_val.ndim == 2 else len(Y_val)),
-        "hitrate": None,
-    }
+    # ctx = {
+    #     "smape_naive": smape_naive,
+    #     "n_val": int(Y_val.shape[0] if Y_val.ndim == 2 else len(Y_val)),
+    #     "hitrate": None,
+    # }
 
-    # ok = pass_filter(metrics, use_restored=True, r2_min=0.1, smape_max=8.0)  # 원 단위 기준으로 필터, SMAPE 30으로 필터링하려면 무조건 restored 값으로
+    ok = pass_filter(metrics, use_restored=True, r2_min=0.1, smape_max=8.0)  # 원 단위 기준으로 필터, SMAPE 30으로 필터링하려면 무조건 restored 값으로
 
     # # 가격으로 복원 (N,)
     # y_base_price = y_hist_end_x * scaler_X.scale_[idx_close] + scaler_X.mean_[idx_close]
@@ -522,17 +554,17 @@ for count, ticker in enumerate(tickers):
     # # 고정 파라미터와 동적 컷을 함께 쓰고 싶다면 max()로 보수적으로:
     # dynamic_hitrate_min = cut
 
-    ok = pass_filter_v2(
-        metrics, use_restored=True,
-        r2_min=0.10, smape_max=10.0,
-        require_naive_improve=True,
-        naive_improve_min=0.05,
-        samples_min=30,
-        ctx=ctx
-    )
+    # ok = pass_filter_v2(
+    #     metrics, use_restored=True,
+    #     r2_min=0.10, smape_max=10.0,
+    #     require_naive_improve=True,
+    #     naive_improve_min=0.05,
+    #     samples_min=30,
+    #     ctx=ctx
+    # )
     # print("                                                        PASS 1st filter?" , ok)
-    if not ok:
-        continue
+    # if not ok:
+    #     continue
 
     #######################################################################
 
@@ -548,19 +580,32 @@ for count, ticker in enumerate(tickers):
     future_y_x  = scaler_y.inverse_transform(future_y_s)     # y-스케일 -> X-스케일
     # print('future_y_x', future_y_x)
 
-    future_price = inverse_close_matrix_fast(
+    y_pred_last_price = inverse_close_matrix_fast(
         future_y_x, scaler_X, idx_close
     ).ravel()  # shape=(H,) 최종 가격 단위
 
-    predicted_prices = future_price
+    # --- 나이브(퍼시스턴스) 마지막 윈도우 기준 ---
+    last_close = X_df[col_c].iloc[-1]
+    H = y_pred_last_price.shape[0]
+    y_naive_last_price = np.repeat(last_close, H)
+
+    # --- 운영 결정 반영 (val_tune에서 구한 decision 사용) ---
+    # decision = ("model", 1.0) | ("blend", alpha_star) | ("naive", 0.0)
+    kind, alpha = decision
+
+    if kind == "model":
+        predicted_prices = y_pred_last_price
+    elif kind == "blend":
+        predicted_prices = alpha * y_pred_last_price + (1 - alpha) * y_naive_last_price
+    else:  # "naive"
+        predicted_prices = y_naive_last_price
     # print('predicted_prices', predicted_prices)
 
     # 9) 다음 영업일 가져오기
     future_dates = get_next_business_days()
     # print('future_dates', future_dates)
-    last_close = X_df[col_c].iloc[-1]
     avg_future_return = (predicted_prices.mean() / last_close - 1.0) * 100
-    print(f"  predicted rate of increase : {avg_future_return:.2f}%")
+    print(f"    predicted rate of increase : {avg_future_return:.2f}%")
 
     # 기대 성장률 미만이면 건너뜀
     if avg_future_return < EXPECTED_GROWTH_RATE and avg_future_return < 20:
