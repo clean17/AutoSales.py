@@ -51,9 +51,9 @@ start_five_date = (datetime.today() - timedelta(days=5)).strftime('%Y%m%d')
 
 # chickchick.com에서 종목 리스트 조회
 tickers_dict = get_kor_ticker_dict_list()
-# tickers = list(tickers_dict.keys())
-tickers = ['204620']
-# tickers = ['172670']
+tickers = list(tickers_dict.keys())
+# tickers = ['204620'] # 글로벌 텍스프리
+# tickers = ['172670'] # 에이엘티
 
 def _col(df, ko: str, en: str):
     """한국/영문 칼럼 자동매핑: ko가 있으면 ko, 없으면 en을 반환"""
@@ -386,8 +386,6 @@ for count, ticker in enumerate(tickers):
 
     # print("=== SCALED (표준화 공간) ===")
     for k,v in metrics["scaled"].items():
-        if k == 'SMAPE (%)':
-            total_smape += v
         if k == 'R2': # R-squared, (0=엉망, 1=완벽)
             # print(f"                                                        R-squared 0.6 미만이면 패스 : {r2}")
             total_r2 += v
@@ -401,11 +399,16 @@ for count, ticker in enumerate(tickers):
         m_rest = metrics["restored"]
         mase_price = m_rest.get("MASE", np.nan)
         smape_price = m_rest.get("SMAPE (%)", np.nan)
+        total_smape += smape_price
         # print("MASE(price)=", mase_price, "SMAPE(price)=", smape_price)
 
     # 가드: NaN/Inf는 탈락
     if not np.isfinite(mase_price):
         print("    MASE is NaN → fail")
+        continue
+
+    ok_first = pass_filter(metrics, use_restored=True, r2_min=None, smape_max=8.0)  # 원 단위 기준으로 필터, SMAPE 30으로 필터링하려면 무조건 restored 값으로
+    if not ok_first:
         continue
 
     # ======================
@@ -437,6 +440,23 @@ for count, ticker in enumerate(tickers):
     smape_naive = smape(Y_val_tune_price, y_naive_price)
     smape_price = smape(Y_val_tune_price, pred_price)
 
+
+    # 같은 공간을 사용하는지 체크 - 모델이 진짜로 나이브와 다른 예측을 하고 있나?
+    # True면, 모델 예측이 나이브(내일=오늘) 와 사실상 같다는 뜻, 같은 공간이면 안됨
+    # print("allclose(pred, naive):", np.allclose(pred_price, y_naive_price))
+    # max |diff|가 0에 가깝다면 거의 동일 → 모델이 정보 추가를 못하고 있을 가능성
+    # print("max |diff| :", np.max(np.abs(pred_price - y_naive_price)))
+    # 첫 몇 개 샘플 비교
+    # for i in range(3):
+    #     print("win", i, "pred", pred_price[i], "naive", y_naive_price[i], "true", Y_val_tune_price[i])
+
+
+    # 첫 스텝(h=1)이 입력 마지막 값과 같은지 건전성 체크, 둘의 값이 비슷해야함
+    # last_obs = X_val_tune[:, -1, idx_close]
+    # print("corr(pred[:,0], last_obs):", np.corrcoef(pred_price[:,0], last_obs)[0,1])
+    # print("corr(true[:,0], last_obs):", np.corrcoef(Y_val_tune_price[:,0], last_obs)[0,1])
+
+
     # === 2) 윈도우별 sMAPE 배열 ===
     def smape_rows(y_true, y_pred, eps=1e-12):
         num = np.abs(y_pred - y_true)
@@ -452,6 +472,22 @@ for count, ticker in enumerate(tickers):
 
     # 개선비율: 윈도우별로 모델 sMAPE가 나이브보다 작은 비율
     improved_window_ratio = float(np.mean(smape_model_rows < smape_naive_rows))
+
+    # print(f"[ROW] median sMAPE model: {median_smape_model:.3f}  naive: {median_smape_naive:.3f}") # 낮아야 더 좋음
+
+    # === 3) 윈도우별 MASE 배열(옵션) ===
+    # MASE 분모: 인샘플(Train+Val_tune)에서 m-시즌 절대차 평균 (상수)
+    # m_season = 1
+    # den = np.mean(np.abs(y_insample_price[m_season:] - y_insample_price[:-m_season]))  # 인샘플 분모
+    # mae_rows_model  = np.mean(np.abs(pred_price      - Y_val_tune_price), axis=1)      # ✅ 모델
+    # mae_rows_naive  = np.mean(np.abs(y_naive_price   - Y_val_tune_price), axis=1)      # ✅ 나이브
+    # mase_rows_model = mae_rows_model / (den + 1e-12)
+    # mase_rows_naive = mae_rows_naive / (den + 1e-12)
+
+    # median_mase_model = np.nanmedian(mase_rows_model)
+    # median_mase_naive = np.nanmedian(mase_rows_naive)
+    # print(f"[ROW] median MASE(model, m={m_season}): {median_mase_model:.3f}")
+    # print(f"[ROW] median MASE(naive,  m={m_season}): {median_mase_naive:.3f}")
 
     # === 4) 컷오프 규칙에 반영 (예시) ===
     eps = 1e-9
@@ -499,7 +535,7 @@ for count, ticker in enumerate(tickers):
     if pass_rule:
         decision = ("model", 1.0)     # 운영 예측은 모델 그대로
     else:
-        alphas = np.linspace(0, 1, 21)
+        alphas = np.linspace(0, 1, 21) # 0부터 1까지 21개 값(양 끝 포함)을 균등 간격으로 만든다
         best = (None, np.inf)
         for a in alphas:
             blend = a*pred_price + (1-a)*y_naive_price   # 가격 단위
@@ -507,11 +543,18 @@ for count, ticker in enumerate(tickers):
             if s < best[1]:
                 best = (a, s)
         alpha_star, smape_blend = best
-        # 의사결정: blend가 naive보다 최소 0.2pp 또는 3% 상대 개선이면 채택
-        if smape_blend <= min(smape_naive - 0.2, smape_naive*0.97):
+
+        rel_thresh = smape_naive * (1 - 0.03)   # 상대 3% 개선
+        abs_pp = 0.2 if smape_naive >= 3.0 else 0.1 # 나이브가 아주 작을 때는 0.2pp가 과도할 수 있으니
+        abs_thresh = smape_naive - abs_pp
+
+        accept_thresh = max(rel_thresh, abs_thresh)  # 더 느슨한(또는 넉넉한) 기준
+        eps = 1e-6
+        if smape_blend <= accept_thresh + eps:
             decision = ("blend", alpha_star)
         else:
-            decision = ("naive", 0.0)
+            # decision = ("naive", 0.0)
+            continue
     # print("decision:", decision, "alpha*:", alpha_star, "sMAPE_blend:", smape_blend)
 
 
@@ -535,8 +578,6 @@ for count, ticker in enumerate(tickers):
     #     "n_val": int(Y_val.shape[0] if Y_val.ndim == 2 else len(Y_val)),
     #     "hitrate": None,
     # }
-
-    ok = pass_filter(metrics, use_restored=True, r2_min=0.1, smape_max=8.0)  # 원 단위 기준으로 필터, SMAPE 30으로 필터링하려면 무조건 restored 값으로
 
     # # 가격으로 복원 (N,)
     # y_base_price = y_hist_end_x * scaler_X.scale_[idx_close] + scaler_X.mean_[idx_close]
@@ -597,8 +638,8 @@ for count, ticker in enumerate(tickers):
         predicted_prices = y_pred_last_price
     elif kind == "blend":
         predicted_prices = alpha * y_pred_last_price + (1 - alpha) * y_naive_last_price
-    else:  # "naive"
-        predicted_prices = y_naive_last_price
+    else:
+        continue
     # print('predicted_prices', predicted_prices)
 
     # 9) 다음 영업일 가져오기
@@ -673,6 +714,6 @@ except Exception as e:
     pass  # 오류
 
 if total_cnt > 0:
-    print('R-squared_avg : ', total_r2/total_cnt)
-    print('SMAPE : ', total_smape/total_cnt)
-    print('total_cnt : ', total_cnt)
+    print(f'R-squared_avg : {total_r2/total_cnt:.2f}')
+    print(f'SMAPE : {total_smape/total_cnt:.2f}')
+    print(f'total_cnt : {total_cnt}')
