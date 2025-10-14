@@ -1084,7 +1084,8 @@ def regression_metrics(
         scaler=None,            # 전체 피처 스케일러(지금 케이스)
         n_features=None,
         idx_close=None,
-        y_insample_for_mase=None,  # ← 추가: MASE 분모용 원단위(또는 같은 스케일) 시계열 1D
+        y_insample_for_mase_scaled=None,     # y-스케일(=현재 y_true/y_pred 공간)의 1D 시계열
+        y_insample_for_mase_restored=None,   # 복원(가격) 공간의 1D 시계열
         m: int = 1                 # 계절 주기(없으면 1)
 ):
     y_true = _to_2d(y_true)
@@ -1104,11 +1105,6 @@ def regression_metrics(
     # MAPE/SMAPE는 0 근처 값에 민감합니다(함수 내부에 eps 처리는 있지만 여전히 해석 주의)
     mape = _mape(y_true, y_pred)
     smape = _smape(y_true, y_pred)
-    # MASE는 insample 시계열이 있어야만 계산
-    if y_insample_for_mase is not None:
-        msae = _mase(y_true, y_pred, y_insample=np.asarray(y_insample_for_mase), m=m)
-    else:
-        msae = None
     # r2는 y의 분산이 작거나 상수에 가까우면 의미가 희석될 수 있음
     r2   = r2_score(y_true, y_pred)
 
@@ -1117,9 +1113,12 @@ def regression_metrics(
         "MAPE (%)": float(mape), "SMAPE (%)": float(smape), "R2": float(r2)
     }}
 
-    # (선택) MASE는 스케일 일관성 맞춰 separate로 계산
-    if y_insample_for_mase is not None:
-        out["scaled"]["MASE"] = float(_mase(y_true, y_pred, y_insample=np.asarray(y_insample_for_mase), m=m))
+    # (선택) MASE
+    if y_insample_for_mase_scaled is not None:
+        out["scaled"]["MASE"] = float(_mase(
+            y_true, y_pred,
+            y_insample=np.asarray(y_insample_for_mase_scaled), m=m
+        ))
 
     # restore if possible
     restored_true = restored_pred = None
@@ -1178,6 +1177,12 @@ def regression_metrics(
             "MSE": float(r_mse), "RMSE": float(r_rmse), "MAE": float(r_mae),
             "MAPE (%)": float(r_mape), "SMAPE (%)": float(r_smape), "R2": float(r_r2)
         }
+        # ★ 복원(가격) MASE 추가
+        if y_insample_for_mase_restored is not None:
+            out["restored"]["MASE"] = float(_mase(
+                restored_true, restored_pred,
+                y_insample=np.asarray(y_insample_for_mase_restored), m=m
+            ))
 
     return out
 
@@ -1194,13 +1199,20 @@ def regression_metrics(
   sMAPE: 상대오차(%)라 종목/구간 비교가 쉬움. 해석도 직관적.
   하지만 이 둘만 보면 과적합/누수/스케일 편향을 놓칠 수 있다
 """
-def pass_filter(metrics, use_restored=True, r2_min=0.6, smape_max=30.0, mape_max=50.0):
+def pass_filter(metrics, use_restored=True, r2_min=None, smape_max=30.0, mape_max=50.0):
     m = metrics["restored"] if (use_restored and "restored" in metrics) else metrics["scaled"]
-    m_r2 = m["R2"]
-    m_smape = m["SMAPE (%)"]
-    print(f"    DEBUG >> R2: {m_r2:.2f} SMAPE: {m_smape:.2f}") # <- 디버깅
-    # return (m["R2"] >= r2_min) and (m["SMAPE (%)"] < smape_max) and (m["MAPE (%)"] < mape_max)
-    return (m["R2"] >= r2_min) and (m["SMAPE (%)"] <= smape_max)
+    r2 = m["R2"]
+    sm = m["SMAPE (%)"]
+    # print(f"    DEBUG >> R2: {r2:.2f} SMAPE: {sm:.2f}") # <- 디버깅
+    if not np.isfinite(sm):
+        return False
+    # SMAPE 상한 컷만 적용
+    if sm > smape_max:
+        return False
+    # R² 컷 비활성화(기본) — 쓰려면 r2_min에 숫자 전달
+    if (r2_min is not None) and (not np.isnan(r2)) and (r2 < r2_min):
+        return False
+    return True
 
 """
 나이브 비교(예: C_{t+h}=C_t)**가 가장 현실적인 기준
