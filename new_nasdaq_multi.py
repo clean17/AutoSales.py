@@ -5,12 +5,14 @@ import pytz
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 from send2trash import send2trash
 from utils import create_lstm_model, create_multistep_dataset, fetch_stock_data_us, get_nasdaq_symbols, \
     extract_stock_code_from_filenames, get_usd_krw_rate, add_technical_features, check_column_types, \
-    get_name_from_usa_ticker, plot_candles_daily, plot_candles_weekly, drop_trading_halt_rows
+    get_name_from_usa_ticker, plot_candles_daily, plot_candles_weekly, drop_trading_halt_rows, \
+    inverse_close_matrix_fast, get_next_business_days, make_naive_preds, smape, pass_filter_v2, regression_metrics , \
+    pass_filter
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.model_selection import train_test_split
 import requests
@@ -32,11 +34,12 @@ os.makedirs(pickle_dir, exist_ok=True) # 없으면 생성
 
 
 
-PREDICTION_PERIOD = 3
-EXPECTED_GROWTH_RATE = 4
+N_FUTURE = PREDICTION_PERIOD = 3
+EXPECTED_GROWTH_RATE = 3
 DATA_COLLECTION_PERIOD = 700
 LOOK_BACK = 15
-KR_AVERAGE_TRADING_VALUE = 6_000_000_000
+KR_AVERAGE_TRADING_VALUE = 7_000_000_000
+SPLIT      = 0.75
 
 exchangeRate = get_usd_krw_rate()
 if exchangeRate is None:
@@ -62,15 +65,42 @@ tickers = get_nasdaq_symbols()
 # tickers = ['MNKD']
 
 
+def _col(df, ko: str, en: str):
+    """한국/영문 칼럼 자동매핑: ko가 있으면 ko, 없으면 en을 반환"""
+    if ko in df.columns: return ko
+    return en
+
 # 결과를 저장할 배열
 results = []
 total_r2 = 0
 total_cnt = 0
+total_smape = 0
 is_first_flag = True
 
 for count, ticker in enumerate(tickers):
     stock_name = get_name_from_usa_ticker(ticker)
     print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
+
+    # 학습하기 직전에 요청을 보낸다
+    percent = f'{round((count+1)/len(tickers)*100, 1):.1f}'
+    try:
+        requests.post(
+            'https://chickchick.shop/func/stocks/progress-update/nasdaq',
+            json={
+                "percent": percent,
+                "count": count+1,
+                "total_count": len(tickers),
+                "ticker": ticker,
+                "stock_name": "",
+                "done": False,
+            },
+            timeout=5
+        )
+    except Exception as e:
+        # logging.warning(f"progress-update 요청 실패: {e}")
+        print(f"progress-update 요청 실패: {e}")
+        pass  # 오류
+
 
 
     # 데이터가 없으면 1년 데이터 요청, 있으면 5일 데이터 요청
@@ -158,8 +188,8 @@ for count, ticker in enumerate(tickers):
     rolling_min = data['Close'].rolling(window=5).min()    # 5일 중 최소가
     ratio = data['Close'] / rolling_min
 
-    if np.any(ratio >= 2.0):
-        print(f"                                                        어느 5일 구간이든 2배 급등: 제외")
+    if np.any(ratio >= 2.5):
+        print(f"                                                        어느 5일 구간이든 2.5배 급등: 제외")
         continue
 
 
@@ -215,7 +245,7 @@ for count, ticker in enumerate(tickers):
         # inplace=True : 반환 없이 입력을 그대로 수정
         # errors='ignore' : 목록에 없는 칼럼 지우면 에러지만 무시
         data.drop(columns=cols_to_drop, inplace=True, errors='ignore')
-        print("Drop candidates:", cols_to_drop)
+        # print("Drop candidates:", cols_to_drop)
 
     if 'MA20' not in data.columns:
         continue
@@ -223,7 +253,7 @@ for count, ticker in enumerate(tickers):
     # 현재 5일선이 20일선보다 낮으면서 하락중이면 패스
     ma_angle_5 = data['MA5'].iloc[-1] - data['MA5'].iloc[-2]
     if data['MA5'].iloc[-1] < data['MA20'].iloc[-1] and ma_angle_5 < 0:
-        # print(f"                                                        5일선이 20일선 보다 낮을 경우 → pass")
+        # print(f"                                                        5일선이 20일선 보다 낮으면서 하락중 → pass")
         continue
         # pass
 
@@ -240,116 +270,308 @@ for count, ticker in enumerate(tickers):
 
     ########################################################################
 
-    # 데이터셋 생성
-    scaler = MinMaxScaler(feature_range=(0, 1))
-    # scaled_data = scaler.fit_transform(data.values)
+    # 한국/영문 칼럼 자동 식별
+    col_o = _col(df, '시가',   'Open')
+    col_h = _col(df, '고가',   'High')
+    col_l = _col(df, '저가',   'Low')
+    col_c = _col(df, '종가',   'Close')
+    col_v = _col(df, '거래량', 'Volume')
+
+    # 학습에 쓸 피처
     feature_cols = [
-        'Close', 'High', 'Low', 'Open', 'Vol_logdiff', 'MA5_slope'
+        col_o, col_l, col_h, col_c, 'Vol_logdiff',
     ]
 
-    # 0) NaN/inf 정리
-    data = data.replace([np.inf, -np.inf], np.nan)
+    cols = [c for c in feature_cols if c in data.columns]  # 순서 보존
+    df = data.loc[:, cols].replace([np.inf, -np.inf], np.nan)
+    X_df = df.dropna()  # X_df는 (정렬/결측처리된) 피처 데이터프레임, '종가' 컬럼 존재
+    close_price = X_df[col_c].to_numpy()
 
-    # 1) feature_cols만 남기고 dropna
-    feature_cols = [c for c in feature_cols if c in data.columns]
-    # print('feature_cols', feature_cols)
-    X_for_model = data.dropna(subset=feature_cols).loc[:, feature_cols]
+    # 종가 컬럼 이름/인덱스
+    idx_close = cols.index(col_c)
 
-#     X_for_model = X_for_model.apply(pd.to_numeric, errors='coerce') # float64여야 함 (object라면 먼저 float 변환 필요)
-#     X_for_model = X_for_model.replace([np.inf, -np.inf], 0) # # inf/-inf 값을 0으로(또는 np.nan으로) 대체
-    scaled_data = scaler.fit_transform(X_for_model)
-    # 슬라이딩 윈도우로 전체 데이터셋 생성
-    X, Y = create_multistep_dataset(scaled_data, LOOK_BACK, PREDICTION_PERIOD, 0)
+    # 2) 시계열 분리 후, train만 fit → val/전체 transform
+    split = int(len(X_df) * SPLIT)
+    scaler_X = StandardScaler().fit(X_df.iloc[:split])  # 원시 train 구간만, 중복 윈도우 때문에 같은 시점 행이 여러 번 들어가는 왜곡 방지
+    X_all = scaler_X.transform(X_df)                    # 전체 변환 (누수 없음)
+
+    # ↓ 여기서 X_all, Y_all을 '스케일된 X'로부터 만듦
+    X_tmp, Y_xscale, t0 = create_multistep_dataset(X_all, LOOK_BACK, N_FUTURE, idx=idx_close, return_t0=True)
+    t_end = t0 + LOOK_BACK - 1        # 윈도 끝 인덱스 (입력의 마지막 시점)
+    t_y_end = t_end + (N_FUTURE - 1)  # 타깃의 마지막 시점
+
+    # 시점 마스크로 분리
+    train_mask = (t_y_end < split)
+    val_mask   = (t_y_end >= split)
+
+    # 3) 윈도잉(블록별) → 학습/검증 세트
+    X_train, Y_train = X_tmp[train_mask], Y_xscale[train_mask]
+    X_val,   Y_val   = X_tmp[val_mask],   Y_xscale[val_mask]
+
     if is_first_flag:
         is_first_flag = False
-        print("X.shape:", X.shape) # X.shape: (0,) 데이터가 부족해서 슬라이딩 윈도우로 샘플이 만들어지지 않음
-    # print("Y.shape:", Y.shape)
+        print("X_train", X_train.shape, "Y_train", Y_train.shape)
+        print("X_val  ", X_val.shape,   " Y_val  ", Y_val.shape)
 
-    if X.shape[0] < 50:
+    X_val_tune, Y_val_tune = X_val[:-1], Y_val[:-1]    # 튜닝/early stopping 전용
+    X_last,     Y_last     = X_val[-1:], Y_val[-1:]    # 마지막 1개(예측 입력 전용; 정답은 개발 중엔 보지 않음)
+
+    # 5) 최소 샘플 수 확인
+    if X_train.shape[0] < 50:
         print("                                                        샘플 부족 : ", X.shape[0])
         continue
 
-    # 학습하기 직전에 요청을 보낸다
-    percent = f'{round((count+1)/len(tickers)*100, 1):.1f}'
-    try:
-        requests.post(
-            'https://chickchick.shop/func/stocks/progress-update/nasdaq',
-            json={
-                "percent": percent,
-                "count": count+1,
-                "total_count": len(tickers),
-                "ticker": ticker,
-                "stock_name": "",
-                "done": False,
-            },
-            timeout=5
-        )
-    except Exception as e:
-        # logging.warning(f"progress-update 요청 실패: {e}")
-        print(f"progress-update 요청 실패: {e}")
-        pass  # 오류
+    # ---- y 스케일링: Train으로만 fit ---- (타깃이 수익률이면 생략 가능)
+    scaler_y = StandardScaler().fit(Y_train)
+    y_train_scaled = scaler_y.transform(Y_train)
+    y_val_tune_scaled = scaler_y.transform(Y_val_tune)
 
-    # 머신러닝/딥러닝 모델 입력을 위해 학습/검증 분리
-    # 3차원 유지: (n_samples, look_back, n_features)
-    X_train, X_val, y_train, y_val = train_test_split(X, Y, test_size=0.1, shuffle=False)  # 시계열 데이터라면 shuffle=False 권장, random_state는 의미 없음(어차피 순서대로 나누니까)
-    if X_train.shape[0] < 50:
-        print("                                                        샘플 부족 : ", X_train.shape[0])
-        continue
+    #######################################################################
 
-    # 모델 생성 및 학습
+    # 6) 모델 생성/학습
+    def make_huber_per_h(delta_vec, eps=1e-6):
+        delta_vec = np.asarray(delta_vec, dtype="float32")
+        delta_vec = np.maximum(delta_vec, eps)
+
+        def huber_per_h(y_true, y_pred):
+            err = tf.abs(y_true - y_pred)                  # (N,H)
+            d   = tf.constant(delta_vec, dtype=err.dtype)  # (H,)
+            quad = 0.5 * tf.square(err)
+            lin  = d * err - 0.5 * tf.square(d)
+            loss = tf.where(err <= d, quad, lin)           # (N,H)
+            return tf.reduce_mean(loss)
+        return huber_per_h
+
+    stds = Y_train.std(axis=0).astype("float32")
+    loss_fn = make_huber_per_h(2.0 * stds)
+
+    # 6) 모델 생성/학습
     model = create_lstm_model((X_train.shape[1], X_train.shape[2]), PREDICTION_PERIOD,
-                              lstm_units=[128,64], dense_units=[64,32])
+                              lstm_units=[32], dropout=None, dense_units=[16], loss=loss_fn)
 
-    # 콜백 설정
-    from tensorflow.keras.callbacks import EarlyStopping
+    from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
     early_stop = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
-    # history = model.fit(X, Y, batch_size=8, epochs=200, validation_split=0.1, shuffle=False, verbose=0, callbacks=[early_stop])
-    history = model.fit(X_train, y_train, batch_size=8, epochs=200,
-                        validation_data=(X_val, y_val),
-                        shuffle=False, verbose=0, callbacks=[early_stop])
+    rlrop = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, min_lr=1e-6)
+    history = model.fit(
+        X_train, y_train_scaled,
+        batch_size=8, epochs=200, verbose=0, shuffle=False,
+        validation_data=(X_val_tune, y_val_tune_scaled),
+        callbacks=[early_stop, rlrop]
+    )
 
-    # 모델 평가
-    # val_loss = model.evaluate(X_val, y_val, verbose=1)
-    # print("Validation Loss :", val_loss)
+    # 예측 (y-스케일)
+    va_pred_s = model.predict(X_val_tune, verbose=0)
+    # y-스케일 -> X-스케일
+    va_pred_x = scaler_y.inverse_transform(va_pred_s)
+    # X-스케일 -> 원 단위(종가만 역변환)
+    pred_price = inverse_close_matrix_fast(va_pred_x, scaler_X, idx_close)
 
-    # X_val : 검증에 쓸 여러 시계열 구간의 집합
-    # predictions : 검증셋 각 구간(윈도우)에 대해 미래 PREDICTION_PERIOD만큼의 예측치 반환
-    # shape: (검증샘플수, 예측일수)
-    predictions = model.predict(X_val, verbose=0)
+    #######################################################################
 
-    # 학습이 최소한으로 되었는지 확인 후 실제 예측을 시작
-    # R-squared; (0=엉망, 1=완벽)
-    r2 = r2_score(y_val, predictions)
-    if r2 > 0:
-        total_r2 += r2
-        total_cnt += 1
-    if r2 < 0.64:
-        # print(f"                                                        R-squared 0.7 미만이면 패스 : {r2:.2f}%")
+    # 밸리데이션 인덱스
+    val_idx = np.flatnonzero(val_mask)
+    # 튜닝용 밸리데이션 윈도우(마지막 1개 제외)
+    val_tune_idx = val_idx[:-1]
+    last_val_idx = val_idx[-1]    # 마지막 1개(예측용)
+    split_tune_end = int(t_end[val_tune_idx].max())   # 원시 인덱스 (inclusive)
+    # print('split_tune_end', split_tune_end)
+
+    # 훈련+Val_tune 경계까지 사용(Last/Test 제외). split_tune_end는 직접 계산한 인덱스
+    y_insample_price = close_price[:split_tune_end + 1]  # 길이 > m 필요
+    # print('y_insample_price', y_insample_price)
+
+
+    # ++ 지표 계산: scaled + restored(원 단위)
+    metrics = regression_metrics(
+        y_val_tune_scaled, va_pred_s,
+        y_scaler=scaler_y,
+        scaler=scaler_X,
+        n_features=X_df.shape[1],
+        idx_close=idx_close,
+        y_insample_for_mase_restored=y_insample_price,
+        m=1  # 예: 주기 5 영업일
+    )
+
+    # print("=== SCALED (표준화 공간) ===")
+    for k,v in metrics["scaled"].items():
+        if k == 'R2': # R-squared, (0=엉망, 1=완벽)
+            # print(f"                                                        R-squared 0.6 미만이면 패스 : {r2}")
+            total_r2 += v
+            total_cnt += 1
+        # print(f"    {k}: {v:.4f}")
+
+    if "restored" in metrics:
+        m_rest = metrics["restored"]
+        mase_price = m_rest.get("MASE", np.nan)
+        smape_price = m_rest.get("SMAPE (%)", np.nan)
+        total_smape += smape_price
+
+    # 가드: NaN/Inf는 탈락
+    if not np.isfinite(mase_price):
+        print("    MASE is NaN → fail")
         continue
 
+    ok_first = pass_filter(metrics, use_restored=True, r2_min=None, smape_max=8.0)  # 원 단위 기준으로 필터, SMAPE 30으로 필터링하려면 무조건 restored 값으로
+    if not ok_first:
+        continue
 
-    # X_input 생성 (마지막 구간)
-    X_input = X[-1:]
-    future_preds = model.predict(X_input, verbose=0).flatten() # 1차원 벡터로 변환
-    # print('future', future_preds)
+    # ======================
+    # 여기가 실제 사용 예
+    # 전제:
+    #   Y_val      : (N, H)  검증 실제값 (복원된 가격 또는 수익률)
+    #   y_hist_end : (N,)    각 윈도우 마지막 실제값 (가격공간일 때 필요)
+    #   y_pred_val : (N, H)  모델 예측 (있으면 hitrate 계산에 사용)
+    #   use_restored=True라면 price space로 본다고 가정
+    # ======================
 
-    # 종가 scaler fit (실제 데이터로)
-    close_scaler = MinMaxScaler(feature_range=(0, 1))
-    close_prices = data['Close'].values.reshape(-1, 1)
-    close_scaler.fit(close_prices)
+    """
+    나이브: 아주 단순한 규칙으로 만든 예측, 베이스 기준
+    """
+    # 2) 나이브: 먼저 X스케일에서 퍼시스턴스 행렬을 만들고 → 가격으로 복원
+    # (A) 튜닝/평가: 마지막 1개 제외한 Val에 대해서만 지표 산출
+    y_hist_end_x = X_val_tune[:, -1, idx_close]                  # (N,)  X-스케일
+    H = Y_val_tune.shape[1] if Y_val_tune.ndim == 2 else 1
+    y_naive_x = make_naive_preds(y_hist_end_x, horizon=H, mode="price")  # (N_tune, H) X-스케일 기준 naive
 
-    # 모델 예측값(future_preds)은 정규화된 값임 >> scaler로 실제 가격 단위(원래 스케일)로 되돌림 (역정규화)
-    predicted_prices = close_scaler.inverse_transform(future_preds.reshape(-1, 1)).flatten() # (PREDICTION_PERIOD, )
+    # 가격으로 복원
+    Y_val_tune_x  = scaler_y.inverse_transform(y_val_tune_scaled)     # (N,H)  y-스케일 -> X-스케일
+    Y_val_tune_price = inverse_close_matrix_fast(Y_val_tune_x, scaler_X, idx_close)
+    y_naive_price = inverse_close_matrix_fast(y_naive_x, scaler_X, idx_close)
+
+    # 2) naive sMAPE
+    smape_naive = smape(Y_val_tune_price, y_naive_price)
+    smape_price = smape(Y_val_tune_price, pred_price)
+
+    # === 2) 윈도우별 sMAPE 배열 ===
+    def smape_rows(y_true, y_pred, eps=1e-12):
+        num = np.abs(y_pred - y_true)
+        den = (np.abs(y_true) + np.abs(y_pred) + eps) / 2.0
+        # 윈도우별(행별) H-step 평균 sMAPE(%)를 반환
+        return (100.0 * (num / den)).mean(axis=1)
+
+    smape_model_rows = smape_rows(Y_val_tune_price, pred_price)    # (N_tune,)
+    smape_naive_rows = smape_rows(Y_val_tune_price, y_naive_price) # (N_tune,)
+
+    median_smape_model = np.nanmedian(smape_model_rows)
+    median_smape_naive = np.nanmedian(smape_naive_rows)
+
+    # 개선비율: 윈도우별로 모델 sMAPE가 나이브보다 작은 비율
+    improved_window_ratio = float(np.mean(smape_model_rows < smape_naive_rows))
+
+    # === 4) 컷오프 규칙에 반영 (예시) ===
+    eps = 1e-9
+    rel_ok = (smape_price <= smape_naive * (1 - 0.03))     # 상대 3% 개선
+    abs_ok = ((smape_naive - smape_price) >= 0.2)          # 절대 0.2pp 개선
+    mase_ok = (mase_price < 1.0 - eps)
+
+    # 1) 베이스라인 격파
+    base_ok = (rel_ok or abs_ok or mase_ok)
+    # 2) 안정성
+    stable_ok = (improved_window_ratio >= 0.60)
+    # 3) (선택) 중앙값 보조
+    median_ok = (median_smape_model <= median_smape_naive)
+
+    # 기본 합격
+    pass_rule = base_ok and stable_ok
+
+    # 표본 수(Val_tune 윈도우 개수, X_val -1)
+    n_tune = int(len(smape_model_rows))
+
+    # 표본 적을 때 완화(옵션)
+    if n_tune < 80:
+        pass_rule = base_ok and (improved_window_ratio >= 0.55)
+
+    # 타이브레이커(옵션)
+    if not pass_rule and base_ok:
+        tiny_margin = 0.05  # 0.05pp 낮으면 통과시겨줌, 마지막 허용선
+        # median_ok를 빼면 타이브레이커가 느슨해지니 권장하지 않음
+        if median_ok and ((smape_naive - smape_price) >= tiny_margin):
+            pass_rule = True
+
+    # 조건 통과 못함 -> pass
+    # if not pass_rule:
+    #     continue
+
+    """
+    어떤 예측을 쓸지(모델/블렌드/나이브) 를 정하기 위한 “안전장치”
+    
+    모델이 나이브보다 항상 좋지 않을 수 있으니, Val_tune에서 모델과 나이브를 가중합(α) 하여 오차가 최소가 되는 α*를 찾는다
+    >> 리스크(큰 실수) 를 줄이고, 평균 성능을 끌어올릴 수 있다
+    
+    Val_tune에서 찾은 α*로 만든 혼합 예측(= blend)이 나이브보다 의미 있게 좋다(절대 0.2pp 또는 상대 3% 이상 개선)면, 
+    운영/최종 예측에서 이 블렌딩을 사용하겠다는 결정
+    """
+    if pass_rule:
+        decision = ("model", 1.0)     # 운영 예측은 모델 그대로
+    else:
+        alphas = np.linspace(0, 1, 21) # 0부터 1까지 21개 값(양 끝 포함)을 균등 간격으로 만든다
+        best = (None, np.inf)
+        for a in alphas:
+            blend = a*pred_price + (1-a)*y_naive_price   # 가격 단위
+            s = smape(Y_val_tune_price, blend)           # % 기준
+            if s < best[1]:
+                best = (a, s)
+        alpha_star, smape_blend = best
+
+        rel_thresh = smape_naive * (1 - 0.03)   # 상대 3% 개선
+        abs_pp = 0.2 if smape_naive >= 3.0 else 0.1 # 나이브가 아주 작을 때는 0.2pp가 과도할 수 있으니
+        abs_thresh = smape_naive - abs_pp
+
+        accept_thresh = max(rel_thresh, abs_thresh)  # 더 느슨한(또는 넉넉한) 기준
+        eps = 1e-6
+        if smape_blend <= accept_thresh + eps:
+            decision = ("blend", alpha_star)
+        else:
+            # decision = ("naive", 0.0)
+            continue
+    # print("decision:", decision, "alpha*:", alpha_star, "sMAPE_blend:", smape_blend)
+
+
+    #######################################################################
+
+    # 7) 마지막 윈도우 1개로 미래 H-step 예측
+    n_features = X_all.shape[1]
+    # X_all[-LOOK_BACK:] : 가장 최근 LOOK_BACK개 시점의 표준화된 피쳐들
+    # last_window : 15일치의 피쳐들을 표준화한 블록
+    last_window = X_last.reshape(1, LOOK_BACK, n_features)   # shape (1, L, F)
+    # print('last_window', last_window)
+    future_y_s  = model.predict(last_window, verbose=0)      # shape (1, H)  y-스케일
+
+    # 8) y-표준화 → X-스케일
+    future_y_x  = scaler_y.inverse_transform(future_y_s)     # y-스케일 -> X-스케일
+    # print('future_y_x', future_y_x)
+
+    y_pred_last_price = inverse_close_matrix_fast(
+        future_y_x, scaler_X, idx_close
+    ).ravel()  # shape=(H,) 최종 가격 단위
+
+    # --- 나이브(퍼시스턴스) 마지막 윈도우 기준 ---
+    last_close = X_df[col_c].iloc[-1]
+    H = y_pred_last_price.shape[0]
+    y_naive_last_price = np.repeat(last_close, H)
+
+    # --- 운영 결정 반영 (val_tune에서 구한 decision 사용) ---
+    # decision = ("model", 1.0) | ("blend", alpha_star) | ("naive", 0.0)
+    kind, alpha = decision
+
+    if kind == "model":
+        predicted_prices = y_pred_last_price
+    elif kind == "blend":
+        predicted_prices = alpha * y_pred_last_price + (1 - alpha) * y_naive_last_price
+    else:
+        continue
     # print('predicted_prices', predicted_prices)
 
-    # 날짜 처리
-    future_dates = pd.date_range(start=data.index[-1] + pd.Timedelta(days=1), periods=PREDICTION_PERIOD, freq='B')
-    avg_future_return = (np.mean(predicted_prices) / last_close - 1) * 100
+    # 9) 다음 영업일 가져오기
+    future_dates = get_next_business_days()
+    # print('future_dates', future_dates)
+    avg_future_return = (predicted_prices.mean() / last_close - 1.0) * 100
+    print(f"    predicted rate of increase : {avg_future_return:.2f}%")
 
     # 기대 성장률 미만이면 건너뜀
     if avg_future_return < EXPECTED_GROWTH_RATE and avg_future_return < 20:
-        if avg_future_return > 0:
-            print(f"  예상 : {avg_future_return:.2f}%")
+        # if avg_future_return > 0:
+        #     print(f"  predicted rate of increase : {avg_future_return:.2f}%")
         # pass
         continue
 
@@ -367,7 +589,9 @@ for count, ticker in enumerate(tickers):
 
 
 
+    #######################################################################
 
+    # 10) 차트로 전달
     fig = plt.figure(figsize=(14, 16), dpi=150)
     gs = fig.add_gridspec(nrows=4, ncols=1, height_ratios=[3, 1, 3, 1])
 
@@ -412,8 +636,10 @@ except Exception as e:
     print(f"progress-update 요청 실패: {e}")
     pass  # 오류
 
-print('result_r2 : ', total_r2/total_cnt)
-print('total_cnt : ', total_cnt)
+if total_cnt > 0:
+    print(f'R-squared_avg : {total_r2/total_cnt:.2f}')
+    print(f'SMAPE : {total_smape/total_cnt:.2f}')
+    print(f'total_cnt : {total_cnt}')
 
 
 '''
