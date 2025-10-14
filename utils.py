@@ -23,6 +23,7 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score, r
     f1_score
 import warnings
 import pandas_market_calendars as mcal
+from pandas.api.types import is_numeric_dtype
 
 # 시드 고정
 import numpy as np, tensorflow as tf, random
@@ -1467,3 +1468,32 @@ def effective_trials_for_hitrate(y_true, y_pred, *, y_base=None, space="price", 
 def min_sig_hitrate(N_eff, alpha=0.05):
     z = 1.96 if alpha == 0.05 else 2.576  # 0.01
     return 0.5 + z * 0.5 / max(N_eff, 1)**0.5
+
+
+def drop_sparse_columns(df: pd.DataFrame, threshold: float = 0.10, *, check_inf: bool = True, inplace: bool = False):
+    """
+    결측치 비율이 threshold(기본 10%)를 넘는 컬럼을 드롭.
+    옵션으로 무한대(±inf) 비율도 같은 기준으로 드롭.
+
+    check_inf : bool
+        True면 숫자형 컬럼의 ±inf 비율도 검사하여 기준 초과 시 드롭
+    inplace : bool
+        True면 df를 직접 수정하고, False면 복사본을 반환
+    """
+    target = df if inplace else df.copy()
+    dropped = []
+
+    for col in list(target.columns):
+        s = target[col]
+        na_ratio = s.isna().mean()    # isna() : pandas의 결측값(NA) 체크. NaN, None, NaT에 대해 True
+
+        inf_ratio = 0.0
+        if check_inf and is_numeric_dtype(s):
+            # 숫자형만 inf 체크 (문자열 등에선 불필요/오류 방지)
+            inf_ratio = np.isinf(s.to_numpy()).mean()
+
+        if (na_ratio > threshold) or (inf_ratio > threshold):
+            target.drop(columns=[col], inplace=True, errors="ignore")
+            dropped.append(col)
+
+    return target, dropped

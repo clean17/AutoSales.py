@@ -11,11 +11,12 @@ matplotlib.use('Agg')
 import os, sys
 import pandas as pd
 from datetime import datetime, timedelta
-from sklearn.preprocessing import StandardScaler, MinMaxScaler
+from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 from utils import create_lstm_model, create_multistep_dataset, fetch_stock_data, add_technical_features, \
     get_kor_ticker_dict_list, plot_candles_daily, plot_candles_weekly, drop_trading_halt_rows, regression_metrics, \
-    pass_filter, inverse_close_matrix_fast, get_next_business_days, make_naive_preds, smape, pass_filter_v2
+    pass_filter, inverse_close_matrix_fast, get_next_business_days, make_naive_preds, smape, pass_filter_v2, \
+    drop_sparse_columns
 import requests
 import time
 
@@ -27,7 +28,6 @@ random.seed(42)
 
 
 output_dir = 'D:\\kospi_stocks'
-# output_dir = 'D:\\stocks'
 os.makedirs(output_dir, exist_ok=True)
 
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
@@ -37,13 +37,12 @@ os.makedirs(pickle_dir, exist_ok=True) # 없으면 생성
 
 N_FUTURE = PREDICTION_PERIOD = 3
 LOOK_BACK = 15
-AVERAGE_TRADING_VALUE = 4_000_000_000 # 평균거래대금 30억
+AVERAGE_TRADING_VALUE = 5_000_000_000 # 평균거래대금 50억
 EXPECTED_GROWTH_RATE = 2
 DATA_COLLECTION_PERIOD = 700 # 샘플 수 = 68(100일 기준) - 20 - 4 + 1 = 45
 SPLIT      = 0.75
 
 today = datetime.today().strftime('%Y%m%d')
-# today = (datetime.today() - timedelta(days=5)).strftime('%Y%m%d')
 today_us = datetime.today().strftime('%Y-%m-%d')
 start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y%m%d')
 start_five_date = (datetime.today() - timedelta(days=5)).strftime('%Y%m%d')
@@ -53,7 +52,6 @@ start_five_date = (datetime.today() - timedelta(days=5)).strftime('%Y%m%d')
 tickers_dict = get_kor_ticker_dict_list()
 tickers = list(tickers_dict.keys())
 # tickers = ['204620'] # 글로벌 텍스프리
-# tickers = ['172670'] # 에이엘티
 
 def _col(df, ko: str, en: str):
     """한국/영문 칼럼 자동매핑: ko가 있으면 ko, 없으면 en을 반환"""
@@ -67,15 +65,12 @@ total_cnt = 0
 total_smape = 0
 is_first_flag = True
 
-# print('==================================================')
-# print("    RMSE, MAE → 예측 오차를 주가 단위(원) 그대로 해석 가능")
-# print("    MAPE (%) → 평균적으로 몇 % 오차가 나는지 직관적")
-# print("      0~10%: 매우 우수, 10~20%: 양호, 20~50%: 보통, 50% 이상: 부정확")
-# print("    SMAPE (%) → SMAPE는 0% ~ 200% 범위를 가지지만, 보통은 0~100% 사이에서 해석")
-# print("      0 ~ 10% → 매우 우수, 10 ~ 20% → 양호 (실사용 가능한 수준), 20 ~ 50% → 보통, 50% 이상 → 부정확")
-# print("    R² → 모델 설명력, 0~1 범위에서 클수록 좋음")
-# print("      0.6: 변동성의 약 60%를 설명")
-# print('==================================================')
+"""
+SMAPE (%) → SMAPE는 0% ~ 200% 범위를 가지지만, 보통은 0~100% 사이에서 해석")
+  0 ~ 10% → 매우 우수, 10 ~ 20% → 양호 (실사용 가능한 수준), 20 ~ 50% → 보통, 50% 이상 → 부정확
+R² → 모델 설명력, 0~1 범위에서 클수록 좋음
+  0.6: 변동성의 약 60%를 설명
+"""
 
 # 데이터 가져오는것만 1시간 걸리네
 for count, ticker in enumerate(tickers):
@@ -129,16 +124,22 @@ for count, ticker in enumerate(tickers):
 
     # 파일 저장
     df.to_pickle(filepath)
-    # data = pd.read_pickle(filepath)
+    # df = pd.read_pickle(filepath)    # 디버깅용
     data = df
 
+    # 한국/영문 칼럼 자동 식별
+    col_o = _col(df, '시가',   'Open')
+    col_h = _col(df, '고가',   'High')
+    col_l = _col(df, '저가',   'Low')
+    col_c = _col(df, '종가',   'Close')
+    col_v = _col(df, '거래량', 'Volume')
 
     ########################################################################
 
-    actual_prices = data['종가'].values # 종가 배열
+    actual_prices = data[col_c].values # 종가 배열
     last_close = actual_prices[-1]
 
-    # 0) 우선 거래정지/이상치 행 제거
+    # 거래정지/이상치 행 제거
     data, removed_idx = drop_trading_halt_rows(data)
     if len(removed_idx) > 0:
         # print(f"                                                        거래정지/이상치로 제거된 날짜 수: {len(removed_idx)}")
@@ -151,13 +152,13 @@ for count, ticker in enumerate(tickers):
 
     # 500원 미만이면 패스
     last_row = data.iloc[-1]
-    if last_row['종가'] < 500:
+    if last_row[col_c] < 500:
         # print("                                                        종가가 0이거나 500원 미만 → pass")
         continue
 
     # 최근 한달 거래대금 중 3억 미만이 있으면 패스
-    month_data = data.tail(20)
-    month_trading_value = month_data['거래량'] * month_data['종가']
+    month_data = data.tail(20)    # 마지막 20개 행을 반환
+    month_trading_value = month_data[col_v] * month_data[col_c]
     # 하루라도 거래대금이 3억 미만이 있으면 제외
     if (month_trading_value < 300_000_000).any():
         # print(f"                                                        최근 4주 중 거래대금 3억 미만 발생 → pass")
@@ -165,8 +166,8 @@ for count, ticker in enumerate(tickers):
 
     # 최근 2주 거래대금이 기준치 이하면 패스
     recent_data = data.tail(10)
-    recent_trading_value = recent_data['거래량'] * recent_data['종가']
-    recent_average_trading_value = recent_trading_value.mean()
+    recent_trading_value = recent_data[col_v] * recent_data[col_c]
+    recent_average_trading_value = recent_trading_value.mean()    # 평균
     if recent_average_trading_value <= AVERAGE_TRADING_VALUE:
         formatted_recent_value = f"{recent_average_trading_value / 100_000_000:.0f}억"
         # print(f"                                                        최근 2주 평균 거래대금({formatted_recent_value})이 부족 → pass")
@@ -180,31 +181,28 @@ for count, ticker in enumerate(tickers):
     #     # continue
     #     pass
 
-    # 투경 조건
+    # ----- 투경 조건 -----
     # 1. 당일의 종가가 3일 전날의 종가보다 100% 이상 상승
-    if len(actual_prices) >= 4:
-        close_3ago = actual_prices[-4]
-        ratio = (last_close - close_3ago) / close_3ago * 100
-        if last_close >= close_3ago * 2:  # 100% 이상 상승
-            print(f"                                                        3일 전 대비 100% 이상 상승: {close_3ago} -> {last_close}  {ratio:.2f}% → pass")
-            continue
+    close_3ago = actual_prices[-4]
+    ratio = (last_close - close_3ago) / close_3ago * 100
+    if last_close >= close_3ago * 2:  # 100% 이상 상승
+        print(f"                                                        3일 전 대비 100% 이상 상승: {close_3ago} -> {last_close}  {ratio:.2f}% → pass")
+        continue
 
     # 2. 당일의 종가가 5일 전날의 종가보다 60% 이상 상승
-    # if len(actual_prices) >= 6:
-    #     close_5ago = actual_prices[-6]
-    #     ratio = (last_close - close_5ago) / close_5ago * 100
-    #     if last_close >= close_5ago * 1.6:  # 60% 이상 상승
-    #         print(f"                                                        5일 전 대비 60% 이상 상승: {close_5ago} -> {last_close}  {ratio:.2f}% → pass")
-    #         continue
+    close_5ago = actual_prices[-6]
+    ratio = (last_close - close_5ago) / close_5ago * 100
+    if last_close >= close_5ago * 1.6:  # 60% 이상 상승
+        print(f"                                                        5일 전 대비 60% 이상 상승: {close_5ago} -> {last_close}  {ratio:.2f}% → pass")
+        continue
 
     # 3. 당일의 종가가 15일 전날의 종가보다 100% 이상 상승
-    # if len(actual_prices) >= 16:
-    #     close_15ago = actual_prices[-16]
-    #     ratio = (last_close - close_15ago) / close_15ago * 100
-    #     if last_close >= close_15ago * 2:  # 100% 이상 상승
-    #         print(f"                                                        15일 전 대비 100% 이상 상승: {close_15ago} -> {last_close}  {ratio:.2f}% → pass")
-    #         continue
-
+    # close_15ago = actual_prices[-16]
+    # ratio = (last_close - close_15ago) / close_15ago * 100
+    # if last_close >= close_15ago * 2:  # 100% 이상 상승
+    #     print(f"                                                        15일 전 대비 100% 이상 상승: {close_15ago} -> {last_close}  {ratio:.2f}% → pass")
+    #     continue
+    # --------------------
 
     # 현재 종가가 4일 전에 비해서 크게 하락하면 패스
     # close_4days_ago = actual_prices[-5]
@@ -218,19 +216,21 @@ for count, ticker in enumerate(tickers):
     data = add_technical_features(data)
 
     # 결측 제거
-    threshold = 0.1  # 10%
-    # isna() : pandas의 결측값(NA) 체크. NaN, None, NaT에 대해 True
-    # mean() : 평균
-    # isinf() : 무한대 체크
-    cols_to_drop = [ # 결측치가 10% 이상인 칼럼
-        col for col in data.columns
-        if (data[col].isna().mean() > threshold) or (np.isinf(data[col]).mean() > threshold)
-    ]
-    if len(cols_to_drop) > 0:
-        # inplace=True : 반환 없이 입력을 그대로 수정
-        # errors='ignore' : 목록에 없는 칼럼 지우면 에러지만 무시
-        data.drop(columns=cols_to_drop, inplace=True, errors='ignore')
-        # print("    Drop candidates:", cols_to_drop)
+    cleaned, cols_to_drop = drop_sparse_columns(data, threshold=0.10, check_inf=True, inplace=True)
+    # print("    Drop candidates:", cols_to_drop)
+    data = cleaned
+
+
+    # 5일선이 너무 하락하면
+    ma5_today = data['MA5'].iloc[-1]
+    ma5_yesterday = data['MA5'].iloc[-2]
+
+    # 변화율 계산 (퍼센트로 보려면 * 100)
+    change_rate = (ma5_today - ma5_yesterday) / ma5_yesterday
+    if change_rate * 100 < -2:
+        # print(f"어제 5일선의 변화율: {change_rate:.5f}")  # 소수점 5자리
+        print(f"                                                        어제 5일선의 변화율: {change_rate * 100:.2f}% → pass")
+        continue
 
     if 'MA20' not in data.columns:
         continue
@@ -242,27 +242,7 @@ for count, ticker in enumerate(tickers):
         continue
         # pass
 
-    # 5일선이 너무 하락하면
-    # ma5_today = data['MA5'].iloc[-1]
-    # ma5_yesterday = data['MA5'].iloc[-2]
-    #
-    # # 변화율 계산 (퍼센트로 보려면 * 100)
-    # change_rate = (ma5_today - ma5_yesterday) / ma5_yesterday
-    # if change_rate * 100 < -2:
-    #     # print(f"어제 5일선의 변화율: {change_rate:.5f}")  # 소수점 5자리
-    #     print(f"                                                        어제 5일선의 변화율: {change_rate * 100:.2f}% → pass")
-    #     continue
-
-
     ########################################################################
-
-
-    # 한국/영문 칼럼 자동 식별
-    col_o = _col(df, '시가',   'Open')
-    col_h = _col(df, '고가',   'High')
-    col_l = _col(df, '저가',   'Low')
-    col_c = _col(df, '종가',   'Close')
-    col_v = _col(df, '거래량', 'Volume')
 
     # 학습에 쓸 피처
     feature_cols = [
