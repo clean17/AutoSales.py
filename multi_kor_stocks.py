@@ -37,7 +37,7 @@ os.makedirs(pickle_dir, exist_ok=True) # 없으면 생성
 
 N_FUTURE = PREDICTION_PERIOD = 3
 LOOK_BACK = 15
-AVERAGE_TRADING_VALUE = 5_000_000_000 # 평균거래대금 50억
+AVERAGE_TRADING_VALUE = 4_000_000_000 # 평균거래대금 50억
 EXPECTED_GROWTH_RATE = 2
 DATA_COLLECTION_PERIOD = 700 # 샘플 수 = 68(100일 기준) - 20 - 4 + 1 = 45
 SPLIT      = 0.75
@@ -52,6 +52,7 @@ start_five_date = (datetime.today() - timedelta(days=5)).strftime('%Y%m%d')
 tickers_dict = get_kor_ticker_dict_list()
 tickers = list(tickers_dict.keys())
 # tickers = ['204620'] # 글로벌 텍스프리
+# tickers = tickers[1526:]
 
 def _col(df, ko: str, en: str):
     """한국/영문 칼럼 자동매핑: ko가 있으면 ko, 없으면 en을 반환"""
@@ -217,9 +218,12 @@ for count, ticker in enumerate(tickers):
 
     # 결측 제거
     cleaned, cols_to_drop = drop_sparse_columns(data, threshold=0.10, check_inf=True, inplace=True)
-    # print("    Drop candidates:", cols_to_drop)
+    if len(cols_to_drop) > 0:
+        print("    Drop candidates:", cols_to_drop)
     data = cleaned
 
+    if 'MA5' not in data.columns or 'MA20' not in data.columns:
+        continue
 
     # 5일선이 너무 하락하면
     ma5_today = data['MA5'].iloc[-1]
@@ -230,9 +234,6 @@ for count, ticker in enumerate(tickers):
     if change_rate * 100 < -2:
         # print(f"어제 5일선의 변화율: {change_rate:.5f}")  # 소수점 5자리
         print(f"                                                        어제 5일선의 변화율: {change_rate * 100:.2f}% → pass")
-        continue
-
-    if 'MA20' not in data.columns:
         continue
 
     # 현재 5일선이 20일선보다 낮으면서 하락중이면 패스
