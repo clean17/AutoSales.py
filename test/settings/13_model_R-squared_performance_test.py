@@ -1,12 +1,20 @@
+# Could not load dynamic library 'cudart64_110.dll'; dlerror: cudart64_110.dll not found / Skipping registering GPU devices... 안나오게
+import os
+# 1) GPU 완전 비활성화
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+# 2) C++ 백엔드 로그 레벨 낮추기 (0=INFO, 1=WARNING, 2=ERROR, 3=FATAL)
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import MinMaxScaler
-from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import MinMaxScaler, StandardScaler
 import os
 import sys
 import pickle
 from datetime import datetime, timedelta
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, Dropout
 
 # 현재 파일에서 2단계 위 폴더 경로 구하기
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
@@ -34,13 +42,16 @@ ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__fil
 pickle_dir = os.path.join(ROOT_DIR, 'pickle')
 
 # 데이터 수집
-tickers = ['008970']
-# tickers = ['008970', '006490', '042670', '023160', '006800', '323410', '009540', '034020', '358570', '000155', '035720', '00680K', '035420', '012510']
+# tickers = ['358570']
+tickers = ['008970', '006490', '042670', '023160', '006800', '323410', '009540', '034020', '358570', '000155', '035720', '00680K', '035420', '012510']
 tickers_dict = get_kor_ticker_dict_list()
 
-today = datetime.today().strftime('%Y%m%d')
-# start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y%m%d')
-start_five_date = (datetime.today() - timedelta(days=5)).strftime('%Y%m%d')
+
+# 혹시라도 1D가 되었다면 강제 2D 복원
+def ensure_2d(y):
+    return y.reshape(-1, 1) if y.ndim == 1 else y
+
+
 
 for i in range(1):
     # period = DATA_COLLECTION_PERIOD + (10*i)
@@ -57,36 +68,19 @@ for i in range(1):
         stock_name = tickers_dict.get(ticker, 'Unknown Stock')
         print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
 
-        # 데이터가 없으면 1년 데이터 요청, 있으면 5일 데이터 요청
+        # 1. 데이터 수집
         filepath = os.path.join(pickle_dir, f'{ticker}.pkl')
-        if os.path.exists(filepath):
-            df = pd.read_pickle(filepath)
-            data = fetch_stock_data(ticker, start_five_date, today)
-        else:
-            df = pd.DataFrame()
-            data = fetch_stock_data(ticker, start_date, today)
+        data = pd.read_pickle(filepath)
 
-        # 중복 제거 & 새로운 날짜만 추가
-        if not df.empty:
-            # 기존 날짜 인덱스와 비교하여 새로운 행만 선택
-            new_rows = data.loc[~data.index.isin(df.index)] # ~ (not) : 기존에 없는 날짜만 남김
-            df = pd.concat([df, new_rows])
-        else:
-            df = data
-
-        # 파일 저장
-        df.to_pickle(filepath)
-        data = df
-
-
-        # 0) 우선 거래정지/이상치 행 제거
+        # 1-1. 우선 거래정지/이상치 행 제거
         data, removed_idx = drop_trading_halt_rows(data)
-        if len(removed_idx) > 0:
-            print(f"거래정지/이상치로 제거된 날짜 수: {len(removed_idx)}")
+        # if len(removed_idx) > 0:
+        #     print(f"거래정지/이상치로 제거된 날짜 수: {len(removed_idx)}")
 
+        # 2. 2차 생성 feature
         data = add_technical_features(data)
 
-
+        # 3. 결측 제거
         threshold = 0.1  # 10%
         cols_to_drop = [
             col for col in data.columns
@@ -98,68 +92,139 @@ for i in range(1):
             # continue
 
 
-        # 데이터 스케일링
-        scaler = MinMaxScaler(feature_range=(0, 1))
+        # ---- 전처리: NaN/inf 제거 및 피처 선택 ----
         feature_cols = [
-            '종가', '고가', '저가', '거래량',
-            # 'RSI14',
-            'ma10_gap',
+            '시가', '고가', '저가', '종가', 'Vol_logdiff',
+            'RSI14',
+
+            # 'MA5_slope',
+            # 'CCI14',
+            # 'STD20', 'UpperBand', 'LowerBand',
+            # 'UltimateOsc',
         ]
-        # '종가', '고가', 'PBR', '저가', '거래량', >> 0.39
-        # '종가', '고가', 'PBR', '저가', '거래량', 'RSI14', >> 0.32
-        # '종가', '고가', 'PBR', '저가', '거래량', 'ma10_gap', >> 0.43
-        # '종가', '고가', 'PBR', '저가', '거래량', 'RSI14', 'ma10_gap', >> 0.33
-        # feature_cols = [
-        #     '종가', '고가', '저가', '거래량'
-        # ]
 
-        # 0) NaN/inf 정리
-        data = data.replace([np.inf, -np.inf], np.nan)
-        # 1) feature_cols만 남기고, 그 안에서만 dropna
-        feature_cols = [c for c in feature_cols if c in data.columns]
-        X_for_model = data.dropna(subset=feature_cols).loc[:, feature_cols]
-        scaled_data = scaler.fit_transform(X_for_model)
+        # 4. 피쳐, 무한대 필터링
+        cols = [c for c in feature_cols if c in data.columns]  # 순서 보존
+        df = data.loc[:, cols].replace([np.inf, -np.inf], np.nan)
+        X_df = df.dropna()
+        idx_close = feature_cols.index('종가')
 
-        # 시계열 데이터를 윈도우로 나누기
-        X, Y = create_multistep_dataset(scaled_data, (LOOK_BACK + i), PREDICTION_PERIOD, 0)
+        # 5. 스케일링, 시점 마스크
+        split = int(len(X_df) * 0.8)
+        scaler_X = StandardScaler().fit(X_df.iloc[:split])  # 원시 train 구간만, 중복 윈도우 때문에 같은 시점 행이 여러 번 들어가는 왜곡 방지
+        X_all_2d = scaler_X.transform(X_df)                 # 전체 변환 (누수 없음)
 
-        # 학습 데이터와 검증 데이터 분리
-        X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=0.1, shuffle=False)
+        LOOK_BACK = 15
+        N_FUTURE = 3
+
+        # 이미 스케일된 데이터셋
+        X_all, Y_all, t0 = create_multistep_dataset(X_all_2d, LOOK_BACK, N_FUTURE, idx=idx_close, return_t0=True)
+
+        train_mask = (t0 + N_FUTURE - 1) < split
+        val_mask   = (t0 >= split)
+
+        X_train, Y_train = X_all[train_mask], Y_all[train_mask]
+        X_val,   Y_val   = X_all[val_mask],   Y_all[val_mask]
+
+        # ---- Train/Test split (스케일러는 Train으로만 fit) ----
+        Y_train = ensure_2d(Y_train)
+        Y_val  = ensure_2d(Y_val)
+
+        # ---- y 스케일링: Train으로만 fit ---- (타깃이 수익률이면 생략 가능)
+        scaler_y = StandardScaler().fit(Y_train)
+        y_train_scaled = scaler_y.transform(Y_train)
+        y_val_scaled  = scaler_y.transform(Y_val)
+
+        # dtype & 메모리 연속성(권장: float32, C-order)
+        X_train = np.asarray(X_train, dtype=np.float32, order="C")
+        X_val   = np.asarray(X_val,   dtype=np.float32, order="C")
+        y_train_scaled = np.asarray(y_train_scaled, dtype=np.float32, order="C")
+        y_val_scaled   = np.asarray(y_val_scaled,   dtype=np.float32, order="C")
+
         if X_train.shape[0] < 50:
             print('샘플 부족 : ', X_train.shape)
             continue
 
         model = create_lstm_model((X_train.shape[1], X_train.shape[2]), PREDICTION_PERIOD,
-                                      lstm_units=[128,64], dense_units=[64,32])
+                                      lstm_units=[32], dense_units=[16])
 
         # 콜백 설정
         from tensorflow.keras.callbacks import EarlyStopping
         early_stop = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True) # 10회 동안 개선없으면 종료, 최적의 가중치를 복원
-        history = model.fit(X_train, Y_train, batch_size=8, epochs=200,
-                            validation_data=(X_val, Y_val),
-                            shuffle=False, verbose=0, callbacks=[early_stop])
+        model.fit(
+            X_train, y_train_scaled,
+            batch_size=8, epochs=200, verbose=0, shuffle=False,
+            validation_data=(X_val, y_val_scaled),
+            callbacks=[early_stop]
+        )
+
+        y_pred_scaled = model.predict(X_val, batch_size=256, verbose=0)
+
+        # -------- 평가 ---------
+        y_true = scaler_y.inverse_transform(y_val_scaled)     # (N, H)
+        y_pred = scaler_y.inverse_transform(y_pred_scaled)    # (N, H)
+
+        last_close = X_val[:, -1, idx_close]
+        y_naive = np.repeat(last_close[:, None], y_true.shape[1], axis=1)
 
 
-        # X_val : 검증에 쓸 여러 시계열 구간의 집합
-        # predictions : 검증셋 각 구간(윈도우)에 대해 미래 PREDICTION_PERIOD만큼의 예측치 반환
-        # shape: (검증샘플수, 예측일수)
-        predictions = model.predict(X_val, verbose=0)
-        print('predictions (샘플, 예측일)', predictions.shape)
+        # --- Naive: persistence (가격용) ---
+        # X_val: (N,T,F), idx_close: 종가 열
+        last_close = X_val[:, -1, idx_close]    # 반드시 '원 단위' 원본으로 맞추세요
+        y_naive = np.repeat(last_close[:, None], y_true.shape[1], axis=1)
+
+
+        # --- 멀티스텝 집계 ---
+        def per_horizon_metrics(y_true, y_pred):
+            H = y_true.shape[1]
+            out = []
+            for h in range(H):
+                out.append({
+                    "h": h+1,
+                    "RMSE": rmse(y_true[:,h], y_pred[:,h]),
+                    "MAE" : mae (y_true[:,h], y_pred[:,h]),
+                    "R2"  : r2_score(y_true[:,h], y_pred[:,h])
+                })
+            return out
+
+        # Model vs Naive
+        print("== Aggregate ==")
+        print("RMSE(model) :", rmse(y_true, y_pred))
+        print("RMSE(naive) :", rmse(y_true, y_naive))
+        print("ratio       :", rmse(y_true, y_pred) / rmse(y_true, y_naive))
+        print("SMAPE(model):", smape(y_true, y_pred))
+
+        print("\n== Per-horizon ==")
+        for row in per_horizon_metrics(y_true, y_pred):
+            h = row["h"]
+            r_model = rmse(y_true[:,h-1], y_pred[:,h-1])
+            r_naive = rmse(y_true[:,h-1], y_naive[:,h-1])
+            print(f"h={h:>2}  RMSE(model)={r_model:.2f}  RMSE(naive)={r_naive:.2f}  ratio={r_model/r_naive:.3f}")
+
+        # 방향 정확도(hit rate) - 방향을 맞췄는지 비율 // 무작위 기준: 0.5, 일반 관찰치: 0.4~0.6
+        def hit_rate(y_true, y_pred):
+            # 마지막 스텝 기준 (원하면 모든 스텝 평균도 가능)
+            y_t = y_true[:,-1] - y_true[:,-2] if y_true.shape[1] > 1 else y_true[:,-1]
+            p_t = y_pred[:,-1] - y_true[:,-2] if y_true.shape[1] > 1 else y_pred[:,-1]
+            return np.mean((y_t >= 0) == (p_t >= 0))
+
+        print("Hit rate:", hit_rate(y_true, y_pred))
 
         # MSE
-        mse = mean_squared_error(Y_val, predictions)
+        mse = mean_squared_error(Y_val, y_pred_scaled)
         # print("MSE:", mse)
         total_mse += mse
 
         # R-squared; (0=엉망, 1=완벽)
-        r2 = r2_score(Y_val, predictions)
+        r2 = r2_score(Y_val, y_pred_scaled)
         # print("R-2:", r2)
         total_r2 += r2
         total_cnt += 1
+        print('')
 
 
-    print('result1 : ', total_mse/total_cnt)
-    print('result2 : ', total_r2/total_cnt)
+    print('mse : ', total_mse/total_cnt)
+    print('r2 : ', total_r2/total_cnt)
 
 
 
