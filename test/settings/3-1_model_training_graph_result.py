@@ -42,6 +42,7 @@ for count, ticker in enumerate(tickers):
     filepath = os.path.join(pickle_dir, f'{ticker}.pkl')
     data = pd.read_pickle(filepath)
 
+
     # 1-1. 우선 거래정지/이상치 행 제거
     data, removed_idx = drop_trading_halt_rows(data)
     if len(removed_idx) > 0:
@@ -79,30 +80,59 @@ for count, ticker in enumerate(tickers):
     df = data.loc[:, cols].replace([np.inf, -np.inf], np.nan)
     X_df = df.dropna() # X_df는 (정렬/결측처리된) 피처 데이터프레임, '종가' 컬럼 존재
 
-    idx_close = feature_cols.index('종가')
+    # 정렬되어 있다면
+    # last_dt = X_df.index[-1]
+    # print(last_dt)    # 마지막 날짜 인덱스
+    # check_data = X_df[-5:]
+    # print(check_data)
+
+    idx_close = cols.index('종가')
 
     # 5. 스케일링, 시점 마스크
-    split = int(len(X_df) * 0.85)
+    split = int(len(X_df) * 0.75)
     scaler_X = StandardScaler().fit(X_df.iloc[:split])  # 원시 train 구간만, 중복 윈도우 때문에 같은 시점 행이 여러 번 들어가는 왜곡 방지
-    X_all = scaler_X.transform(X_df)                    # 전체 변환 (누수 없음)
+    X_all = scaler_X.transform(X_df)
 
+    # (A) X-스케일 ↔ 원단위 종가
+    close_raw = X_df['종가'].to_numpy(dtype=float)
+    recon_close_all = inverse_close_from_Xscale_fast(X_all[:, idx_close], scaler_X, idx_close)
+    assert np.allclose(recon_close_all, close_raw, atol=1e-6)# 전체 변환 (누수 없음)
 
+    # print('X_all', X_all.shape)    # (290, 5)
     # ↓ 여기서 X_all, Y_all을 '스케일된 X'로부터 만듦
     X_tmp, Y_xscale, t0 = create_multistep_dataset(X_all, LOOK_BACK, N_FUTURE, idx=idx_close, return_t0=True)
+    # print('X_tmp', X_tmp.shape)    # (273, 15, 5)
+    # print('Y_xscale', Y_xscale.shape)    # (273, 3)
+
     t_end = t0 + LOOK_BACK - 1        # 윈도 끝 인덱스 (입력의 마지막 시점)
-    t_y_end = t_end + (N_FUTURE - 1)  # 타깃의 마지막 시점
+    # print('t_end', t_end)    # 첫 인덱스 14 (0~14)
+    t_y_end = t_end + N_FUTURE  # 타깃의 마지막 시점
+    # print('t_y_end', t_y_end)    # 마지막 인덱스 17 (15~17)
 
     # 시점 마스크로 분리
     train_mask = (t_y_end < split)
     val_mask   = (t_y_end >= split)
 
-    X_train, Y_train = X_tmp[train_mask], Y_xscale[train_mask]
-    X_val,   Y_val   = X_tmp[val_mask],   Y_xscale[val_mask]
+    # (D) 분할 경계 — 라벨이 참조하는 마지막 '가격'이 split 이전/이후로 정확히 나뉘는가
+    assert np.all(t_y_end[train_mask] < split)
+    assert np.all(t_y_end[val_mask]   >= split)
+
+    X_train, Y_train = X_tmp[train_mask], Y_xscale[train_mask]    # 학습에 사용할 데이터셋, 종가셋
+    X_val,   Y_val   = X_tmp[val_mask],   Y_xscale[val_mask]    # 검증에 사용할 데이터셋, 종가셋
+    # print('X_train', X_train.shape)    # (200, 15, 5)
+    # print('Y_train', Y_train.shape)    # (200, 3)
+    # print('X_val', X_val.shape)        # (73, 15, 5)
+    # print('Y_val', Y_val.shape)        # (73, 3)
+
+    last_val = Y_val
+    last_price = inverse_close_matrix_fast(Y_val, scaler_X, idx_close)
+    print('last_price', last_price[-1])
+
 
     # ---- y 스케일링: Train으로만 fit ---- (타깃이 수익률이면 생략 가능)
     scaler_y = StandardScaler().fit(Y_train)
     y_train_scaled = scaler_y.transform(Y_train)
-    y_test_scaled  = scaler_y.transform(Y_val)
+    y_val_scaled  = scaler_y.transform(Y_val)
 
 
     # ===== 공통 설정 =====
@@ -111,9 +141,6 @@ for count, ticker in enumerate(tickers):
     rlrop       = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, min_lr=1e-6)
 
     # ===== 권장 실험 구성 =====
-    # - LSTM32: 가벼운 모델 (작은 데이터/빠른 실험)
-    # - LSTM64: 밸런스형 (권장 기본)
-    # - LSTM128: 깊고 넓게 (데이터/패턴이 충분할 때만)
     def make_huber_per_h(delta_vec, eps=1e-6):
         delta_vec = np.asarray(delta_vec, dtype="float32")
         delta_vec = np.maximum(delta_vec, eps)
@@ -127,52 +154,73 @@ for count, ticker in enumerate(tickers):
             return tf.reduce_mean(loss)
         return huber_per_h
 
-    stds = Y_train.std(axis=0).astype("float32")
-    loss_fn = make_huber_per_h(2.0 * stds)
+    # stds = Y_train.std(axis=0).astype("float32")
+    # loss_fn = make_huber_per_h(2.0 * stds)
+
+    stds_scaled = y_train_scaled.std(axis=0).astype("float32")
+    loss_fn = make_huber_per_h(2.0 * stds_scaled)
 
     variants = {
-        "LSTM": {
+        "LSTM_4": {
             "lstm_units": [32],
             "dropout": None,
             "dense_units": [16],
-            "lr": 5e-4, "loss": loss_fn, "delta": 1.0
+            "lr": 5e-4, "loss": loss_fn, "delta": 1.0,
+            "batch_size": 4
+        },
+        "LSTM_8": {
+            "lstm_units": [32],
+            "dropout": None,
+            "dense_units": [16],
+            "lr": 5e-4, "loss": loss_fn, "delta": 1.0,
+            "batch_size": 8
+        },
+        "LSTM_16": {
+            "lstm_units": [32],
+            "dropout": None,
+            "dense_units": [16],
+            "lr": 5e-4, "loss": loss_fn, "delta": 1.0,
+            "batch_size": 16
         },
     }
 
     results = {}
-    n_features = X_train.shape[2]
 
     for name, cfg in variants.items():
         print(f"[{name}] training...")
-        model_v = create_lstm_model(
+        model = create_lstm_model(
             input_shape, N_FUTURE,
             lstm_units=cfg["lstm_units"],
             dropout=cfg["dropout"],
             dense_units=cfg["dense_units"],
             lr=cfg["lr"], delta=cfg["delta"],
+            loss=cfg["loss"]
         )
-        history = model_v.fit(
+        history = model.fit(
             X_train, y_train_scaled,
-            batch_size=16, epochs=200, verbose=0, shuffle=False,
-            validation_data=(X_val, y_test_scaled),
+            batch_size=cfg["batch_size"], epochs=200, verbose=0, shuffle=False,
+            validation_data=(X_val, y_val_scaled),
             callbacks=[early_stop, rlrop]
         )
 
         # 예측 (y-스케일)
-        tr_pred_s = model_v.predict(X_train, verbose=0)
-        va_pred_s = model_v.predict(X_val,   verbose=0)
+        tr_pred_s = model.predict(X_train, verbose=0)
+        va_pred_s = model.predict(X_val,   verbose=0)
 
-        # y-스케일 -> X-스케일
+        # y-스케일 -> X-스케일 (y-스케일 공간으로 학습했으므로 예측 결과도 y-스케일)
         tr_pred_x = scaler_y.inverse_transform(tr_pred_s)
         va_pred_x = scaler_y.inverse_transform(va_pred_s)
+        # print('tr_pred_x', tr_pred_x.shape)    # (200, 3)
+        # print('va_pred_x', va_pred_x.shape)    # (73, 3)
 
         # X-스케일 -> 원 단위(종가만 역변환)
         tr_pred_p = inverse_close_matrix_fast(tr_pred_x, scaler_X, idx_close)  # (N_tr, H)
         va_pred_p = inverse_close_matrix_fast(va_pred_x, scaler_X, idx_close)  # (N_va, H)
+        # print('tr_pred_p', tr_pred_p)
 
         best_val = min(history.history.get('val_loss', [float('inf')]))
         results[name] = {
-            "model": model_v,
+            "model": model,
             "train_pred_price": tr_pred_p,
             "val_pred_price":   va_pred_p,
             "best_val": best_val,
@@ -189,10 +237,27 @@ for count, ticker in enumerate(tickers):
     y_train_price = inverse_close_matrix_fast(Y_train, scaler_X, idx_close)
     y_val_price   = inverse_close_matrix_fast(Y_val,   scaler_X, idx_close)
 
+    # (C) 라벨(진짜값) 역변환
+    # y_val_price[k, h] 가 실제로 close_raw[t_end[val_mask][k] + (h+1)] 와 같은가?
+    for k in range(min(5, len(y_val_price))):
+        for h in range(N_FUTURE):
+            assert np.isclose(
+                y_val_price[k, h],
+                close_raw[t_end[val_mask][k] + (h+1)],
+                atol=1e-6
+            )
+
     # ====== 평가 세트용 앵커(기준가격 C_t) ======
-    n_features = X_train.shape[2]
-    base_close_val_scaled = X_val[:, -1, idx_close]
+    base_close_val_scaled = X_val[:, -1, idx_close] # 검증 구간 마지막 인덱스의 종가를 뽑는다  (N, )
     base_close_val = inverse_close_from_Xscale_fast(base_close_val_scaled, scaler_X, idx_close)
+    # print('base_close_val', base_close_val)    # 검증셋의 데이터에서 종가만 추출
+
+    # (B) 윈도 마지막 시점 종가(검증)
+    assert np.allclose(
+        inverse_close_from_Xscale_fast(X_val[:, -1, idx_close], scaler_X, idx_close),
+        close_raw[t_end[val_mask]],
+        atol=1e-6
+    )
 
     # ====== 나이브 베이스라인 (C_{t+h} = C_t) ======
     naive_val = np.repeat(base_close_val[:, None], N_FUTURE, axis=1)
@@ -236,7 +301,7 @@ for count, ticker in enumerate(tickers):
         # ------ (선택) 로그수익률 기준 평가 ------
         # 가격 예측을 로그수익률로 변환해, 수익률 공간에서도 비교
         pred_log = np.log(np.clip(y_pred_p, 1e-12, None) / base_close_val[:, None])
-        true_log = np.log(y_true_p / base_close_val[:, None])
+        true_log = np.log(np.clip(y_true_p, 1e-12, None) / base_close_val[:, None])
         rlog_m = rmse(true_log.reshape(-1), pred_log.reshape(-1))
         rlog_n = rmse(true_log.reshape(-1), np.zeros_like(true_log).reshape(-1))  # 나이브(0수익률)
         print(f"    [log-returns] RMSE model={rlog_m:.6f} | naive={rlog_n:.6f} | 개선={improve(rlog_m, rlog_n):.1f}%")
