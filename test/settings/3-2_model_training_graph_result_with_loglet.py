@@ -26,15 +26,15 @@ pickle_dir = os.path.join(BASE_DIR, 'pickle')
 
 from utils import create_multistep_dataset, add_technical_features, create_lstm_model, drop_trading_halt_rows, \
     inverse_close_matrix_fast, inverse_close_from_Xscale_fast, prices_from_logrets, log_returns_from_prices, \
-    rmse, improve, smape, nrmse
+    rmse, improve, smape, nrmse, drop_sparse_columns
 
 
 
 
 # 1. 데이터 수집
 ticker = '000660' # 하이닉스
-tickers = ['000660', '008970', '006490', '042670', '023160', '006800', '323410', '009540', '034020', '358570', '000155', '035720', '00680K', '035420', '012510']
-tickers = ['000660']
+tickers = ['095610', '000660', '008970', '006490', '042670', '023160', '006800', '323410', '009540', '034020', '358570', '000155', '035720', '00680K', '035420', '012510']
+# tickers = ['095610']
 
 LOOK_BACK = 15
 N_FUTURE = 3
@@ -44,30 +44,17 @@ for count, ticker in enumerate(tickers):
     filepath = os.path.join(pickle_dir, f'{ticker}.pkl')
     data = pd.read_pickle(filepath)
 
-    # 1-1. 우선 거래정지/이상치 행 제거
+    # 1. 우선 거래정지/이상치 행 제거
     data, removed_idx = drop_trading_halt_rows(data)
-    # if len(removed_idx) > 0:
-    #     print(f"거래정지/이상치로 제거된 날짜 수: {len(removed_idx)}")
 
     # 2. 2차 생성 feature
     data = add_technical_features(data)
     # print(data.columns) # 칼럼 헤더 전체 출력
 
     # 3. 결측 제거
-    threshold = 0.1  # 10%
-    # isna() : pandas의 결측값(NA) 체크. NaN, None, NaT에 대해 True
-    # mean() : 평균
-    # isinf() : 무한대 체크
-    cols_to_drop = [  # 결측치가 10% 이상인 칼럼
-        col
-        for col in data.columns
-        if (~np.isfinite(pd.to_numeric(data[col], errors='coerce'))).mean() > threshold
-    ]
-    if len(cols_to_drop) > 0:
-        # inplace=True : 반환 없이 입력을 그대로 수정
-        # errors='ignore' : 목록에 없는 칼럼 지우면 에러지만 무시
-        data.drop(columns=cols_to_drop, inplace=True, errors='ignore')
-        print("Drop candidates:", cols_to_drop)
+    cleaned, cols_to_drop = drop_sparse_columns(data, threshold=0.10, check_inf=True, inplace=True)
+    # print("    Drop candidates:", cols_to_drop)
+    data = cleaned
 
 
     # ---- 전처리: NaN/inf 제거 및 피처 선택 ----
@@ -81,39 +68,52 @@ for count, ticker in enumerate(tickers):
     df = data.loc[:, cols].replace([np.inf, -np.inf], np.nan)
     X_df = df.dropna()  # X_df는 (정렬/결측처리된) 피처 데이터프레임, '종가' 컬럼 존재
 
+    if '종가' not in cols:
+        raise KeyError("'종가' 컬럼이 데이터에 없습니다.")
     idx_close = cols.index('종가')
-    # print('idx_close', idx_close)
 
     # 5. 스케일링, 시점 마스크
-    split = int(len(X_df) * 0.85)
+    split = int(len(X_df) * 0.75)
     scaler_X = StandardScaler().fit(X_df.iloc[:split])  # 원시 train 구간만, 중복 윈도우 때문에 같은 시점 행이 여러 번 들어가는 왜곡 방지
     X_all = scaler_X.transform(X_df)                    # 전체 변환 (누수 없음)
+    print(X_all.shape)
 
     # 원본 종가(스케일 전)를 1D ndarray로 확보 (X_df와 같은 인덱스/정렬/필터 상태)
     # close_raw = X_df.iloc[:, idx_close].to_numpy(dtype=float)
-    close_raw = X_df['종가'].to_numpy(float)
-    logret = log_returns_from_prices(close_raw)  # 길이 L-1
+    close_raw = X_df['종가'].to_numpy(dtype=float)
+    logret = log_returns_from_prices(close_raw)  # 인접한 두 가격으로 로그수익률을 만드니까 길이는 L-1, 
 
     # X_all(스케일) 종가 역변환 == close_raw(원본) 일치 여부 (전구간 체크)
-    recon_close = inverse_close_from_Xscale_fast(X_all[:, idx_close], scaler_X, idx_close)
+    # recon_close = inverse_close_from_Xscale_fast(X_all[:, idx_close], scaler_X, idx_close)
+    # X_all[:, idx_close]는 NumPy 2차원 배열 X_all에서 모든 행(:), 한 개의 열(idx_close 열 인덱스)을 선택해 1차원 벡터를 뽑는 슬라이싱
     # print("max|recon_close - close_raw| =", np.max(np.abs(recon_close - close_raw)))
 
     # ↓ 여기서 X_all, Y_all을 '스케일된 X'로부터 만듦
+    # Y_xscale: X_all에서 ‘종가’ 열(idx_close)의 미래 H-step 값들을 그대로 뽑아 만든 타깃 행렬
     X_tmp, Y_xscale, t0 = create_multistep_dataset(X_all, LOOK_BACK, N_FUTURE, idx=idx_close, return_t0=True)
-    t_end = t0 + LOOK_BACK - 1  # 윈도 끝 인덱스 (입력의 마지막 시점)
+    # print('X_tmp', X_tmp.shape)         # (274, 15, 5)
+    # print('Y_xscale', Y_xscale.shape)   # (274, 3)
+    t_end = t0 + LOOK_BACK - 1  # 윈도 끝 인덱스 (입력의 마지막 시점) >> 전체 길이 291일 경우, t_end: 14~287, 288~290
+
+    valid = (t_end + N_FUTURE) <= (len(close_raw)-1)
+    X_tmp, t0, t_end = X_tmp[valid], t0[valid], t_end[valid]
+
+    # 각 입력 윈도우의 마지막 시점(t_end) 이후 앞으로 N_FUTURE개의 로그수익률 벡터들을 쌓아 만든 2차원 배열 >> 윈도 끝 이후 1,2,...,N_FUTURE 기간의 로그수익률
     Y_log = np.stack([logret[t: t + N_FUTURE] for t in t_end], axis=0)
+    # print(Y_log.shape)    # (274, 3)
 
+    # minN = min(len(X_tmp), len(Y_log))
+    # X_tmp     = X_tmp[:minN]      # (N, LOOK_BACK, F)
+    # Y_log     = Y_log[:minN]      # (N, H)
+    # # Y_xscale  = Y_xscale[:minN]
+    # t0        = t0[:minN]
+    # t_end     = t_end[:minN]
+    # # print('t_end', t_end)
 
-    minN = min(len(X_tmp), len(Y_log))
-    X_tmp     = X_tmp[:minN]      # (N, LOOK_BACK, F)
-    Y_log     = Y_log[:minN]      # (N, H)
-    Y_xscale  = Y_xscale[:minN]
-    t0        = t0[:minN]
-
-    # 시점 마스크로 분리
+    # # 시점 마스크로 분리
     # train_mask = (t0 + N_FUTURE - 1) < split
     # val_mask   = (t0 >= split)
-
+    #
     # # (현재 사용 중인) 마스크 합계/겹침/누락 체크
     # n_tr = int(np.sum(train_mask))
     # n_va = int(np.sum(val_mask))
@@ -126,11 +126,13 @@ for count, ticker in enumerate(tickers):
     # print(f"겹침 수    = {overlap} (0이어야 정상)")
     # print(f"누락 수    = {len(gaps)} (0이어야 정상)")
 
-    # print('t_end', t_end)
-    t_y_end = t_end + (N_FUTURE - 1)  # 타깃의 마지막 시점
-    # print('t_y_end', t_y_end)
+    # 가격 인덱스 기준으로 분할
+    t_y_end = t_end + N_FUTURE   # 타깃의 마지막 시점
+    # print('t_y_end', t_y_end)    # 마지막 인덱스 17 (15~17)
+
+    # 시점 마스크로 분리
     train_mask = (t_y_end < split)
-    val_mask = (t_y_end >= split)
+    val_mask   = (t_y_end >= split)
 
     # # 동일한 검증
     # n_tr2 = int(np.sum(train_mask))
@@ -147,7 +149,10 @@ for count, ticker in enumerate(tickers):
 
     X_train, Y_train = X_tmp[train_mask], Y_log[train_mask]
     X_val,   Y_val   = X_tmp[val_mask],   Y_log[val_mask]
-    # print("    002 X_tr__.shape:", X_train.shape, "    Y_tr__.shape:", Y_train.shape)
+    # print('X_train', X_train.shape)    # (201, 15, 5)
+    # print('Y_train', Y_train.shape)    # (201, 3)
+    # print('X_val', X_val.shape)        # (73, 15, 5)
+    # print('Y_val', Y_val.shape)        # (73, 3)
 
     # ---- (y_scaler) ----
     scaler_y_log = StandardScaler().fit(Y_train)  # 로그수익률에 대해
@@ -174,7 +179,10 @@ for count, ticker in enumerate(tickers):
     # 기준가격(원 단위): 각 샘플의 윈도 마지막 시점 t의 종가 (원 단위)
     base_close_train = inverse_close_from_Xscale_fast(X_all[t_end[train_mask], idx_close], scaler_X, idx_close)
     base_close_val   = inverse_close_from_Xscale_fast(X_all[t_end[val_mask],   idx_close], scaler_X, idx_close)
-
+    # print('base_close_train', base_close_train.shape)
+    # print('base_close_val', base_close_val.shape)
+    # print('base_close_train', base_close_train)
+    # print('base_close_val', base_close_val)
 
     # ===== 공통 설정 =====
     input_shape = (X_train.shape[1], X_train.shape[2])
@@ -186,7 +194,6 @@ for count, ticker in enumerate(tickers):
     # - LSTM32: 가벼운 모델 (작은 데이터/빠른 실험)
     # - LSTM64: 밸런스형 (권장 기본)
     # - LSTM128: 깊고 넓게 (데이터/패턴이 충분할 때만)
-
     def make_huber_per_h(delta_vec, eps=1e-6):
         delta_vec = np.asarray(delta_vec, dtype="float32")
         delta_vec = np.maximum(delta_vec, eps)  # 0 방지
@@ -202,33 +209,65 @@ for count, ticker in enumerate(tickers):
         return huber_per_h
 
 
+    # **스케일된 Y(Y_train_s)**로 학습하는 변형에도 Huber를 쓰려면 별도 델타를 만들어야
     stds = Y_train.std(axis=0)
     loss_fn = make_huber_per_h(2.0 * stds)
+    stds_scaled = Y_train_s.std(axis=0).astype("float32")
+    loss_fn_scaled = make_huber_per_h(2.0 * stds_scaled)
     variants = {
+        # "LSTM32_mse": { # 낮게 예측함
+        #     "lstm_units": [32],
+        #     "dropout": 0.0,
+        #     "dense_units": [16],
+        #     "lr": 5e-4, "loss": "mse", "delta": 1.0,
+        #     "batch_size": 8
+        # },
+        # "LSTM64_mse": {
+        #     "lstm_units": [64, 32],
+        #     "dropout": 0.1,
+        #     "dense_units": [32, 16],
+        #     "lr": 5e-4, "loss": "mse", "delta": 1.0,
+        #     "batch_size": 8
+        # },
+        # "LSTM32": { # 높게 예측함
+        #     "lstm_units": [32],
+        #     "dropout": 0.0,
+        #     "dense_units": [16],
+        #     "lr": 5e-4, "loss": loss_fn, "delta": 1.0,
+        #     "batch_size": 8
+        # },
         # "LSTM64": {
         #     "lstm_units": [64, 32],
         #     "dropout": 0.1,
         #     "dense_units": [32, 16],
-        #     "lr": 5e-4,
-        #     "loss": loss_fn,
-        #     "delta": 1.0
+        #     "lr": 5e-4, "loss": loss_fn, "delta": 1.0,
+        #     "batch_size": 8
         # },
+        "Y_LSTM32": {
+            "lstm_units": [32],
+            "dropout": 0.0,
+            "dense_units": [16],
+            "lr": 5e-4,
+            "loss": None,
+            "delta": 1.0,
+            "batch_size": 8,
+        },
         "Y_LSTM64": {  # 채택.. 가장 안정적이고 평균 성능이 좋음
             "lstm_units": [64, 32],
             "dropout": 0.1,
             "dense_units": [32, 16],
             "lr": 5e-4,
             "loss": None,
-            "delta": 1.0
+            "delta": 1.0,
+            "batch_size": 8,
         },
     }
 
     results = {}
-    n_features = X_train.shape[2]
 
     for name, cfg in variants.items():
         print(f"[{name}] training...")
-        model_v = create_lstm_model(
+        model = create_lstm_model(
             input_shape, N_FUTURE,
             lstm_units=cfg["lstm_units"],
             dropout=cfg["dropout"],
@@ -236,34 +275,31 @@ for count, ticker in enumerate(tickers):
             lr=cfg["lr"], delta=cfg["delta"],
             loss=cfg["loss"],
         )
-        if name.startswith("Y"):
-            history = model_v.fit(
+        if name.startswith("Y"): # Y가 붙으면 로그수익률을 y-스케일링 했음
+            history = model.fit(
                 X_train, Y_train_s,  # (y_scaler)
-                batch_size=16, epochs=200, verbose=0, shuffle=False,
+                batch_size=cfg["batch_size"], epochs=200, verbose=0, shuffle=False,
                 validation_data=(X_val, Y_val_s),  # (y_scaler)
                 callbacks=[early_stop, rlrop]
             )
         else:
-            history = model_v.fit(
+            history = model.fit(
                 X_train, Y_train,
-                batch_size=16, epochs=200, verbose=0, shuffle=False,
+                batch_size=cfg["batch_size"], epochs=200, verbose=0, shuffle=False,
                 validation_data=(X_val, Y_val),
                 callbacks=[early_stop, rlrop]
             )
 
 
-        # 예측(로그수익률)
-        pred_tr_log = model_v.predict(X_train, verbose=0)
-        pred_va_log = model_v.predict(X_val,   verbose=0)
+        # 예측(로그수익률), 예측 결과는 'y-스케일된 로그' or '로그'
+        pred_tr_log = model.predict(X_train, verbose=0)
+        pred_va_log = model.predict(X_val,   verbose=0)
 
         if name.startswith("Y"):
             # ---- (y_scaler) ----
-            # 2) 예측 → (반드시) 역표준화하여 '원-로그수익률'로 복원
-            pred_tr_log_s = model_v.predict(X_train, verbose=0)
-            pred_va_log_s = model_v.predict(X_val,   verbose=0)
-            # 표준화 해제 (y_scaler)
-            pred_tr_log = scaler_y_log.inverse_transform(pred_tr_log_s)  # ← 누락 금지
-            pred_va_log = scaler_y_log.inverse_transform(pred_va_log_s)
+            # 역표준화하여 '원-로그수익률'로 복원
+            pred_tr_log = scaler_y_log.inverse_transform(pred_tr_log)
+            pred_va_log = scaler_y_log.inverse_transform(pred_va_log)
             # ---------------------
 
         # 로그수익률 → 가격 복원
@@ -294,8 +330,11 @@ for count, ticker in enumerate(tickers):
         #            prices_from_logrets(base_close_val, Y_val)))
 
         best_val = min(history.history.get('val_loss', [float('inf')]))
+
+        is_scaled = name.startswith("Y")
         results[name] = {
-            "model": model_v,
+            "model": model,
+            "is_scaled": is_scaled,
             "train_pred_price": price_pred_tr,
             "val_pred_price":   price_pred_va,
             "train_true_price": price_true_tr,
@@ -335,8 +374,11 @@ for count, ticker in enumerate(tickers):
             print(f"    h={h+1}: RMSE={r_h:.2f} | naive={r_hn:.2f} | ratio={r_h/r_hn:.3f} | 개선={improve(r_h, r_hn):.1f}% | sMAPE={s_h:.2f} | nRMSE={nr_h:.4f}")
 
         # (선택) 로그수익률 기준도 하나 출력
-        pred_va_log_s = results[name]["model"].predict(X_val, verbose=0)
-        yhat_log      = scaler_y_log.inverse_transform(pred_va_log_s)  # 역표준화
+        pred_va_raw = results[name]["model"].predict(X_val, verbose=0)
+        if results[name]["is_scaled"]:
+            yhat_log = scaler_y_log.inverse_transform(pred_va_raw)     # 스케일 → 원-로그수익률
+        else:
+            yhat_log = pred_va_raw                                     # 이미 원-로그수익률
         ytrue_log     = Y_val                                          # 원본(비표준화)
         ynaive_log    = np.zeros_like(ytrue_log)                       # 0수익률 베이스라인
 

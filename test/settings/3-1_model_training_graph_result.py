@@ -24,7 +24,7 @@ sys.path.append(BASE_DIR)
 pickle_dir = os.path.join(BASE_DIR, 'pickle')
 
 from utils import create_multistep_dataset, add_technical_features, create_lstm_model, drop_trading_halt_rows, \
-    inverse_close_from_Xscale_fast, inverse_close_matrix_fast, rmse, improve, smape, nrmse
+    inverse_close_from_Xscale_fast, inverse_close_matrix_fast, rmse, improve, smape, nrmse, drop_sparse_columns
 
 
 
@@ -32,7 +32,7 @@ from utils import create_multistep_dataset, add_technical_features, create_lstm_
 # 1. 데이터 수집
 ticker = '000660' # 하이닉스
 # tickers = ['000660', '008970', '006490', '042670', '023160', '006800', '323410', '009540', '034020', '358570', '000155', '035720', '00680K', '035420', '012510']
-tickers = ['000660']
+tickers = ['095610']
 
 LOOK_BACK = 15
 N_FUTURE = 3
@@ -53,20 +53,9 @@ for count, ticker in enumerate(tickers):
     # print(data.columns) # 칼럼 헤더 전체 출력
 
     # 3. 결측 제거
-    threshold = 0.1  # 10%
-    # isna() : pandas의 결측값(NA) 체크. NaN, None, NaT에 대해 True
-    # mean() : 평균
-    # isinf() : 무한대 체크
-    cols_to_drop = [ # 결측치가 10% 이상인 칼럼
-        col
-        for col in data.columns
-        if (~np.isfinite(pd.to_numeric(data[col], errors='coerce'))).mean() > threshold
-    ]
-    if len(cols_to_drop) > 0:
-        # inplace=True : 반환 없이 입력을 그대로 수정
-        # errors='ignore' : 목록에 없는 칼럼 지우면 에러지만 무시
-        data.drop(columns=cols_to_drop, inplace=True, errors='ignore')
-        print("Drop candidates:", cols_to_drop)
+    cleaned, cols_to_drop = drop_sparse_columns(data, threshold=0.10, check_inf=True, inplace=True)
+    # print("    Drop candidates:", cols_to_drop)
+    data = cleaned
 
 
     # ---- 전처리: NaN/inf 제거 및 피처 선택 ----
@@ -124,9 +113,9 @@ for count, ticker in enumerate(tickers):
     # print('X_val', X_val.shape)        # (73, 15, 5)
     # print('Y_val', Y_val.shape)        # (73, 3)
 
-    last_val = Y_val
-    last_price = inverse_close_matrix_fast(Y_val, scaler_X, idx_close)
-    print('last_price', last_price[-1])
+    # last_val = Y_val
+    # last_price = inverse_close_matrix_fast(Y_val, scaler_X, idx_close)
+    # print('last_price', last_price[-1])
 
 
     # ---- y 스케일링: Train으로만 fit ---- (타깃이 수익률이면 생략 가능)
