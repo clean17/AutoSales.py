@@ -147,7 +147,7 @@ for count, ticker in enumerate(tickers):
         pass
 
     # 데이터가 부족하면 패스
-    if data.empty or len(data) < 30:
+    if data.empty or len(data) < 70:
         # print(f"                                                        데이터 부족 → pass")
         continue
 
@@ -222,26 +222,26 @@ for count, ticker in enumerate(tickers):
         print("    Drop candidates:", cols_to_drop)
     data = cleaned
 
-    if 'MA5' not in data.columns or 'MA20' not in data.columns:
-        continue
-
-    # 5일선이 너무 하락하면
-    ma5_today = data['MA5'].iloc[-1]
-    ma5_yesterday = data['MA5'].iloc[-2]
-
-    # 변화율 계산 (퍼센트로 보려면 * 100)
-    change_rate = (ma5_today - ma5_yesterday) / ma5_yesterday
-    if change_rate * 100 < -2:
-        # print(f"어제 5일선의 변화율: {change_rate:.5f}")  # 소수점 5자리
-        print(f"                                                        어제 5일선의 변화율: {change_rate * 100:.2f}% → pass")
-        continue
-
-    # 현재 5일선이 20일선보다 낮으면서 하락중이면 패스
-    ma_angle_5 = data['MA5'].iloc[-1] - data['MA5'].iloc[-2]
-    if data['MA5'].iloc[-1] < data['MA20'].iloc[-1] and ma_angle_5 < 0:
-        # print(f"                                                        5일선이 20일선 보다 낮으면서 하락중 → pass")
-        continue
-        # pass
+    # if 'MA5' not in data.columns or 'MA20' not in data.columns:
+    #     continue
+    #
+    # # 5일선이 너무 하락하면
+    # ma5_today = data['MA5'].iloc[-1]
+    # ma5_yesterday = data['MA5'].iloc[-2]
+    #
+    # # 변화율 계산 (퍼센트로 보려면 * 100)
+    # change_rate = (ma5_today - ma5_yesterday) / ma5_yesterday
+    # if change_rate * 100 < -2:
+    #     # print(f"어제 5일선의 변화율: {change_rate:.5f}")  # 소수점 5자리
+    #     print(f"                                                        어제 5일선의 변화율: {change_rate * 100:.2f}% → pass")
+    #     continue
+    #
+    # # 현재 5일선이 20일선보다 낮으면서 하락중이면 패스
+    # ma_angle_5 = data['MA5'].iloc[-1] - data['MA5'].iloc[-2]
+    # if data['MA5'].iloc[-1] < data['MA20'].iloc[-1] and ma_angle_5 < 0:
+    #     # print(f"                                                        5일선이 20일선 보다 낮으면서 하락중 → pass")
+    #     continue
+    #     # pass
 
     ########################################################################
 
