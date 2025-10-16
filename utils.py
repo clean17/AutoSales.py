@@ -473,7 +473,7 @@ def create_multistep_dataset(dataset, look_back, n_future, idx=3, return_t0=Fals
         ds = ds.reshape(-1, 1)
     X, Y = [], []
     n = len(ds)
-    t0_list = []
+    t0_list = []    # 인덱스가 저장된 리스트
     for i in range(n - look_back - n_future + 1):
         X.append(ds[i:i+look_back])
         Y.append(ds[i+look_back:i+look_back+n_future, idx])
@@ -529,7 +529,7 @@ def create_lstm_model(input_shape, n_future,
     if loss is None:
         # 기본은 표준 Huber(delta=스칼라)
         loss = tf.keras.losses.Huber(delta=delta)
-    model.compile(optimizer=Adam(lr), loss=loss)
+    model.compile(optimizer=Adam(learning_rate=lr), loss=loss)
     return model
 
 
@@ -610,7 +610,7 @@ def inverse_close_from_scaled(scaled_2d, scaler, n_features, idx_close):
         outs.append(inv_full[:, idx_close])
     return np.column_stack(outs)  # (N,H)
 
-# ---- StandardScaler만 사용한다면 ----
+# ---- StandardScaler만 사용한다면 아래 계산식으로 원단위로 복원 가능 ----
 def inverse_close_matrix_fast(Y_xscale, scaler_X, idx_close):
     """
     Y_xscale: (N, H) 형태의 스케일된 종가 행렬... y종가를 X스케일링 한 것
@@ -1058,6 +1058,12 @@ def plot_candles_weekly(
 
 # 로그수익률을 원 단위로 복원
 def prices_from_logrets(base_close_1d, logrets_2d):
+    """
+    이 함수는 **기준가(base price)**와 미래 구간의 로그수익률들로부터 각 구간의 가격 시퀀스를 복원
+    :param base_close_1d: 각 샘플의 기준 시점 가격
+    :param logrets_2d:    각 샘플의 미래 H-step 로그수익률
+    :return:
+    """
     base_close_1d = np.asarray(base_close_1d, dtype=float)
     logrets_2d    = np.asarray(logrets_2d, dtype=float)
     if base_close_1d.ndim != 1 or logrets_2d.ndim != 2:
