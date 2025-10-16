@@ -78,8 +78,9 @@ total_smape = 0
 is_first_flag = True
 
 for count, ticker in enumerate(tickers):
-    stock_name = get_name_from_usa_ticker(ticker)
-    print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
+    # stock_name = get_name_from_usa_ticker(ticker)
+    # print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
+    print(f"Processing {count+1}/{len(tickers)} : {ticker}")
 
     # 학습하기 직전에 요청을 보낸다
     percent = f'{round((count+1)/len(tickers)*100, 1):.1f}'
@@ -298,7 +299,7 @@ for count, ticker in enumerate(tickers):
     # ↓ 여기서 X_all, Y_all을 '스케일된 X'로부터 만듦
     X_tmp, Y_xscale, t0 = create_multistep_dataset(X_all, LOOK_BACK, N_FUTURE, idx=idx_close, return_t0=True)
     t_end = t0 + LOOK_BACK - 1        # 윈도 끝 인덱스 (입력의 마지막 시점)
-    t_y_end = t_end + (N_FUTURE - 1)  # 타깃의 마지막 시점
+    t_y_end = t_end + N_FUTURE  # 타깃의 마지막 시점
 
     # 시점 마스크로 분리
     train_mask = (t_y_end < split)
@@ -576,7 +577,8 @@ for count, ticker in enumerate(tickers):
         continue
 
     # 결과 저장
-    results.append((avg_future_return, ticker, stock_name))
+    # results.append((avg_future_return, ticker, stock_name))
+    results.append((avg_future_return, ticker))
 
     # 기존 파일 삭제
     for file_name in os.listdir(output_dir):
@@ -601,7 +603,8 @@ for count, ticker in enumerate(tickers):
     ax_w_price = fig.add_subplot(gs[2, 0])
     ax_w_vol   = fig.add_subplot(gs[3, 0], sharex=ax_w_price)
 
-    daily_chart_title = f'{end_date}  {stock_name} [{ticker}] (예상 상승률: {avg_future_return:.2f}%)'
+    # daily_chart_title = f'{end_date}  {stock_name} [{ticker}] (예상 상승률: {avg_future_return:.2f}%)'
+    daily_chart_title = f'{end_date}  {ticker} (예상 상승률: {avg_future_return:.2f}%)'
     plot_candles_daily(data, show_months=6  , title=daily_chart_title,
                        ax_price=ax_d_price, ax_volume=ax_d_vol,
                        future_dates=future_dates, predicted_prices=predicted_prices)
@@ -612,7 +615,8 @@ for count, ticker in enumerate(tickers):
     plt.tight_layout()
 
     # 파일 저장 (옵션)
-    final_file_name = f'{today} [ {avg_future_return:.2f}% ] {stock_name} [{ticker}].png'
+    # final_file_name = f'{today} [ {avg_future_return:.2f}% ] {stock_name} [{ticker}].png'
+    final_file_name = f'{today} [ {avg_future_return:.2f}% ]  {ticker}.png'
     final_file_path = os.path.join(output_dir, final_file_name)
     plt.savefig(final_file_path)
     plt.close()
@@ -622,8 +626,10 @@ for count, ticker in enumerate(tickers):
 # 정렬 및 출력
 results.sort(reverse=True, key=lambda x: x[0])
 
-for avg_future_return, ticker, stock_name in results:
-    print(f"==== [ {avg_future_return:.2f}% ] {stock_name} [{ticker}] ====")
+# for avg_future_return, ticker, stock_name in results:
+for avg_future_return, ticker in results:
+    # print(f"==== [ {avg_future_return:.2f}% ] {stock_name} [{ticker}] ====")
+    print(f"==== [ {avg_future_return:.2f}% ]  {ticker} ====")
 
 try:
     requests.post(

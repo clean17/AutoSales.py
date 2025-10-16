@@ -266,7 +266,7 @@ for count, ticker in enumerate(tickers):
     # ↓ 여기서 X_all, Y_all을 '스케일된 X'로부터 만듦
     X_tmp, Y_xscale, t0 = create_multistep_dataset(X_all, LOOK_BACK, N_FUTURE, idx=idx_close, return_t0=True)
     t_end = t0 + LOOK_BACK - 1        # 윈도 끝 인덱스 (입력의 마지막 시점)
-    t_y_end = t_end + (N_FUTURE - 1)  # 타깃의 마지막 시점
+    t_y_end = t_end + N_FUTURE  # 타깃의 마지막 시점
 
     # 시점 마스크로 분리
     train_mask = (t_y_end < split)
