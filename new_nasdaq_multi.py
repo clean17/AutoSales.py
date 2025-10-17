@@ -12,7 +12,7 @@ from utils import create_lstm_model, create_multistep_dataset, fetch_stock_data_
     extract_stock_code_from_filenames, get_usd_krw_rate, add_technical_features, check_column_types, \
     get_name_from_usa_ticker, plot_candles_daily, plot_candles_weekly, drop_trading_halt_rows, \
     inverse_close_matrix_fast, get_next_business_days, make_naive_preds, smape, pass_filter_v2, regression_metrics , \
-    pass_filter
+    pass_filter, drop_sparse_columns
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.model_selection import train_test_split
 import requests
@@ -34,10 +34,10 @@ os.makedirs(pickle_dir, exist_ok=True) # 없으면 생성
 
 
 
-N_FUTURE = PREDICTION_PERIOD = 3
+N_FUTURE = 3
+LOOK_BACK = 15
 EXPECTED_GROWTH_RATE = 3
 DATA_COLLECTION_PERIOD = 700
-LOOK_BACK = 15
 KR_AVERAGE_TRADING_VALUE = 7_000_000_000
 SPLIT      = 0.75
 
@@ -131,7 +131,14 @@ for count, ticker in enumerate(tickers):
     data = df
 
 
-    if data is None or 'Close' not in data.columns or data.empty:
+    # 한국/영문 칼럼 자동 식별
+    col_o = _col(df, '시가',   'Open')
+    col_h = _col(df, '고가',   'High')
+    col_l = _col(df, '저가',   'Low')
+    col_c = _col(df, '종가',   'Close')
+    col_v = _col(df, '거래량', 'Volume')
+
+    if data is None or col_c not in data.columns or data.empty:
         print(f"{ticker}: 데이터가 비었거나 'Close' 컬럼이 없습니다. pass.")
         continue
 
@@ -140,7 +147,7 @@ for count, ticker in enumerate(tickers):
 
     ########################################################################
 
-    actual_prices = data['Close'].values # 최근 종가 배열
+    actual_prices = data[col_c].values # 최근 종가 배열
     last_close = actual_prices[-1]
 
     # 0) 우선 거래정지/이상치 행 제거
@@ -149,19 +156,19 @@ for count, ticker in enumerate(tickers):
         # print(f"                                                        거래정지/이상치로 제거된 날짜 수: {len(removed_idx)}")
         pass
 
-    if data.empty or len(data) < 50:
+    if data.empty or len(data) < 70:
         # print(f"                                                        데이터 부족 → pass")
         continue
 
     # 종가가 0.0이거나 500원 미만이면 건너뜀
     last_row = data.iloc[-1]
-    if last_row['Close'] == 0.0 or last_row['Close'] * exchangeRate < 500:
+    if last_row[col_c] == 0.0 or last_row[col_c] * exchangeRate < 500:
         # print("                                                        종가가 0이거나 500원 미만이므로 작업을 건너뜁니다.")
         continue
 
     # 한달 데이터
     month_data = data.tail(20)
-    month_trading_value = month_data['Volume'] * month_data['Close']
+    month_trading_value = month_data[col_v] * month_data[col_c]
     # 하루라도 거래대금이 5억 미만이 있으면 제외
     if (month_trading_value * exchangeRate < 500_000_000).any():
         # print(f"                                                        최근 4주 중 거래대금 5억 미만 발생 → pass")
@@ -169,14 +176,14 @@ for count, ticker in enumerate(tickers):
 
     # 최근 2주 평균 거래대금 60억 미만 패스
     recent_data = data.tail(10)
-    recent_trading_value = recent_data['Volume'] * recent_data['Close']     # 최근 2주 거래대금 리스트
+    recent_trading_value = recent_data[col_v] * recent_data[col_c]     # 최근 2주 거래대금 리스트
     recent_average_trading_value = recent_trading_value.mean()
     if recent_average_trading_value * exchangeRate <= KR_AVERAGE_TRADING_VALUE:
         formatted_recent_value = f"{(recent_average_trading_value * exchangeRate)/ 100_000_000:.0f}억"
         print(f"                                                        최근 2주 평균 거래액({formatted_recent_value})이 부족하여 작업을 건너뜁니다.")
         continue
 
-    # 투경 조건
+    # ----- 투경 조건 -----
     # 1. 당일의 종가가 3일 전날의 종가보다 100% 이상 상승
     if len(actual_prices) >= 4:
         close_3ago = actual_prices[-4]
@@ -186,12 +193,12 @@ for count, ticker in enumerate(tickers):
             continue
 
     # rolling window로 5일 전 대비 현재가 3배 이상 오른 지점 찾기
-    rolling_min = data['Close'].rolling(window=5).min()    # 5일 중 최소가
-    ratio = data['Close'] / rolling_min
-
-    if np.any(ratio >= 2.5):
-        print(f"                                                        어느 5일 구간이든 2.5배 급등: 제외")
-        continue
+    # rolling_min = data[col_c].rolling(window=5).min()    # 5일 중 최소가
+    # ratio = data[col_c] / rolling_min
+    #
+    # if np.any(ratio >= 2.5):
+    #     print(f"                                                        어느 5일 구간이든 2.5배 급등: 제외")
+    #     continue
 
 
     # # 최고가 대비 현재가 하락률 계산
@@ -211,8 +218,8 @@ for count, ticker in enumerate(tickers):
     #     print(f"                                                        어떤 4일 연속 구간에서 첫날 대비 60% 이상 상승: 제외")
     #     continue
     #
-    # last_close = data['Close'].iloc[-1]
-    # close_4days_ago = data['Close'].iloc[-5]
+    # last_close = data[col_c].iloc[-1]
+    # close_4days_ago = data[col_c].iloc[-5]
     #
     # rate = (last_close / close_4days_ago - 1) * 100
     #
@@ -222,8 +229,8 @@ for count, ticker in enumerate(tickers):
 
 
     # # 최근 3일, 2달 평균 거래량 계산, 최근 3일 거래량이 최근 2달 거래량의 25% 안되면 패스
-    # recent_3_avg = data['Volume'][-3:].mean()
-    # recent_2months_avg = data['Volume'][-40:].mean()
+    # recent_3_avg = data[col_v][-3:].mean()
+    # recent_2months_avg = data[col_v][-40:].mean()
     # if recent_3_avg < recent_2months_avg * 0.15:
     #     temp = (recent_3_avg/recent_2months_avg * 100)
     #     # print(f"                                                        최근 3일의 평균거래량이 최근 2달 평균거래량의 25% 미만 → pass : {temp:.2f} %")
@@ -233,23 +240,25 @@ for count, ticker in enumerate(tickers):
     # 2차 생성 feature
     data = add_technical_features(data)
 
-    threshold = 0.1  # 10%
-    # isna() : pandas의 결측값(NA) 체크. NaN, None, NaT에 대해 True
-    # mean() : 평균
-    # isinf() : 무한대 체크
-    cols_to_drop = [ # 결측치가 10% 이상인 칼럼
-        col
-        for col in data.columns
-        if (~np.isfinite(pd.to_numeric(data[col], errors='coerce'))).mean() > threshold
-    ]
+    # 결측 제거
+    cleaned, cols_to_drop = drop_sparse_columns(data, threshold=0.10, check_inf=True, inplace=True)
     if len(cols_to_drop) > 0:
-        # inplace=True : 반환 없이 입력을 그대로 수정
-        # errors='ignore' : 목록에 없는 칼럼 지우면 에러지만 무시
-        data.drop(columns=cols_to_drop, inplace=True, errors='ignore')
-        # print("Drop candidates:", cols_to_drop)
+        print("    Drop candidates:", cols_to_drop)
+    data = cleaned
 
-    if 'MA20' not in data.columns:
+    if 'MA5' not in data.columns or 'MA20' not in data.columns:
         continue
+
+    # # 5일선이 너무 하락하면
+    # ma5_today = data['MA5'].iloc[-1]
+    # ma5_yesterday = data['MA5'].iloc[-2]
+    #
+    # # 변화율 계산 (퍼센트로 보려면 * 100)
+    # change_rate = (ma5_today - ma5_yesterday) / ma5_yesterday
+    # if change_rate * 100 < -2:
+    #     # print(f"어제 5일선의 변화율: {change_rate:.5f}")  # 소수점 5자리
+    #     print(f"                                                        어제 5일선의 변화율: {change_rate * 100:.2f}% → pass")
+    #     continue
 
     # 현재 5일선이 20일선보다 낮으면서 하락중이면 패스
     ma_angle_5 = data['MA5'].iloc[-1] - data['MA5'].iloc[-2]
@@ -258,25 +267,8 @@ for count, ticker in enumerate(tickers):
         continue
         # pass
 
-    # 5일선이 너무 하락하면
-    # ma5_today = data['MA5'].iloc[-1]
-    # ma5_yesterday = data['MA5'].iloc[-2]
-
-    # 변화율 계산 (퍼센트로 보려면 * 100)
-    # change_rate = (ma5_today - ma5_yesterday) / ma5_yesterday
-    # if change_rate * 100 < -4:
-    #     # print(f"어제 5일선의 변화율: {change_rate:.5f}")  # 소수점 5자리
-    #     print(f"                                                        어제 5일선의 변화율: {change_rate * 100:.2f}% → pass")
-    #     continue
 
     ########################################################################
-
-    # 한국/영문 칼럼 자동 식별
-    col_o = _col(df, '시가',   'Open')
-    col_h = _col(df, '고가',   'High')
-    col_l = _col(df, '저가',   'Low')
-    col_c = _col(df, '종가',   'Close')
-    col_v = _col(df, '거래량', 'Volume')
 
     # 학습에 쓸 피처
     feature_cols = [
@@ -319,7 +311,7 @@ for count, ticker in enumerate(tickers):
 
     # 5) 최소 샘플 수 확인
     if X_train.shape[0] < 50:
-        print("                                                        샘플 부족 : ", X.shape[0])
+        print("                                                        샘플 부족 : ", X_train.shape[0])
         continue
 
     # ---- y 스케일링: Train으로만 fit ---- (타깃이 수익률이면 생략 가능)
@@ -347,7 +339,7 @@ for count, ticker in enumerate(tickers):
     loss_fn = make_huber_per_h(2.0 * stds)
 
     # 6) 모델 생성/학습
-    model = create_lstm_model((X_train.shape[1], X_train.shape[2]), PREDICTION_PERIOD,
+    model = create_lstm_model((X_train.shape[1], X_train.shape[2]), N_FUTURE,
                               lstm_units=[32], dropout=None, dense_units=[16], loss=loss_fn)
 
     from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau

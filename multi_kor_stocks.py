@@ -35,11 +35,11 @@ root_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 
 pickle_dir = os.path.join(root_dir, 'pickle')
 os.makedirs(pickle_dir, exist_ok=True) # 없으면 생성
 
-N_FUTURE = PREDICTION_PERIOD = 3
+N_FUTURE = 3
 LOOK_BACK = 15
-AVERAGE_TRADING_VALUE = 4_000_000_000 # 평균거래대금 50억
-EXPECTED_GROWTH_RATE = 2
+EXPECTED_GROWTH_RATE = 3
 DATA_COLLECTION_PERIOD = 700 # 샘플 수 = 68(100일 기준) - 20 - 4 + 1 = 45
+AVERAGE_TRADING_VALUE = 4_000_000_000 # 평균거래대금 50억
 SPLIT      = 0.75
 
 today = datetime.today().strftime('%Y%m%d')
@@ -222,9 +222,9 @@ for count, ticker in enumerate(tickers):
         print("    Drop candidates:", cols_to_drop)
     data = cleaned
 
-    # if 'MA5' not in data.columns or 'MA20' not in data.columns:
-    #     continue
-    #
+    if 'MA5' not in data.columns or 'MA20' not in data.columns:
+        continue
+
     # # 5일선이 너무 하락하면
     # ma5_today = data['MA5'].iloc[-1]
     # ma5_yesterday = data['MA5'].iloc[-2]
@@ -235,13 +235,13 @@ for count, ticker in enumerate(tickers):
     #     # print(f"어제 5일선의 변화율: {change_rate:.5f}")  # 소수점 5자리
     #     print(f"                                                        어제 5일선의 변화율: {change_rate * 100:.2f}% → pass")
     #     continue
-    #
-    # # 현재 5일선이 20일선보다 낮으면서 하락중이면 패스
-    # ma_angle_5 = data['MA5'].iloc[-1] - data['MA5'].iloc[-2]
-    # if data['MA5'].iloc[-1] < data['MA20'].iloc[-1] and ma_angle_5 < 0:
-    #     # print(f"                                                        5일선이 20일선 보다 낮으면서 하락중 → pass")
-    #     continue
-    #     # pass
+
+    # 현재 5일선이 20일선보다 낮으면서 하락중이면 패스
+    ma_angle_5 = data['MA5'].iloc[-1] - data['MA5'].iloc[-2]
+    if data['MA5'].iloc[-1] < data['MA20'].iloc[-1] and ma_angle_5 < 0:
+        # print(f"                                                        5일선이 20일선 보다 낮으면서 하락중 → pass")
+        continue
+        # pass
 
     ########################################################################
 
@@ -314,7 +314,7 @@ for count, ticker in enumerate(tickers):
     loss_fn = make_huber_per_h(2.0 * stds)
 
     # 6) 모델 생성/학습
-    model = create_lstm_model((X_train.shape[1], X_train.shape[2]), PREDICTION_PERIOD,
+    model = create_lstm_model((X_train.shape[1], X_train.shape[2]), N_FUTURE,
                               lstm_units=[32], dropout=None, dense_units=[16], loss=loss_fn)
 
     from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
