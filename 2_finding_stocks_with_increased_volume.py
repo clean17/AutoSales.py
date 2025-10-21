@@ -1,3 +1,8 @@
+'''
+거래대금 증가 종목 탐색
+지난 5 거래일에 비해 오늘 거래대금이 x배 이상 상승한 종목 찾기
+'''
+
 import os, sys
 import numpy as np
 import pandas as pd
@@ -21,12 +26,9 @@ else:
     raise FileNotFoundError("utils.py를 상위 디렉터리에서 찾지 못했습니다.")
 
 from utils import fetch_stock_data, get_kor_ticker_list, get_kor_ticker_dict_list, add_technical_features, \
-    plot_candles_weekly, plot_candles_daily, drop_trading_halt_rows
+    plot_candles_weekly, plot_candles_daily, drop_trading_halt_rows, drop_sparse_columns
 
-'''
-거래대금 증가 종목 탐색
-지난 5 거래일에 비해 오늘 거래대금이 x배 이상 상승한 종목 찾기
-'''
+
 
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
 root_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(=루트)
@@ -98,19 +100,37 @@ for count, ticker in enumerate(tickers):
     # 2차 생성 feature
     data = add_technical_features(data)
 
+    # 결측 제거
+    cleaned, cols_to_drop = drop_sparse_columns(data, threshold=0.10, check_inf=True, inplace=True)
+    if len(cols_to_drop) > 0:
+        # print("    Drop candidates:", cols_to_drop)
+        pass
+    data = cleaned
+
+    if 'MA5' not in data.columns or 'MA20' not in data.columns:
+        # print(f"                                                        이동평균선이 존재하지 않음 → pass")
+        continue
+
+    # 5일선이 너무 하락하면
+    ma5_today = data['MA5'].iloc[-1]
+    ma5_yesterday = data['MA5'].iloc[-2]
+
+    # 변화율 계산 (퍼센트로 보려면 * 100)
+    change_rate = (ma5_today - ma5_yesterday) / ma5_yesterday
 
     # 현재 5일선이 20일선보다 낮으면서 하락중이면 패스
-    ma_angle_5 = data['MA5'].iloc[-1] - data['MA5'].iloc[-2]
-    if data['MA5'].iloc[-1] < data['MA20'].iloc[-1] and ma_angle_5 < 0:
-        # print(f"                                                        5일선이 20일선 보다 낮을 경우 → pass")
+    min_slope = -3
+    if ma5_today < data['MA20'].iloc[-1] and change_rate * 100 < min_slope:
+        # print(f"                                                        5일선이 20일선 보다 낮으면서 {min_slope}기울기보다 낮게 하락중[{change_rate * 100:.2f}] → pass")
         continue
+        # pass
 
     ########################################################################
     # ======== 조건 체크 시작 ========
 
-    """
-    10일 동안 박스권 > 오늘 급등 찾기
-    """
+    # ─────────────────────────────────────────────────────────────
+    # 1) 10일 동안 박스권 >>> 오늘 급등 찾기
+    # ─────────────────────────────────────────────────────────────
     # "어제부터 10일 전"의 박스권 체크
     box_closes = closes[-11:-1]  # 10일 전 ~ 오늘 이전 (10개)
     # print('box', box_closes)
@@ -120,7 +140,8 @@ for count, ticker in enumerate(tickers):
     # print('min', min_close)
     range_pct = (max_close - min_close) / min_close * 100
 
-    if range_pct >= 4:
+    # 10일 동안 5% 이상 변화가 없다 -> 박스권으로 간주
+    if range_pct >= 5:
         condition_passed = False
         # continue  # 4% 이상 움직이면 박스권 X
 
@@ -131,13 +152,16 @@ for count, ticker in enumerate(tickers):
     # print('yesterday', yesterday_close)
     change_pct_today = (today_close - yesterday_close) / yesterday_close * 100
 
-    if change_pct_today < 10:
+    # 오늘 상승률이 X% 가 안되면 제외
+    if change_pct_today < 6:
         condition_passed = False
         condition_passed2 = False
         # continue  # 오늘 10% 미만 상승이면 제외
 
 
-    # 시가 총액 500억 이하 패스
+    # ─────────────────────────────────────────────────────────────
+    # 2) 시가 총액 500억 이하 패스
+    # ─────────────────────────────────────────────────────────────
     try:
         res = requests.post(
             'https://chickchick.shop/func/stocks/info',
@@ -148,7 +172,7 @@ for count, ticker in enumerate(tickers):
         product_code = json_data["result"][0]["data"]["items"][0]["productCode"]
 
     except Exception as e:
-        print(f"info 요청 실패: {e}")
+        print(f"info 요청 실패-2: {e}")
         pass  # 오류
 
     try:
@@ -166,33 +190,38 @@ for count, ticker in enumerate(tickers):
             continue
 
     except Exception as e:
-        print(f"overview 요청 실패: {e}")
+        print(f"overview 요청 실패-2: {e}")
         pass  # 오류
 
 
-    """
-    5일 평균 거래대금 * 10 < 오늘 거래대금 찾기
-    """
+    # ─────────────────────────────────────────────────────────────
+    # 3) 5일 평균 거래대금 * 10 < 오늘 거래대금 찾기
+    # ─────────────────────────────────────────────────────────────
     # 지난 5거래일 평균 거래대금(오늘 제외: -6:-1), 오늘값: -1
     avg5 = trading_value.iloc[-6:-1].mean()
+    # 최근 5일 거래대금이 없으면 한달 평균
     if avg5 == 0.0:
         avg5 = trading_value.iloc[-21:-1].mean()
     # print('avg', avg5)
     today_val = trading_value.iloc[-1]
     # print('today', today_val)
 
-    # # 거래대금 x배 증가 종목 찾기
-    # TARGET_VALUE = 10
-    # # 0 나눗셈 방지 및 조건 체크
-    # if avg5 > 0 and np.isfinite(avg5) and today_val >= TARGET_VALUE * avg5:
-    #     condition_passed2 = True
+    # 거래대금 x배 증가 종목 찾기
+    TARGET_VALUE = 6
+    # 0 나눗셈 방지 및 조건 체크
+    if avg5 > 0 and np.isfinite(avg5) and today_val < TARGET_VALUE * avg5:
+        condition_passed2 = False
 
     data, removed_idx = drop_trading_halt_rows(data)
     if len(removed_idx) > 0:
         # print(f"                                                        거래정지/이상치로 제거된 날짜 수: {len(removed_idx)}")
         pass
 
+
+
+    # ─────────────────────────────────────────────────────────────
     # 그래프 생성
+    # ─────────────────────────────────────────────────────────────
     fig = plt.figure(figsize=(14, 16), dpi=150)
     gs = fig.add_gridspec(nrows=4, ncols=1, height_ratios=[3, 1, 3, 1])
 
@@ -219,9 +248,9 @@ for count, ticker in enumerate(tickers):
     plt.savefig(final_file_path)
     plt.close()
 
-    ratio = today_val / avg5 * 100
-    ratio = round(ratio, 2)
 
+
+    # 카테고리 조회
     try:
         res = requests.post(
             'https://chickchick.shop/func/stocks/company',
@@ -234,6 +263,10 @@ for count, ticker in enumerate(tickers):
         print(f"/func/stocks/company 요청 실패: {e}")
         pass  # 오류
 
+    ratio = today_val / avg5 * 100
+    ratio = round(ratio, 2)
+
+    # DB 등록
     if condition_passed:
         # 부합하면 결과에 저장 (상승률, 종목명, 코드)}
         change_pct_today = round(change_pct_today, 2)
@@ -294,9 +327,10 @@ for count, ticker in enumerate(tickers):
             pass  # 오류
 
 
-#######################################################################
 
-
+# ─────────────────────────────────────────────────────────────
+# 콘솔 출력
+# ─────────────────────────────────────────────────────────────
 if len(results) > 0:
     # 내림차순 정렬 (상승률 기준)
     results.sort(reverse=True, key=lambda x: x[0])
