@@ -207,9 +207,9 @@ for count, ticker in enumerate(tickers):
     # print('today', today_val)
 
     # 거래대금 x배 증가 종목 찾기
-    TARGET_VALUE = 6
+    TARGET_VALUE = 5
     # 0 나눗셈 방지 및 조건 체크
-    if avg5 > 0 and np.isfinite(avg5) and today_val < TARGET_VALUE * avg5:
+    if avg5 > 0 and np.isfinite(avg5) and today_val >= TARGET_VALUE * avg5:
         condition_passed2 = False
 
     data, removed_idx = drop_trading_halt_rows(data)
