@@ -1,3 +1,9 @@
+'''
+5일선이 상승중인 ?
+20일선 아래에서 상승중인 ?
+반등하는 ? 주식 찾아서 그래프 생성
+'''
+
 import os, sys
 import numpy as np
 import pandas as pd
@@ -16,12 +22,9 @@ else:
     raise FileNotFoundError("utils.py를 상위 디렉터리에서 찾지 못했습니다.")
 
 from utils import get_kor_ticker_dict_list, add_technical_features, plot_candles_weekly, plot_candles_daily, \
-    near_bull_cross_signal
+    near_bull_cross_signal, drop_sparse_columns
 
-'''
-거래대금 증가 종목 탐색
-지난 5 거래일에 비해 오늘 거래대금이 x배 이상 상승한 종목 찾기
-'''
+
 
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
 root_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(=루트)
@@ -62,7 +65,8 @@ for count, ticker in enumerate(tickers):
 
     trading_value = data['거래량'] * data['종가']
     # 금일 거래대금 50억 이하 패스
-    if trading_value.iloc[-1] < 5_000_000_000:
+    if trading_value.iloc[-1] < 1_000_000_000:
+        # print(f"                                                        거래대금 부족 → pass")
         continue
 
     # 데이터가 부족하면 패스
@@ -79,20 +83,46 @@ for count, ticker in enumerate(tickers):
     # 2차 생성 feature
     data = add_technical_features(data)
 
+    # 결측 제거
+    cleaned, cols_to_drop = drop_sparse_columns(data, threshold=0.10, check_inf=True, inplace=True)
+    if len(cols_to_drop) > 0:
+        # print("    Drop candidates:", cols_to_drop)
+        pass
+    data = cleaned
 
-    # 현재 5일선이 20일선보다 낮으면서 하락중이면 패스
-    ma_angle_5 = data['MA5'].iloc[-1] - data['MA5'].iloc[-2]
-    if data['MA5'].iloc[-1] < data['MA20'].iloc[-1] and ma_angle_5 < 0:
-        # print(f"                                                        5일선이 20일선 보다 낮을 경우 → pass")
+    if 'MA5' not in data.columns or 'MA20' not in data.columns:
+        # print(f"                                                        이동평균선이 존재하지 않음 → pass")
         continue
 
+    # 5일선 기울기
+    ma5_today = data['MA5'].iloc[-1]
+    ma5_yesterday = data['MA5'].iloc[-2]
+    ma20_today = data['MA20'].iloc[-1]
+
+    # 변화율 계산 (퍼센트로 보려면 * 100)
+    change_rate = (ma5_today - ma5_yesterday) / ma5_yesterday
+    min_slope = -1.8
+
+    # 20일선보다 5일선이 높은데 크게 하락중이면 패스
+    if ma5_today > ma20_today and change_rate * 100 < min_slope:
+        # print(f"                                                        5일선이 20일선 보다 높은데 {min_slope}기울기보다 하락중[{change_rate * 100:.2f}] → pass")
+        continue
+
+    # 현재 5일선이 20일선보다 낮으면서 20일선으로 다가오지 않으면 패스
+    if ma5_today < ma20_today and near_bull_cross_signal(data, lookback=5, gap_bp=0.015, min_rise_bp=0.003): # gap_bp → 0.008~0.015
+        results.append((stock_name, ticker))
+        # print(f"                                                        5일선이 20일선 보다 낮으면서 {min_slope}기울기보다 하락중[{change_rate * 100:.2f}] → pass")
+    else:
+        # print('★★★★★★★★★★★★★★★★★★★')
+        continue
+        # pass
     ########################################################################
     # ======== 조건 체크 시작 ========
 
-    if near_bull_cross_signal(data, lookback=5, gap_bp=0.004, min_rise_bp=0.002):
-        results.append((stock_name, ticker))
-    else:
-        continue
+    # if near_bull_cross_signal(data, lookback=5, gap_bp=0.004, min_rise_bp=0.002):
+    #     results.append((stock_name, ticker))
+    # else:
+    #     continue
 
     # 그래프 생성
     fig = plt.figure(figsize=(14, 16), dpi=150)

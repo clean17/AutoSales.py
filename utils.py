@@ -1285,7 +1285,8 @@ def pass_filter_v2(
 def near_bull_cross_signal(df: pd.DataFrame,
                            lookback: int = 5,
                            gap_bp: float = 0.004,    # MA20 대비 0.4% 이내
-                           min_rise_bp: float = 0.002 # delta가 최근 lookback동안 최소 0.2%p 이상 상승
+                           min_rise_bp: float = 0.002, # delta가 최근 lookback동안 최소 0.2%p 이상 상승, 근접 “속도”의 최소 요구치.
+                           use_atr: bool = True
                            ) -> bool:
     """
     df: MA5, MA20 컬럼 포함. 인덱스는 날짜(오름차순).
@@ -1304,16 +1305,36 @@ def near_bull_cross_signal(df: pd.DataFrame,
     if not (delta.iloc[-1] < 0):
         return False
 
-    # 현재 격차가 충분히 좁은가? (MA20의 퍼센트 기준)
+    # # 현재 격차가 충분히 좁은가? (MA20의 퍼센트 기준)
+    # tight_now = abs(delta.iloc[-1]) <= (s_ma20.iloc[-1] * gap_bp)
+    #
+    # # 최근 lookback일 동안 delta가 유의미하게 상승(즉, 더 0에 가까워짐)
+    # delta_rise = (delta.iloc[-1] - delta.iloc[-lookback]) >= (s_ma20.iloc[-1] * min_rise_bp)
+
+    # 동적 갭 허용 (선택)
+    if use_atr and {'High','Low','Close'}.issubset(df.columns):
+        hl = df['High'] - df['Low']
+        hc = (df['High'] - df['Close'].shift()).abs()
+        lc = (df['Low']  - df['Close'].shift()).abs()
+        tr = pd.concat([hl, hc, lc], axis=1).max(axis=1)
+        atr = tr.rolling(14, min_periods=14).mean()
+        if not pd.isna(atr.iloc[-1]):
+            vol_bp = (atr / s_ma20).iloc[-1]
+            gap_bp = max(gap_bp, float(vol_bp) * 0.8)
+
     tight_now = abs(delta.iloc[-1]) <= (s_ma20.iloc[-1] * gap_bp)
 
-    # 최근 lookback일 동안 delta가 유의미하게 상승(즉, 더 0에 가까워짐)
-    delta_rise = (delta.iloc[-1] - delta.iloc[-lookback]) >= (s_ma20.iloc[-1] * min_rise_bp)
+    # 갭이 크면 상승 요구치 가중
+    gap_ratio = abs(delta.iloc[-1]) / s_ma20.iloc[-1]
+    req_rise  = s_ma20.iloc[-1] * min_rise_bp * (1.5 if gap_ratio > gap_bp*0.5 else 1.0)
+    delta_rise = (delta.iloc[-1] - delta.iloc[-lookback]) >= req_rise
+
 
     # 보조: MA5 기울기 양수, MA20 기울기 비양수(완화 가능)
     ma5_slope = s_ma5.iloc[-1] - s_ma5.iloc[-2]
-    ma20_slope = s_ma20.iloc[-1] - s_ma20.iloc[-2]
-    slope_ok = (ma5_slope > 0) and (ma20_slope <= 0)
+    # ma20_slope = s_ma20.iloc[-1] - s_ma20.iloc[-2]
+    # slope_ok = (ma5_slope > 0) and (ma20_slope <= 0)
+    slope_ok   = (ma5_slope > 0)  # MA20 기울기 조건은 완화
 
     return bool(tight_now and delta_rise and slope_ok)
 
