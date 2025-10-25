@@ -107,6 +107,11 @@ for count, ticker in enumerate(tickers):
         pass
     data = cleaned
 
+    data, removed_idx = drop_trading_halt_rows(data)
+    if len(removed_idx) > 0:
+        # print(f"                                                        거래정지/이상치로 제거된 날짜 수: {len(removed_idx)}")
+        pass
+
     if 'MA5' not in data.columns or 'MA20' not in data.columns:
         # print(f"                                                        이동평균선이 존재하지 않음 → pass")
         continue
@@ -212,10 +217,6 @@ for count, ticker in enumerate(tickers):
     if avg5 > 0 and np.isfinite(avg5) and today_val >= TARGET_VALUE * avg5:
         condition_passed2 = False
 
-    data, removed_idx = drop_trading_halt_rows(data)
-    if len(removed_idx) > 0:
-        # print(f"                                                        거래정지/이상치로 제거된 날짜 수: {len(removed_idx)}")
-        pass
 
 
 

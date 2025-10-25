@@ -37,9 +37,9 @@ os.makedirs(pickle_dir, exist_ok=True) # 없으면 생성
 
 N_FUTURE = 3
 LOOK_BACK = 15
-EXPECTED_GROWTH_RATE = 3
+EXPECTED_GROWTH_RATE = 4
 DATA_COLLECTION_PERIOD = 700 # 샘플 수 = 68(100일 기준) - 20 - 4 + 1 = 45
-AVERAGE_TRADING_VALUE = 4_000_000_000 # 평균거래대금 50억
+AVERAGE_TRADING_VALUE = 2_000_000_000 # 평균거래대금 20억
 SPLIT      = 0.75
 
 today = datetime.today().strftime('%Y%m%d')
@@ -157,21 +157,30 @@ for count, ticker in enumerate(tickers):
         # print("                                                        종가가 0이거나 500원 미만 → pass")
         continue
 
-    # 최근 한달 거래대금 중 3억 미만이 있으면 패스
-    month_data = data.tail(20)    # 마지막 20개 행을 반환
-    month_trading_value = month_data[col_v] * month_data[col_c]
-    # 하루라도 거래대금이 3억 미만이 있으면 제외
-    if (month_trading_value < 300_000_000).any():
-        # print(f"                                                        최근 4주 중 거래대금 3억 미만 발생 → pass")
-        continue
+    # # 최근 한달 거래대금 중 3억 미만이 있으면 패스
+    # month_data = data.tail(20)
+    # month_trading_value = month_data[col_v] * month_data[col_c]
+    # # 하루라도 거래대금이 3억 미만이 있으면 제외
+    # if (month_trading_value < 300_000_000).any():
+    #     # print(f"                                                        최근 4주 중 거래대금 3억 미만 발생 → pass")
+    #     continue
+    #
+    # # 최근 2주 거래대금이 기준치 이하면 패스
+    # recent_data = data.tail(10)
+    # recent_trading_value = recent_data[col_v] * recent_data[col_c]
+    # recent_average_trading_value = recent_trading_value.mean()
+    # if recent_average_trading_value <= AVERAGE_TRADING_VALUE:
+    #     formatted_recent_value = f"{recent_average_trading_value / 100_000_000:.0f}억"
+    #     # print(f"                                                        최근 2주 평균 거래대금({formatted_recent_value})이 부족 → pass")
+    #     continue
 
-    # 최근 2주 거래대금이 기준치 이하면 패스
-    recent_data = data.tail(10)
-    recent_trading_value = recent_data[col_v] * recent_data[col_c]
-    recent_average_trading_value = recent_trading_value.mean()    # 평균
+    # 최근 3거래일 거래대금이 기준치 이하면 패스
+    recent_5data = data.tail(3)
+    recent_5trading_value = recent_5data[col_v] * recent_5data[col_c]
+    recent_average_trading_value = recent_5trading_value.mean()
     if recent_average_trading_value <= AVERAGE_TRADING_VALUE:
         formatted_recent_value = f"{recent_average_trading_value / 100_000_000:.0f}억"
-        # print(f"                                                        최근 2주 평균 거래대금({formatted_recent_value})이 부족 → pass")
+        # print(f"                                                        최근 3거래일 평균 거래대금({formatted_recent_value})이 부족 → pass")
         continue
 
     # 최고가 대비 현재가가 50% 이상 하락한 경우 건너뜀
@@ -222,24 +231,22 @@ for count, ticker in enumerate(tickers):
         print("    Drop candidates:", cols_to_drop)
     data = cleaned
 
+
     if 'MA5' not in data.columns or 'MA20' not in data.columns:
+        # print(f"                                                        이동평균선이 존재하지 않음 → pass")
         continue
 
-    # # 5일선이 너무 하락하면
-    # ma5_today = data['MA5'].iloc[-1]
-    # ma5_yesterday = data['MA5'].iloc[-2]
-    #
-    # # 변화율 계산 (퍼센트로 보려면 * 100)
-    # change_rate = (ma5_today - ma5_yesterday) / ma5_yesterday
-    # if change_rate * 100 < -2:
-    #     # print(f"어제 5일선의 변화율: {change_rate:.5f}")  # 소수점 5자리
-    #     print(f"                                                        어제 5일선의 변화율: {change_rate * 100:.2f}% → pass")
-    #     continue
+    # 5일선이 너무 하락하면
+    ma5_today = data['MA5'].iloc[-1]
+    ma5_yesterday = data['MA5'].iloc[-2]
+
+    # 변화율 계산 (퍼센트로 보려면 * 100)
+    change_rate = (ma5_today - ma5_yesterday) / ma5_yesterday
 
     # 현재 5일선이 20일선보다 낮으면서 하락중이면 패스
-    ma_angle_5 = data['MA5'].iloc[-1] - data['MA5'].iloc[-2]
-    if data['MA5'].iloc[-1] < data['MA20'].iloc[-1] and ma_angle_5 < 0:
-        # print(f"                                                        5일선이 20일선 보다 낮으면서 하락중 → pass")
+    min_slope = -3
+    if ma5_today < data['MA20'].iloc[-1] and change_rate * 100 < min_slope:
+        print(f"                                                        5일선이 20일선 보다 낮으면서 {min_slope}기울기보다 낮게 하락중[{change_rate * 100:.2f}] → pass")
         continue
         # pass
 
@@ -253,10 +260,13 @@ for count, ticker in enumerate(tickers):
     cols = [c for c in feature_cols if c in data.columns]  # 순서 보존
     df = data.loc[:, cols].replace([np.inf, -np.inf], np.nan)
     X_df = df.dropna()  # X_df는 (정렬/결측처리된) 피처 데이터프레임, '종가' 컬럼 존재
-    close_price = X_df[col_c].to_numpy()
+
+    if col_c not in X_df.columns:
+        raise KeyError(f"'{col_c}' 컬럼이 없습니다.")
 
     # 종가 컬럼 이름/인덱스
     idx_close = cols.index(col_c)
+    close_price = X_df[col_c].to_numpy()
 
     # 2) 시계열 분리 후, train만 fit → val/전체 transform
     split = int(len(X_df) * SPLIT)

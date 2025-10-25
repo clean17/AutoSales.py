@@ -24,7 +24,7 @@ else:
     raise FileNotFoundError("utils.py를 상위 디렉터리에서 찾지 못했습니다.")
 
 from utils import fetch_stock_data, get_kor_interest_ticker_dick_list, add_technical_features, \
-    plot_candles_weekly, plot_candles_daily, drop_sparse_columns
+    plot_candles_weekly, plot_candles_daily, drop_sparse_columns, drop_trading_halt_rows
 
 
 
@@ -80,10 +80,9 @@ for count, ticker in enumerate(tickers):
 
     # 결측 제거
     cleaned, cols_to_drop = drop_sparse_columns(data, threshold=0.10, check_inf=True, inplace=True)
-    if len(cols_to_drop) > 0:
-        # print("    Drop candidates:", cols_to_drop)
-        pass
     data = cleaned
+
+    data, removed_idx = drop_trading_halt_rows(data)
 
 
     ########################################################################
