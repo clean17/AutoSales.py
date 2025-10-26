@@ -36,7 +36,7 @@ os.makedirs(pickle_dir, exist_ok=True) # 없으면 생성
 
 N_FUTURE = 3
 LOOK_BACK = 15
-EXPECTED_GROWTH_RATE = 3
+EXPECTED_GROWTH_RATE = 4
 DATA_COLLECTION_PERIOD = 700
 KR_AVERAGE_TRADING_VALUE = 7_000_000_000
 SPLIT      = 0.75
@@ -247,23 +247,20 @@ for count, ticker in enumerate(tickers):
     data = cleaned
 
     if 'MA5' not in data.columns or 'MA20' not in data.columns:
+        print(f"                                                        이동평균선이 존재하지 않음 → pass")
         continue
 
-    # # 5일선이 너무 하락하면
-    # ma5_today = data['MA5'].iloc[-1]
-    # ma5_yesterday = data['MA5'].iloc[-2]
-    #
-    # # 변화율 계산 (퍼센트로 보려면 * 100)
-    # change_rate = (ma5_today - ma5_yesterday) / ma5_yesterday
-    # if change_rate * 100 < -2:
-    #     # print(f"어제 5일선의 변화율: {change_rate:.5f}")  # 소수점 5자리
-    #     print(f"                                                        어제 5일선의 변화율: {change_rate * 100:.2f}% → pass")
-    #     continue
+    # 5일선이 너무 하락하면
+    ma5_today = data['MA5'].iloc[-1]
+    ma5_yesterday = data['MA5'].iloc[-2]
+
+    # 변화율 계산 (퍼센트로 보려면 * 100)
+    change_rate = (ma5_today - ma5_yesterday) / ma5_yesterday
 
     # 현재 5일선이 20일선보다 낮으면서 하락중이면 패스
-    ma_angle_5 = data['MA5'].iloc[-1] - data['MA5'].iloc[-2]
-    if data['MA5'].iloc[-1] < data['MA20'].iloc[-1] and ma_angle_5 < 0:
-        # print(f"                                                        5일선이 20일선 보다 낮으면서 하락중 → pass")
+    min_slope = -3
+    if ma5_today < data['MA20'].iloc[-1] and change_rate * 100 < min_slope:
+        print(f"                                                        5일선이 20일선 보다 낮으면서 {min_slope}기울기보다 낮게 하락중[{change_rate * 100:.2f}] → pass")
         continue
         # pass
 

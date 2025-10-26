@@ -125,6 +125,7 @@ for count, ticker in enumerate(tickers):
 
     # 파일 저장
     df.to_pickle(filepath)
+    # continue # 데이터 저장용
     # df = pd.read_pickle(filepath)    # 디버깅용
     data = df
 
