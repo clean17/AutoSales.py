@@ -18,8 +18,16 @@ def extract_numbers_from_filenames(directory, isToday):
             match = re.search(r'\[(\d{6})\]\.png$', filename)
             if match:
                     numbers.append(match.group(1))
-    return numbers
 
+    # 중복제거
+    seen = set()
+    uniq = []
+    for n in numbers:
+        if n not in seen:
+            seen.add(n)
+            uniq.append(n)
+
+    return uniq
 
 
 def extract_stock_code_from_filenames(directory):
@@ -43,6 +51,7 @@ def extract_stock_code_from_filenames(directory):
 
 
 directory = r'D:\kospi_stocks'  # 역슬래시 r''로 표기
+directory = r'D:\5below20\g'  # 역슬래시 r''로 표기
 extracted_numbers = extract_numbers_from_filenames(directory, False)
 print("Extracted numbers:", extracted_numbers)
 
