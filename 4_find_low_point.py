@@ -20,47 +20,64 @@ else:
     raise FileNotFoundError("utils.py를 상위 디렉터리에서 찾지 못했습니다.")
 
 from utils import get_kor_ticker_dict_list, add_technical_features, plot_candles_weekly, plot_candles_daily, \
-    drop_sparse_columns, drop_trading_halt_rows
+    drop_sparse_columns, drop_trading_halt_rows, signal_any_drop
 
 
-def signal_any_drop(data: pd.DataFrame,
-                    days: int = 12,
-                    up_thr: float = 3.0,
-                    down_thr: float = -3.0) -> bool:
-    """
-    요구 조건:
-      - 오늘 등락률(마지막 행) >= up_thr  (단위: %)
-      - 어제부터 과거 days일 동안 등락률 <= down_thr 인 날이 '하루라도' 있음
-      - 같은 기간(어제~과거 days일) 동안 MA5 < MA20 이 '항상' 성립
-    컬럼 필요: '등락률', 'MA5', 'MA20'
-    """
+def _col(df, ko: str, en: str):
+    """한국/영문 칼럼 자동매핑: ko가 있으면 ko, 없으면 en을 반환"""
+    if ko in df.columns: return ko
+    return en
 
-    # 안전 변환
-    chg  = pd.to_numeric(data['등락률'], errors='coerce')
-    ma5  = pd.to_numeric(data['MA5'],   errors='coerce')
-    ma20 = pd.to_numeric(data['MA20'],  errors='coerce')
+def weekly_check(data: pd.DataFrame):
+    # 인덱스가 날짜/시간이어야 함
+    if not isinstance(data.index, (pd.DatetimeIndex, pd.PeriodIndex)):
+        data = data.copy()
+        data.index = pd.to_datetime(data.index)
 
-    # 최소 길이: 오늘 1 + 과거 days
-    if len(data) < days + 1:
-        return False
+    # 한국/영문 칼럼 자동 식별
+    col_o = _col(data, '시가',   'Open')
+    col_h = _col(data, '고가',   'High')
+    col_l = _col(data, '저가',   'Low')
+    col_c = _col(data, '종가',   'Close')
+    col_v = _col(data, '거래량', 'Volume')
 
-    # 오늘 등락률(마지막 행)
-    today_chg = chg.iloc[-1]
+    # 주봉 리샘플 (월~금 장 기준이면 W-FRI 권장)
+    weekly = data.resample('W-FRI').agg({
+        col_o: 'first',
+        col_h: 'max',
+        col_l: 'min',
+        col_c: 'last',
+        col_v: 'sum'
+    }).dropna(subset=[col_c])  # 종가 없는 주 제거
 
-    # 어제~과거 days일 (총 days개): 마지막 행 제외한 꼬리 days개
-    past_chg  = chg.iloc[-(days+1):-1]
-    past_ma5  = ma5.iloc[-(days+1):-1]
-    past_ma20 = ma20.iloc[-(days+1):-1]
+    # 직전 2주 추출
+    prev_close = weekly.iloc[-2][col_c]
+    this_close = weekly.iloc[-1][col_c] # 마지막 주 종가
 
-    # 결측 있으면 보수적으로 False (원하면 dropna로 완화 가능)
-    if past_chg.isna().any() or past_ma5.isna().any() or past_ma20.isna().any() or pd.isna(today_chg):
-        return False
+    past_min = weekly.iloc[:-1][col_c].min()  # 이번 주 제외 과거 최저
+    first = weekly.iloc[0][col_c]             # 첫번째 주 종가
 
-    cond_today        = (today_chg >= up_thr)
-    cond_past_anydrop = past_chg.le(down_thr).any()     # 하루라도 -4% 이하
-    cond_ma_order     = past_ma5.lt(past_ma20).all()    # 12일 내내 MA5 < MA20
+    # 20% 이상 하락? (현재가가 과거최저의 80% 이하)
+    is_drop_20 = this_close <= first * 0.8
+    pct_from_min = this_close / first - 1.0  # 이번 주 종가(this_close)가 첫 번째 주 종가(first) 대비 몇 % 변했는지
 
-    return bool(cond_today and cond_past_anydrop and cond_ma_order)
+    pct = (this_close / prev_close) - 1  # 이번주 대비 전주 증감률
+    is_higher = this_close > prev_close
+    is_drop_over_3 = pct < -0.005   # -0.5% 보다 더 하락했는가
+
+    return {
+        "ok": True,
+        "this_week_close": float(this_close),
+        "last_week_close": float(prev_close),
+        "pct_change": float(pct),      # 예: -0.0312 == -3.12%
+        "is_higher_than_last_week": bool(is_higher),
+        "is_drop_more_than_minus3pct": bool(is_drop_over_3),
+        "weekly": weekly,
+        "past_min_close": float(first),
+        "first_close": float(first),
+        "pct_vs_past_min": float(pct_from_min * 100),  # 예: -0.22 == -22% 하락
+        "is_drop_more_than_20pct": bool(is_drop_20),
+    }
 
 
 
@@ -75,122 +92,205 @@ today = datetime.today().strftime('%Y%m%d')
 
 tickers_dict = get_kor_ticker_dict_list()
 tickers = list(tickers_dict.keys())
-# tickers = ['066970']
-# tickers = ['114190']
-tickers = ['044480']
+# tickers = ['419530', '219550', '223310', '007110', '047770', '083660', '001515', '004835', '145210', '217330', '322780', '042660', '083650', '017510', '052770', '131400', '006490', '254120', '114190', '044490', '393890', '396300', '086520', '418550', '002710', '121600', '020150', '069920', '137400', '043100', '002020', '317330', '383310', '452400', '234920', '018880', '417010', '340930']
 
-# 결과를 저장할 배열
-results = []
+# SPLIT_DATE = -40
+# SPLIT_DATE = 0
 
+idx = 0
+while idx <= 0:   # -10까지 포함해서 돌리고, 다음 증가 전에 멈춤
+    idx += 1
 
-for count, ticker in enumerate(tickers):
-    condition_passed = True
-    stock_name = tickers_dict.get(ticker, 'Unknown Stock')
-    print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
+# while SPLIT_DATE <= 21:   # -10까지 포함해서 돌리고, 다음 증가 전에 멈춤
+#     SPLIT_DATE += 1
 
-
-    filepath = os.path.join(pickle_dir, f'{ticker}.pkl')
-    if os.path.exists(filepath):
-        df = pd.read_pickle(filepath)
-
-    data = df
-
-    # 디버깅용
-    # data = data[:-9]
-    # print(data[:-1])
-
-    ########################################################################
-
-    closes = data['종가'].values
-    trading_value = data['거래량'] * data['종가']
+    for count, ticker in enumerate(tickers):
+        condition_passed = True
+        stock_name = tickers_dict.get(ticker, 'Unknown Stock')
+        # print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
 
 
-    # 데이터가 부족하면 패스
-    if data.empty or len(data) < 50:
-        # print(f"                                                        데이터 부족 → pass")
-        continue
+        filepath = os.path.join(pickle_dir, f'{ticker}.pkl')
+        if os.path.exists(filepath):
+            df = pd.read_pickle(filepath)
 
-    # 2차 생성 feature
-    data = add_technical_features(data)
+        data = df
+        # print(data[-1:])
 
-    # 결측 제거
-    cleaned, cols_to_drop = drop_sparse_columns(data, threshold=0.10, check_inf=True, inplace=True)
-    data = cleaned
+        # # 검증용
+        # origin = data.copy()
+        # data = data[:SPLIT_DATE]
 
-    data, removed_idx = drop_trading_halt_rows(data)
+        if count == 0:
+            # print(data)
+            today = data.index[-1].strftime("%Y%m%d")
+            print('\n─────────────────────────────────────────────────────────────')
+            print(data.index[-1].date())
+            print('─────────────────────────────────────────────────────────────')
 
+        ########################################################################
 
-    if 'MA5' not in data.columns or 'MA20' not in data.columns:
-        continue
-
-    # 5일선은 20일선보다 낮아야 한다
-    ma5_today = data['MA5'].iloc[-1]
-    ma20_today = data['MA20'].iloc[-1]
-
-    if ma5_today >= ma20_today:
-        continue
-
-    signal = signal_any_drop(data)
-    if not signal:
-        continue
+        closes = data['종가'].values
+        trading_value = data['거래량'] * data['종가']
 
 
-    ########################################################################
+        # 데이터가 부족하면 패스
+        if data.empty or len(data) < 70:
+            # print(f"                                                        데이터 부족 → pass")
+            continue
 
-    # 그래프 생성
-    fig = plt.figure(figsize=(14, 16), dpi=150)
-    gs = fig.add_gridspec(nrows=4, ncols=1, height_ratios=[3, 1, 3, 1])
+        # 2차 생성 feature
+        data = add_technical_features(data)
 
-    ax_d_price = fig.add_subplot(gs[0, 0])
-    ax_d_vol   = fig.add_subplot(gs[1, 0], sharex=ax_d_price)
-    ax_w_price = fig.add_subplot(gs[2, 0])
-    ax_w_vol   = fig.add_subplot(gs[3, 0], sharex=ax_w_price)
+        # 결측 제거
+        cleaned, cols_to_drop = drop_sparse_columns(data, threshold=0.10, check_inf=True, inplace=True)
+        # o_cleaned, cols_to_drop = drop_sparse_columns(origin, threshold=0.10, check_inf=True, inplace=True)
+        data = cleaned
+        # origin = o_cleaned
 
-    plot_candles_daily(data, show_months=6, title=f'{today} {stock_name} [{ticker}] Daily Chart',
-                       ax_price=ax_d_price, ax_volume=ax_d_vol)
-
-    plot_candles_weekly(data, show_months=12, title=f'{today} {stock_name} [{ticker}] Weekly Chart',
-                        ax_price=ax_w_price, ax_volume=ax_w_vol)
-
-    plt.tight_layout()
-    # plt.show()
-
-    # 파일 저장 (옵션)
-    output_dir = 'D:\\5below20'
-    os.makedirs(output_dir, exist_ok=True)
-
-    final_file_name = f'{today} {stock_name} [{ticker}].png'
-    final_file_path = os.path.join(output_dir, final_file_name)
-    plt.savefig(final_file_path)
-    plt.close()
+        # 거래정지/이상치 행 제거
+        data, removed_idx = drop_trading_halt_rows(data)
+        # origin, removed_idx = drop_trading_halt_rows(origin)
 
 
-#######################################################################
+        if 'MA5' not in data.columns or 'MA20' not in data.columns:
+            continue
+
+        # 5일선은 20일선보다 낮아야 한다
+        ma5_today = data['MA5'].iloc[-1]
+        ma20_today = data['MA20'].iloc[-1]
+
+        if ma5_today >= ma20_today:
+            continue
+
+        # 최근 12일 5일선이 20일선보다 낮은데 3% 하락이 있으면서 오늘 3% 상승
+        signal = signal_any_drop(data)
+        if not signal:
+            continue
+
+        # 오늘 14% 이상 오르면 패스
+        if data.iloc[-1]['등락률'] > 13:
+            continue
 
 
-if len(results) > 0:
-    # 내림차순 정렬 (상승률 기준)
-    results.sort(reverse=True, key=lambda x: x[0])
+        ########################################################################
+
+        m_data = data[-100:]
+
+        # n = len(origin)
+        # start = SPLIT_DATE
+        #
+        # # 음수 시작은 뒤에서부터로 해석해 양수로 변환
+        # if start < 0:
+        #     start = max(0, n + start)
+        # nn = 10 if SPLIT_DATE <= -10 else 5
+        # stop = min(n, start + nn)  # 범위 초과 방지
+        # origin = origin.iloc[start:stop]
+        # # print(origin) # 미래 가격 비교
+
+        # print('m_date:', m_data.index[0].date())
+        # print(origin.index[0].date()) #  2025-05-20, 대략 5달
+
+        m_closes = m_data['종가']
+        # o_closes = origin['종가']
+        m_max = m_closes.max()
+        m_min = m_closes.min()
+        m_current = m_closes[-1]
+        # o_max = o_closes.max() # m_current의 다음 기간 최대
+
+        # print('MAX:',m_max)
+        # print('MIN:', m_min)
+        # print('TODAY:', m_current)
+
+        m_chg_rate=(m_max-m_min)/m_min*100          # 최근 5달 동안의 변동률
+        # m_chg_rate2=(o_max-m_current)/m_current*100 # 미래가격이 현재가 대비 얼마나 올랐어?
+        m_chg_rate3=(m_current-m_max)/m_max*100 # 최근 5달 최대 대비 하락률 계산
+
+        # 최근 변동률 최소 기준: 횡보는 패스 (보조)
+        if m_chg_rate < 20:
+            continue
+
+        # 미래가 10% 이상 상승(검증용)
+        # if m_chg_rate2 <= 9:
+        #     continue
 
 
-    # 글자별 시각적 너비 계산 함수 (한글/한자/일본어 2칸, 영문/숫자/특수문자 1칸)
-    def visual_width(text):
-        width = 0
-        for c in text:
-            if unicodedata.east_asian_width(c) in 'WF':  # W: Wide, F: Fullwidth
-                width += 2
-            else:
-                width += 1
-        return width
+        result = weekly_check(m_data)
+        if result["ok"]:
+            # print(f"이번주 종가: {result['this_week_close']:.2f}")
+            # print(f"지난주 종가: {result['last_week_close']:.2f}")
+            # print(f"지난주 대비 변동률: {result['pct_change']*100:.2f}%")
+            # print("이번주가 더 높음:", result["is_higher_than_last_week"])
+            # print("-0.5%보다 더 하락:", result["is_drop_more_than_minus3pct"])
+            # print(f"5개월 주봉 변동률: {result['pct_vs_past_min']:.1f}")
+            # print(f"5개월 전 주봉보다 하락: {result['is_drop_more_than_20pct']}")
 
-    # 시각적 폭 기준 최대값
-    max_name_vis_len = max(visual_width(name) for name, _ in results)
+            # 저번주 대비 이번주 증감률 -0.5보다 낮으면 패스
+            if result["is_drop_more_than_minus3pct"]:
+                continue
 
-    # 시각적 폭에 맞춰 공백 패딩
-    def pad_visual(text, target_width):
-        gap = target_width - visual_width(text)
-        return text + ' ' * gap
+            # 지난주 대비 주봉 종가가 15% 이상 상승하면 패스
+            if result['pct_change'] * 100 > 15:
+                continue
 
-    for stock_name, ticker in results:
-        print(f"==== {pad_visual(stock_name, max_name_vis_len)} [{ticker}] ====")
+            # 직전 날까지의 마지막 3일 거래대금 평균
+            today_tr_val = trading_value.iloc[-1]
+            mean_prev3 = trading_value.iloc[:-1].tail(3).mean()
+            chg_tr_val = (today_tr_val-mean_prev3)/mean_prev3*100
 
+            # 3거래일 평균 거래대금 5억보다 작으면 패스
+            if mean_prev3.round(1) / 100_000_000 < 5:
+                continue
+
+            # 5개월 주봉 변동률: 너무 하락한것 제외 (목 돌아감), (보조)
+            if result['pct_vs_past_min'] < -20:
+                continue
+
+            # 거래대금 변동률 50% 이상 (보조)
+            if chg_tr_val < 50:
+                continue
+
+
+
+            print(f"\nProcessing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
+            print(f"  직전 3일 거래대금: {mean_prev3.round(1) / 100_000_000:.0f}억")
+            print(f"  오늘 거래대금: {today_tr_val.round(1) / 100_000_000:.0f}억")
+            print(f"  거래대금 변동률: {chg_tr_val:.1f}%")
+            print(f'  5개월 min_max 종가 변동률: {m_chg_rate.round(1)}%', )
+            # print(f'  검증 상승률: {m_chg_rate2.round(1)}%')
+            print(f"  5개월 주봉 변동률: {result['pct_vs_past_min']:.1f}")
+            print(f"  5개월 전 주봉보다 하락: {result['is_drop_more_than_20pct']}")
+            print(f"  5개월 최대 대비 하락률: {m_chg_rate3:.2f}%")
+            print(f"  지난주 대비 변동률: {result['pct_change']*100:.1f}%")
+            print(f"  오늘 등락률: {data.iloc[-1]['등락률']:.2f}%")
+
+
+
+        ########################################################################
+
+        # 그래프 생성
+        fig = plt.figure(figsize=(14, 16), dpi=150)
+        gs = fig.add_gridspec(nrows=4, ncols=1, height_ratios=[3, 1, 3, 1])
+
+        ax_d_price = fig.add_subplot(gs[0, 0])
+        ax_d_vol   = fig.add_subplot(gs[1, 0], sharex=ax_d_price)
+        ax_w_price = fig.add_subplot(gs[2, 0])
+        ax_w_vol   = fig.add_subplot(gs[3, 0], sharex=ax_w_price)
+
+        plot_candles_daily(data, show_months=6, title=f'{today} {stock_name} [{ticker}] Daily Chart',
+                           ax_price=ax_d_price, ax_volume=ax_d_vol)
+
+        plot_candles_weekly(data, show_months=12, title=f'{today} {stock_name} [{ticker}] Weekly Chart',
+                            ax_price=ax_w_price, ax_volume=ax_w_vol)
+
+        plt.tight_layout()
+        # plt.show()
+
+        # 파일 저장 (옵션)
+        output_dir = 'D:\\5below20'
+        os.makedirs(output_dir, exist_ok=True)
+
+        final_file_name = f'{today} {stock_name} [{ticker}].png'
+        final_file_path = os.path.join(output_dir, final_file_name)
+        plt.savefig(final_file_path)
+        plt.close()
