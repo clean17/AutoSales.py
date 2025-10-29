@@ -136,7 +136,7 @@ for count, ticker in enumerate(tickers):
     plot_candles_daily(data, show_months=6, title=f'{today} {stock_name} [{ticker}] Daily Chart',
                        ax_price=ax_d_price, ax_volume=ax_d_vol)
 
-    plot_candles_weekly(data, show_months=12, title=f'{today} {stock_name} [{ticker}] Weekly Chart',
+    plot_candles_weekly(data, show_months=12, title="Weekly Chart",
                         ax_price=ax_w_price, ax_volume=ax_w_vol)
 
     plt.tight_layout()

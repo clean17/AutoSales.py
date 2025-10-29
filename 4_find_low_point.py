@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 import unicodedata
 from pathlib import Path
 import matplotlib.pyplot as plt
+import requests
 
 # 자동 탐색 (utils.py를 찾을 때까지 위로 올라가 탐색)
 here = Path(__file__).resolve()
@@ -94,7 +95,7 @@ tickers_dict = get_kor_ticker_dict_list()
 tickers = list(tickers_dict.keys())
 # tickers = ['419530', '219550', '223310', '007110', '047770', '083660', '001515', '004835', '145210', '217330', '322780', '042660', '083650', '017510', '052770', '131400', '006490', '254120', '114190', '044490', '393890', '396300', '086520', '418550', '002710', '121600', '020150', '069920', '137400', '043100', '002020', '317330', '383310', '452400', '234920', '018880', '417010', '340930']
 
-# SPLIT_DATE = -40
+# SPLIT_DATE = -2
 # SPLIT_DATE = 0
 
 idx = 0
@@ -265,6 +266,52 @@ while idx <= 0:   # -10까지 포함해서 돌리고, 다음 증가 전에 멈�
             print(f"  오늘 등락률: {data.iloc[-1]['등락률']:.2f}%")
 
 
+            today_close = closes[-1]
+            yesterday_close = closes[-2]
+            change_pct_today = (today_close - yesterday_close) / yesterday_close * 100
+            change_pct_today = round(change_pct_today, 2)
+            avg5 = trading_value.iloc[-6:-1].mean()
+            today_val = trading_value.iloc[-1]
+            ratio = today_val / avg5 * 100
+            ratio = round(ratio, 2)
+
+            try:
+                res = requests.post(
+                    'https://chickchick.shop/func/stocks/info',
+                    json={"stock_name": str(ticker)},
+                    timeout=10
+                )
+                json_data = res.json()
+                product_code = json_data["result"][0]["data"]["items"][0]["productCode"]
+            except Exception as e:
+                print(f"info 요청 실패-4(1): {e}")
+                pass  # 오류
+
+            try:
+                res2 = requests.post(
+                    'https://chickchick.shop/func/stocks/overview',
+                    json={"product_code": str(product_code)},
+                    timeout=10
+                )
+                data2 = res2.json()
+                market_value = data2["result"]["marketValueKrw"]
+                company_code = data2["result"]["company"]["code"]
+            except Exception as e:
+                print(f"overview 요청 실패-4(2): {e}")
+                pass  # 오류
+
+            try:
+                res = requests.post(
+                    'https://chickchick.shop/func/stocks/company',
+                    json={"company_code": str(company_code)},
+                    timeout=15
+                )
+                json_data = res.json()
+                category = json_data["result"]["majorList"][0]["title"]
+            except Exception as e:
+                print(f"/func/stocks/company 요청 실패-4(3): {e}")
+                pass  # 오류
+
 
         ########################################################################
 
@@ -280,7 +327,7 @@ while idx <= 0:   # -10까지 포함해서 돌리고, 다음 증가 전에 멈�
         plot_candles_daily(data, show_months=6, title=f'{today} {stock_name} [{ticker}] Daily Chart',
                            ax_price=ax_d_price, ax_volume=ax_d_vol)
 
-        plot_candles_weekly(data, show_months=12, title=f'{today} {stock_name} [{ticker}] Weekly Chart',
+        plot_candles_weekly(data, show_months=12, title="Weekly Chart",
                             ax_price=ax_w_price, ax_volume=ax_w_vol)
 
         plt.tight_layout()
@@ -294,3 +341,31 @@ while idx <= 0:   # -10까지 포함해서 돌리고, 다음 증가 전에 멈�
         final_file_path = os.path.join(output_dir, final_file_name)
         plt.savefig(final_file_path)
         plt.close()
+
+
+
+        try:
+            requests.post(
+                'https://chickchick.shop/func/stocks/interest',
+                json={
+                    "nation": "kor",
+                    "stock_code": str(ticker),
+                    "stock_name": str(stock_name),
+                    "pred_price_change_3d_pct": "",
+                    "yesterday_close": str(yesterday_close),
+                    "current_price": str(today_close),
+                    "today_price_change_pct": str(change_pct_today),
+                    "avg5d_trading_value": str(avg5),
+                    "current_trading_value": str(today_val),
+                    "trading_value_change_pct": str(ratio),
+                    "image_url": str(final_file_name),
+                    "market_value": str(market_value),
+                    "category": str(category),
+                    "target": "low",
+                },
+                timeout=5
+            )
+        except Exception as e:
+            # logging.warning(f"progress-update 요청 실패: {e}")
+            print(f"progress-update 요청 실패-4(4): {e}")
+            pass  # 오류
