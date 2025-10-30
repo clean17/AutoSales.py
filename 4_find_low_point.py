@@ -165,7 +165,7 @@ while idx <= 0:   # -10까지 포함해서 돌리고, 다음 증가 전에 멈�
             continue
 
         # 최근 12일 5일선이 20일선보다 낮은데 3% 하락이 있으면서 오늘 3% 상승
-        signal = signal_any_drop(data)
+        signal = signal_any_drop(data, 10)
         if not signal:
             continue
 
