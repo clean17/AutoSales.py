@@ -176,10 +176,11 @@ for count, ticker in enumerate(tickers):
             timeout=10
         )
         json_data = res.json()
+        json_data["result"][0]
         product_code = json_data["result"][0]["data"]["items"][0]["productCode"]
 
     except Exception as e:
-        print(f"info 요청 실패-2: {e}")
+        print(f"info 요청 실패-2: {str(ticker)} {e}")
         pass  # 오류
 
     try:
