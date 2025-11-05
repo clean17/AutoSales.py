@@ -1,5 +1,6 @@
 '''
 저점을 찾는 스크립트
+signal_any_drop 를 통해서 5일선이 20일선보다 아래에 있으면서 최근 -3%이 존재 + 오늘 3% 이상 상승
 '''
 
 import os, sys
@@ -10,6 +11,9 @@ import unicodedata
 from pathlib import Path
 import matplotlib.pyplot as plt
 import requests
+
+nowTime = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
+print(f'        {nowTime}: running 4_find_low_point.py...')
 
 # 자동 탐색 (utils.py를 찾을 때까지 위로 올라가 탐색)
 here = Path(__file__).resolve()
@@ -165,7 +169,7 @@ while idx <= 0:   # -10까지 포함해서 돌리고, 다음 증가 전에 멈�
             continue
 
         # 최근 12일 5일선이 20일선보다 낮은데 3% 하락이 있으면서 오늘 3% 상승
-        signal = signal_any_drop(data, 10)
+        signal = signal_any_drop(data, 10, 3.0 ,-2.5)
         if not signal:
             continue
 

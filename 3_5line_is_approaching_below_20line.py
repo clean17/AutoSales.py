@@ -143,7 +143,7 @@ for count, ticker in enumerate(tickers):
     # plt.show()
 
     # 파일 저장 (옵션)
-    output_dir = 'D:\\5below20'
+    output_dir = 'D:\\5below20-3'
     os.makedirs(output_dir, exist_ok=True)
 
     final_file_name = f'{today} {stock_name} [{ticker}].png'

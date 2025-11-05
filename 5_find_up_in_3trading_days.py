@@ -55,7 +55,7 @@ def passes_rule(data: pd.DataFrame, close_cols=('종가','Close')) -> bool:
     if len(ret) < 5 or ret.iloc[-4:-1].isna().any() or pd.isna(ret.iloc[-1]):
         return False
 
-    # 1) 3거래일 전 +10% 이상
+    # 1) 3거래일 전 +10% 이상 ########################################################
     cond_3ago_up10 = ret.iloc[-4] >= 8.0
 
     # 2) 최근 3일 모두 -3% < 수익률 < +3%
@@ -77,7 +77,7 @@ today = datetime.today().strftime('%Y%m%d')
 
 tickers_dict = get_kor_ticker_dict_list()
 tickers = list(tickers_dict.keys())
-# tickers = ['114190']
+# tickers = ['114190']  # 디버깅
 
 AVERAGE_TRADING_VALUE = 2_000_000_000 # 평균거래대금 20억
 
@@ -95,7 +95,7 @@ while idx <= 0:   # -10까지 포함해서 돌리고, 다음 증가 전에 멈�
         if os.path.exists(filepath):
             df = pd.read_pickle(filepath)
 
-#         df = df[:-1]  # 테스트용
+#         df = df[:-1]  # 디버깅
         data = df
 #         print(data[-1:])
 #         print(data)

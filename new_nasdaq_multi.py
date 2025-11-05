@@ -243,7 +243,7 @@ for count, ticker in enumerate(tickers):
     # 결측 제거
     cleaned, cols_to_drop = drop_sparse_columns(data, threshold=0.10, check_inf=True, inplace=True)
     if len(cols_to_drop) > 0:
-        print("    Drop candidates:", cols_to_drop)
+#         print("    Drop candidates:", cols_to_drop)
     data = cleaned
 
     if 'MA5' not in data.columns or 'MA20' not in data.columns:
