@@ -2,6 +2,7 @@
 저점을 찾는 스크립트
 signal_any_drop 를 통해서 5일선이 20일선보다 아래에 있으면서 최근 -3%이 존재 + 오늘 3% 이상 상승
 '''
+print('signal_any_drop 를 통해서 5일선이 20일선보다 아래에 있으면서 최근 -3%이 존재 + 오늘 3% 이상 상승')
 
 import os, sys
 import numpy as np
