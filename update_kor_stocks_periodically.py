@@ -109,9 +109,14 @@ def post_stocks_update(
 
 if __name__ == "__main__":
     # 1) 페이로드 구성
-    # payload = build_stock_payload(market="KOSPI")
-    payload = build_stock_payload(market="KOSDAQ")
+    print('update KOSPI')
+    payload = build_stock_payload(market="KOSPI")
+    # 2) 전송 (엔드포인트 주소 맞춰서 변경)
+    API_URL = "https://chickchick.shop/func/stocks/update"
+    post_stocks_update(API_URL, payload, batch_size=500)
 
+    print('update KOSDAQ')
+    payload = build_stock_payload(market="KOSDAQ")
     # 2) 전송 (엔드포인트 주소 맞춰서 변경)
     API_URL = "https://chickchick.shop/func/stocks/update"
     post_stocks_update(API_URL, payload, batch_size=500)
