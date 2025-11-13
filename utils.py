@@ -245,6 +245,14 @@ def compute_roc(close, length=12, pct=True):
 
 # 거래정지/이상치 행 제거
 def drop_trading_halt_rows(data: pd.DataFrame):
+    """
+    변경사항:
+      - 거래정지(거래량 <= 0)인 행은 제거하지 않음
+      - 그 날의 시가/고가/종가는 '전일 종가'로 대체
+      - 나머지 이상치(결측, 음수/0 가격, high<low 등)는 기존 규칙대로 제거
+    반환:
+      - 정제된 DataFrame, 제거된 인덱스 목록(기존과 동일 포맷)
+    """
     d = data.copy()
     d = d.replace([np.inf, -np.inf], np.nan)
 
@@ -255,16 +263,34 @@ def drop_trading_halt_rows(data: pd.DataFrame):
     col_c = _col(d, '종가',   'Close')
     col_v = _col(d, '거래량', 'Volume')
 
-    # 1) OHLCV 전부 존재
+    # 거래정지 마스크(거래량 <= 0 또는 결측을 0으로 간주)
+    halt = d[col_v].fillna(0) <= 0
+
+    # 전일 종가
+    prev_close = d[col_c].shift(1)
+
+    # 거래정지 날: 시가/고가/종가를 전일 종가로 대체(전일 종가가 NaN이면 그대로 NaN 유지)
+    for col in (col_o, col_h, col_c):
+        d.loc[halt, col] = prev_close.loc[halt]
+
+    # (선택) 저가가 비정상/결측이면 전일 종가로 보정
+    # - 저가가 없음, 0/음수, 혹은 저가 > 고가가 되어버린 경우
+    fix_low = (
+            halt &
+            (
+                    d[col_l].isna() |
+                    (d[col_l] <= 0) |
+                    (d[col_h].notna() & d[col_l].notna() & (d[col_l] > d[col_h]))
+            )
+    )
+    d.loc[fix_low, col_l] = prev_close.loc[fix_low]
+
+    # 유효성 체크 (거래량>0 조건은 제거: 거래정지 행을 살려야 하므로)
     notna = d[[col_o, col_h, col_l, col_c, col_v]].notna().all(axis=1)
-    # 2) 가격이 0보다 큼(데이터 공급사에 따라 0으로 채워지는 경우 방지)
     positive_price = d[[col_o, col_h, col_l, col_c]].gt(0).all(axis=1)
-    # 3) 거래량 > 0 (거래정지/휴장 등)
-    nonzero_vol = d[col_v].fillna(0) > 0
-    # 4) 고가 >= 저가 (이상치 방지)
     hl_ok = d[col_h] >= d[col_l]
 
-    valid = notna & positive_price & nonzero_vol & hl_ok
+    valid = notna & positive_price & hl_ok
     removed_idx = d.index[~valid]
 
     return d.loc[valid].copy(), removed_idx
@@ -1536,3 +1562,43 @@ def drop_sparse_columns(df: pd.DataFrame, threshold: float = 0.10, *, check_inf:
             dropped.append(col)
 
     return target, dropped
+
+
+def signal_any_drop(data: pd.DataFrame,
+                    days: int = 12,
+                    up_thr: float = 3.0,
+                    down_thr: float = -3.0) -> bool:
+    """
+    요구 조건:
+      - 오늘 등락률(마지막 행) >= up_thr  (단위: %)
+      - 어제부터 과거 days일 동안 등락률 <= down_thr 인 날이 '하루라도' 있음
+      - 같은 기간(어제~과거 days일) 동안 MA5 < MA20 이 '항상' 성립
+    컬럼 필요: '등락률', 'MA5', 'MA20'
+    """
+
+    # 안전 변환
+    chg  = pd.to_numeric(data['등락률'], errors='coerce')
+    ma5  = pd.to_numeric(data['MA5'],   errors='coerce')
+    ma20 = pd.to_numeric(data['MA20'],  errors='coerce')
+
+    # 최소 길이: 오늘 1 + 과거 days
+    if len(data) < days + 1:
+        return False
+
+    # 오늘 등락률(마지막 행)
+    today_chg = chg.iloc[-1]
+
+    # 어제~과거 days일 (총 days개): 마지막 행 제외한 꼬리 days개
+    past_chg  = chg.iloc[-(days+1):-1]
+    past_ma5  = ma5.iloc[-(days+1):-1]
+    past_ma20 = ma20.iloc[-(days+1):-1]
+
+    # 결측 있으면 보수적으로 False (원하면 dropna로 완화 가능)
+    if past_chg.isna().any() or past_ma5.isna().any() or past_ma20.isna().any() or pd.isna(today_chg):
+        return False
+
+    cond_today        = (today_chg >= up_thr)
+    cond_past_anydrop = past_chg.le(down_thr).any()     # 하루라도 -4% 이하
+    cond_ma_order     = past_ma5.lt(past_ma20).all()    # 12일 내내 MA5 < MA20
+
+    return bool(cond_today and cond_past_anydrop and cond_ma_order)
