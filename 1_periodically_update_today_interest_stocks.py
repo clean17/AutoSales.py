@@ -149,6 +149,35 @@ for count, ticker in enumerate(tickers):
     change_pct_today = round(change_pct_today, 2)
 
     try:
+        res = requests.post(
+            'https://chickchick.shop/func/stocks/info',
+            json={"stock_name": str(ticker)},
+            timeout=10
+        )
+        json_data = res.json()
+        # json_data["result"][0]
+        product_code = json_data["result"][0]["data"]["items"][0]["productCode"]
+
+    except Exception as e:
+        print(f"info 요청 실패-2: {str(ticker)} {e}")
+        pass  # 오류
+
+    # 현재 종가 가져오기
+    try:
+        res = requests.post(
+            'https://chickchick.shop/func/stocks/amount',
+            json={
+                "product_code": str(product_code)
+            },
+            timeout=5
+        )
+        json_data = res.json()
+        last_close = json_data["result"]["candles"][0]["close"]
+    except Exception as e:
+        print(f"progress-update 요청 실패-3-1: {e}")
+        pass  # 오류
+
+    try:
         requests.post(
             'https://chickchick.shop/func/stocks/interest',
             json={
@@ -164,6 +193,7 @@ for count, ticker in enumerate(tickers):
                 "trading_value_change_pct": str(ratio),
                 "image_url": str(final_file_name),
                 "market_value": "",
+                "last_close": str(last_close),
             },
             timeout=5
         )
