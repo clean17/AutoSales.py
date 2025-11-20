@@ -176,7 +176,7 @@ for count, ticker in enumerate(tickers):
             timeout=10
         )
         json_data = res.json()
-        json_data["result"][0]
+        # json_data["result"][0]
         product_code = json_data["result"][0]["data"]["items"][0]["productCode"]
 
     except Exception as e:
@@ -219,8 +219,6 @@ for count, ticker in enumerate(tickers):
     # 0 나눗셈 방지 및 조건 체크
     if avg5 > 0 and np.isfinite(avg5) and today_val >= TARGET_VALUE * avg5:
         condition_passed2 = False
-
-
 
 
     # ─────────────────────────────────────────────────────────────
@@ -270,6 +268,21 @@ for count, ticker in enumerate(tickers):
     ratio = today_val / avg5 * 100
     ratio = round(ratio, 2)
 
+    # 현재 종가 가져오기
+    try:
+        res = requests.post(
+            'https://chickchick.shop/func/stocks/amount',
+            json={
+                "product_code": str(product_code)
+            },
+            timeout=5
+        )
+        json_data = res.json()
+        last_close = json_data["result"]["candles"][0]["close"]
+    except Exception as e:
+        print(f"progress-update 요청 실패-3-2: {e}")
+        pass  # 오류
+
     # DB 등록
     if condition_passed:
         # 부합하면 결과에 저장 (상승률, 종목명, 코드)}
@@ -293,6 +306,7 @@ for count, ticker in enumerate(tickers):
                     "image_url": str(final_file_name),
                     "market_value": str(market_value),
                     "category": str(category),
+                    "last_close": str(last_close),
                 },
                 timeout=5
             )
@@ -322,6 +336,7 @@ for count, ticker in enumerate(tickers):
                     "image_url": str(final_file_name),
                     "market_value": str(market_value),
                     "category": str(category),
+                    "last_close": str(last_close),
                 },
                 timeout=5
             )
