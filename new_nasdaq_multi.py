@@ -99,7 +99,7 @@ for count, ticker in enumerate(tickers):
         )
     except Exception as e:
         # logging.warning(f"progress-update 요청 실패: {e}")
-        print(f"progress-update 요청 실패: {e}")
+        print(f"progress-update 요청 실패:-nn {e}")
         pass  # 오류
 
 
@@ -594,7 +594,7 @@ for count, ticker in enumerate(tickers):
     ax_w_vol   = fig.add_subplot(gs[3, 0], sharex=ax_w_price)
 
     # daily_chart_title = f'{end_date}  {stock_name} [{ticker}] (예상 상승률: {avg_future_return:.2f}%)'
-    daily_chart_title = f'{end_date}  {ticker} (예상 상승률: {avg_future_return:.2f}%)'
+    daily_chart_title = f'{end_date}  {ticker} (예상 상승률: {avg_future_return:.2f}%) {predicted_prices.mean():2f}'
     plot_candles_daily(data, show_months=6  , title=daily_chart_title,
                        ax_price=ax_d_price, ax_volume=ax_d_vol,
                        future_dates=future_dates, predicted_prices=predicted_prices)
@@ -629,7 +629,7 @@ try:
     )
 except Exception as e:
     # logging.warning(f"progress-update 요청 실패: {e}")
-    print(f"progress-update 요청 실패: {e}")
+    print(f"progress-update 요청 실패-nn: {e}")
     pass  # 오류
 
 if total_cnt > 0:

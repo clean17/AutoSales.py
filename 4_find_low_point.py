@@ -289,7 +289,7 @@ while idx <= 0:   # -10까지 포함해서 돌리고, 다음 증가 전에 멈�
                 json_data = res.json()
                 product_code = json_data["result"][0]["data"]["items"][0]["productCode"]
             except Exception as e:
-                print(f"info 요청 실패-4(1): {e}")
+                print(f"info 요청 실패-4: {e}")
                 pass  # 오류
 
             try:
@@ -372,5 +372,5 @@ while idx <= 0:   # -10까지 포함해서 돌리고, 다음 증가 전에 멈�
             )
         except Exception as e:
             # logging.warning(f"progress-update 요청 실패: {e}")
-            print(f"progress-update 요청 실패-4(4): {e}")
+            print(f"progress-update 요청 실패-4-1: {e}")
             pass  # 오류

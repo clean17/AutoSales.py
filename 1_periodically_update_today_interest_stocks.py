@@ -159,45 +159,47 @@ for count, ticker in enumerate(tickers):
         product_code = json_data["result"][0]["data"]["items"][0]["productCode"]
 
     except Exception as e:
-        print(f"info 요청 실패-2: {str(ticker)} {e}")
+        print(f"info 요청 실패-1: {str(ticker)} {e}")
         pass  # 오류
 
-    # 현재 종가 가져오기
-    try:
-        res = requests.post(
-            'https://chickchick.shop/func/stocks/amount',
-            json={
-                "product_code": str(product_code)
-            },
-            timeout=5
-        )
-        json_data = res.json()
-        last_close = json_data["result"]["candles"][0]["close"]
-    except Exception as e:
-        print(f"progress-update 요청 실패-3-1: {e}")
-        pass  # 오류
+    if product_code is not None:
+        # 현재 종가 가져오기
+        try:
+            res = requests.post(
+                'https://chickchick.shop/func/stocks/amount',
+                json={
+                    "product_code": str(product_code)
+                },
+                timeout=5
+            )
+            json_data = res.json()
+            last_close = json_data["result"]["candles"][0]["close"]
+        except Exception as e:
+            print(f"progress-update 요청 실패-1-1: {e}")
+            pass  # 오류
 
-    try:
-        requests.post(
-            'https://chickchick.shop/func/stocks/interest',
-            json={
-                "nation": "kor",
-                "stock_code": str(ticker),
-                "stock_name": str(stock_name),
-                "pred_price_change_3d_pct": "",
-                "yesterday_close": str(yesterday_close),
-                "current_price": str(today_close),
-                "today_price_change_pct": str(change_pct_today),
-                "avg5d_trading_value": str(avg5),
-                "current_trading_value": str(today_val),
-                "trading_value_change_pct": str(ratio),
-                "image_url": str(final_file_name),
-                "market_value": "",
-                "last_close": str(last_close),
-            },
-            timeout=5
-        )
-    except Exception as e:
-        # logging.warning(f"progress-update 요청 실패: {e}")
-        print(f"progress-update 요청 실패: {e}")
-        pass  # 오류
+    if last_close is not None:
+        try:
+            requests.post(
+                'https://chickchick.shop/func/stocks/interest',
+                json={
+                    "nation": "kor",
+                    "stock_code": str(ticker),
+                    "stock_name": str(stock_name),
+                    "pred_price_change_3d_pct": "",
+                    "yesterday_close": str(yesterday_close),
+                    "current_price": str(today_close),
+                    "today_price_change_pct": str(change_pct_today),
+                    "avg5d_trading_value": str(avg5),
+                    "current_trading_value": str(today_val),
+                    "trading_value_change_pct": str(ratio),
+                    "image_url": str(final_file_name),
+                    "market_value": "",
+                    "last_close": str(last_close),
+                },
+                timeout=5
+            )
+        except Exception as e:
+            # logging.warning(f"progress-update 요청 실패: {e}")
+            print(f"progress-update 요청 실패-1-2: {e}")
+            pass  # 오류

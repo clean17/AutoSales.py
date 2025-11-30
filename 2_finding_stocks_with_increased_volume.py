@@ -190,6 +190,7 @@ for count, ticker in enumerate(tickers):
             timeout=10
         )
         data2 = res2.json()
+        # if data2 is not None:
         market_value = data2["result"]["marketValueKrw"]
         company_code = data2["result"]["company"]["code"]
         # 시가총액이 500억보다 작으면 패스
@@ -198,7 +199,7 @@ for count, ticker in enumerate(tickers):
             continue
 
     except Exception as e:
-        print(f"overview 요청 실패-2: {e}")
+        print(f"overview 요청 실패-2: {e} {product_code}")
         pass  # 오류
 
 
@@ -280,7 +281,7 @@ for count, ticker in enumerate(tickers):
         json_data = res.json()
         last_close = json_data["result"]["candles"][0]["close"]
     except Exception as e:
-        print(f"progress-update 요청 실패-3-2: {e}")
+        print(f"progress-update 요청 실패-2-1: {e}")
         pass  # 오류
 
     # DB 등록
@@ -312,7 +313,7 @@ for count, ticker in enumerate(tickers):
             )
         except Exception as e:
             # logging.warning(f"progress-update 요청 실패: {e}")
-            print(f"progress-update 요청 실패-1: {e}")
+            print(f"progress-update 요청 실패-2-2: {e}")
             pass  # 오류
 
 
@@ -342,7 +343,7 @@ for count, ticker in enumerate(tickers):
             )
         except Exception as e:
             # logging.warning(f"progress-update 요청 실패: {e}")
-            print(f"progress-update 요청 실패-2: {e}")
+            print(f"progress-update 요청 실패-2-3: {e}")
             pass  # 오류
 
 

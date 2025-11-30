@@ -580,7 +580,7 @@ try:
     )
 except Exception as e:
     # logging.warning(f"progress-update 요청 실패: {e}")
-    print(f"progress-update 요청 실패: {e}")
+    print(f"progress-update 요청 실패-kl: {e}")
     pass  # 오류
 
 if total_cnt > 0:

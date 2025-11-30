@@ -792,7 +792,7 @@ def add_technical_features(data, window=20, num_std=2):
     70 이상 → 과매수 가능
     30 이하 → 과매도 가능
     """
-    data['UltimateOsc'] = compute_ultimate_osc(h, l, c, 7, 14, 28)
+    # data['UltimateOsc'] = compute_ultimate_osc(h, l, c, 7, 14, 28)
 
     # ROC (percent)
     """
