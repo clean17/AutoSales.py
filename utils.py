@@ -872,6 +872,7 @@ def plot_candles_daily(
         ax_volume=None,
         future_dates=None,           # iterable of datetime/date/str
         predicted_prices=None,       # iterable of float
+        date_tick=10,
 ):
     # 입력 표준화
     df = pd.DataFrame(data).copy()
@@ -951,8 +952,8 @@ def plot_candles_daily(
 
     # ax_price.tick_params(axis='x', which='both', labelbottom=False)  # 위 축 날짜 라벨 숨김
     ax_price.tick_params(axis='x', which='both', labelbottom=True)   # 윗 축 라벨 표시
-    # plt.setp(ax_price.get_xticklabels(), rotation=45, ha='right')    # 회전/정렬
-    plt.setp(ax_price.get_xticklabels(), rotation=0, ha='center')    # 회전/정렬
+    plt.setp(ax_price.get_xticklabels(), rotation=45, ha='right')    # 회전/정렬
+    # plt.setp(ax_price.get_xticklabels(), rotation=0, ha='center')    # 회전/정렬
     ax_price.set_title(title, fontsize=14)
     ax_price.grid(True, alpha=0.25)
     ax_price.legend(loc='upper left')
@@ -964,10 +965,11 @@ def plot_candles_daily(
 
     # x축 눈금(날짜 라벨)
     ds = df.index.strftime('%Y-%m-%d')
-    tick_idx = np.arange(0, len(df), max(1, len(df)//10))
+    # tick_idx = np.arange(0, len(df), max(1, len(df)//10))
+    tick_idx = np.arange(0, len(df), max(1, date_tick))
     ax_volume.set_xticks(tick_idx)
-    # ax_volume.set_xticklabels(ds[tick_idx], rotation=45, ha='right')
-    ax_volume.set_xticklabels(ds[tick_idx], rotation=0, ha='center')
+    ax_volume.set_xticklabels(ds[tick_idx], rotation=45, ha='right')
+    # ax_volume.set_xticklabels(ds[tick_idx], rotation=0, ha='center')
 
     return fig, ax_price, ax_volume
 
@@ -978,6 +980,7 @@ def plot_candles_weekly(
         title: str = "Weekly — Bollinger Bands & Volume",
         ax_price=None,
         ax_volume=None,
+        date_tick=10,
 ):
     # 입력 표준화
     df = pd.DataFrame(data).copy()
@@ -1068,7 +1071,8 @@ def plot_candles_weekly(
 
     # x축 눈금(날짜 라벨)
     dsw = w.index.strftime('%Y-%m-%d')
-    tick_idx = np.arange(0, len(w), max(1, len(w)//10))
+    # tick_idx = np.arange(0, len(w), max(1, len(w)//10))
+    tick_idx = np.arange(0, len(w), max(1, date_tick))
     ax_volume.set_xticks(tick_idx)
     # ax_volume.set_xticklabels(dsw[tick_idx], rotation=45, ha='right')
     ax_volume.set_xticklabels(dsw[tick_idx], rotation=0, ha='center')
@@ -1581,10 +1585,6 @@ def signal_any_drop(data: pd.DataFrame,
     ma5  = pd.to_numeric(data['MA5'],   errors='coerce')
     ma20 = pd.to_numeric(data['MA20'],  errors='coerce')
 
-    # 최소 길이: 오늘 1 + 과거 days
-    if len(data) < days + 1:
-        return False
-
     # 오늘 등락률(마지막 행)
     today_chg = chg.iloc[-1]
 
@@ -1598,7 +1598,7 @@ def signal_any_drop(data: pd.DataFrame,
         return False
 
     cond_today        = (today_chg >= up_thr)
-    cond_past_anydrop = past_chg.le(down_thr).any()     # 하루라도 -4% 이하
-    cond_ma_order     = past_ma5.lt(past_ma20).all()    # 12일 내내 MA5 < MA20
+    cond_past_anydrop = past_chg.le(down_thr).any()     # 하루라도 down_thr 이하
+    cond_ma_order     = past_ma5.lt(past_ma20).all()    # days기간 내내 MA5 < MA20
 
     return bool(cond_today and cond_past_anydrop and cond_ma_order)
