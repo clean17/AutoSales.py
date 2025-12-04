@@ -1602,3 +1602,59 @@ def signal_any_drop(data: pd.DataFrame,
     cond_ma_order     = past_ma5.lt(past_ma20).all()    # days기간 내내 MA5 < MA20
 
     return bool(cond_today and cond_past_anydrop and cond_ma_order)
+
+def low_weekly_check(data: pd.DataFrame):
+    # 인덱스가 날짜/시간이어야 함
+    if not isinstance(data.index, (pd.DatetimeIndex, pd.PeriodIndex)):
+        data = data.copy()
+        data.index = pd.to_datetime(data.index)
+
+    # 한국/영문 칼럼 자동 식별
+    col_o = _col(data, '시가',   'Open')
+    col_h = _col(data, '고가',   'High')
+    col_l = _col(data, '저가',   'Low')
+    col_c = _col(data, '종가',   'Close')
+    col_v = _col(data, '거래량', 'Volume')
+
+    # 주봉 리샘플 (월~금 장 기준이면 W-FRI 권장)
+    weekly = data.resample('W-FRI').agg({
+        col_o: 'first',
+        col_h: 'max',
+        col_l: 'min',
+        col_c: 'last',
+        col_v: 'sum'
+    }).dropna(subset=[col_c])  # 종가 없는 주 제거
+
+    # 직전 2주 추출
+    prev_close = weekly.iloc[-2][col_c]
+    this_close = weekly.iloc[-1][col_c]   # 마지막 주 종가
+    first      = weekly.iloc[0][col_c]    # 첫번째 주 종가
+
+    past_min   = this_close.min()  # 이번 주 제외 과거 최저
+
+    # 20% 이상 하락? (현재가가 과거최저의 80% 이하)
+    is_drop_20 = this_close <= first * 0.8
+    pct_from_first = this_close / first - 1.0  # 이번 주 종가(this_close)가 첫 번째 주 종가(first) 대비 몇 % 변했는지
+
+    '''
+    prev_close = 100
+    this_close = 105
+
+    pct = (105 / 100) - 1   # 1.05 - 1 = 0.05    >> pct = 0.05 (5% 상승)
+    '''
+    pct = (this_close / prev_close) - 1  # 저번주 대비 이번주 증감률
+    is_higher = this_close > prev_close
+    # is_drop_over_3 = pct < -0.005   # -0.5% 보다 더 하락했는가
+    is_drop_over_3 = pct < -0.01   # -0.5% 보다 더 하락했는가
+
+    return {
+        "ok": True,
+        "this_week_close": float(this_close),
+        "last_week_close": float(prev_close),
+        "pct_change": float(pct),                              # 예: -0.0312 == -3.12%
+        "is_higher_than_last_week": bool(is_higher),           # 이번주 주봉이 저번주 보다 더 높은지
+        "is_drop_more_than_minus3pct": bool(is_drop_over_3),   # 주봉 증감률이 기준보다 하락했는지
+        "drop_over_3": pct,                                    # 저번주 대비 이번주 증감률
+        "pct_vs_past_first": float(pct_from_first * 100),      # -0.22 -> -22% 하락
+        "is_drop_more_than_20pct": bool(is_drop_20),           # 주봉 첫번째 대비 20% 이상 하락했는지
+    }
