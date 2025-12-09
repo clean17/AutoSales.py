@@ -26,69 +26,13 @@ for parent in [here.parent, *here.parents]:
         raise FileNotFoundError("utils.py를 상위 디렉터리에서 찾지 못했습니다.")
 
 from utils import get_kor_ticker_dict_list, add_technical_features, plot_candles_weekly, plot_candles_daily, \
-    drop_sparse_columns, drop_trading_halt_rows, signal_any_drop
+    drop_sparse_columns, drop_trading_halt_rows, signal_any_drop, low_weekly_check
 
 
 def _col(df, ko: str, en: str):
     """한국/영문 칼럼 자동매핑: ko가 있으면 ko, 없으면 en을 반환"""
     if ko in df.columns: return ko
     return en
-
-def weekly_check(data: pd.DataFrame):
-    # 인덱스가 날짜/시간이어야 함
-    if not isinstance(data.index, (pd.DatetimeIndex, pd.PeriodIndex)):
-        data = data.copy()
-        data.index = pd.to_datetime(data.index)
-
-    # 한국/영문 칼럼 자동 식별
-    col_o = _col(data, '시가',   'Open')
-    col_h = _col(data, '고가',   'High')
-    col_l = _col(data, '저가',   'Low')
-    col_c = _col(data, '종가',   'Close')
-    col_v = _col(data, '거래량', 'Volume')
-
-    # 주봉 리샘플 (월~금 장 기준이면 W-FRI 권장)
-    weekly = data.resample('W-FRI').agg({
-        col_o: 'first',
-        col_h: 'max',
-        col_l: 'min',
-        col_c: 'last',
-        col_v: 'sum'
-    }).dropna(subset=[col_c])  # 종가 없는 주 제거
-
-    # 직전 2주 추출
-    prev_close = weekly.iloc[-2][col_c]
-    this_close = weekly.iloc[-1][col_c]   # 마지막 주 종가
-    first      = weekly.iloc[0][col_c]    # 첫번째 주 종가
-
-    past_min   = this_close.min()  # 이번 주 제외 과거 최저
-
-    # 20% 이상 하락? (현재가가 과거최저의 80% 이하)
-    is_drop_20 = this_close <= first * 0.8
-    pct_from_first = this_close / first - 1.0  # 이번 주 종가(this_close)가 첫 번째 주 종가(first) 대비 몇 % 변했는지
-
-    '''
-    prev_close = 100
-    this_close = 105
-
-    pct = (105 / 100) - 1   # 1.05 - 1 = 0.05    >> pct = 0.05 (5% 상승)
-    '''
-    pct = (this_close / prev_close) - 1  # 저번주 대비 이번주 증감률
-    is_higher = this_close > prev_close
-    # is_drop_over_3 = pct < -0.005   # -0.5% 보다 더 하락했는가
-    is_drop_over_3 = pct < -0.01   # -0.5% 보다 더 하락했는가
-
-    return {
-        "ok": True,
-        "this_week_close": float(this_close),
-        "last_week_close": float(prev_close),
-        "pct_change": float(pct),                              # 예: -0.0312 == -3.12%
-        "is_higher_than_last_week": bool(is_higher),           # 이번주 주봉이 저번주 보다 더 높은지
-        "is_drop_more_than_minus3pct": bool(is_drop_over_3),   # 주봉 증감률이 기준보다 하락했는지
-        "drop_over_3": pct,                                    # 저번주 대비 이번주 증감률
-        "pct_vs_past_first": float(pct_from_first * 100),      # -0.22 -> -22% 하락
-        "is_drop_more_than_20pct": bool(is_drop_20),           # 주봉 첫번째 대비 20% 이상 하락했는지
-    }
 
 
 
@@ -155,19 +99,87 @@ while idx <= origin_idx:
         # 마지막 일자 5일선은 20일선보다 낮아야 한다
         ma5_today = data['MA5'].iloc[-1]
         ma20_today = data['MA20'].iloc[-1]
+        ma20_yesterday = data['MA20'].iloc[-2]
 
-        if ma5_today >= ma20_today:
+        # if ma5_today >= ma20_today:
+        #     continue
+
+
+
+
+        # 변화율 계산 (퍼센트로 보려면 * 100)
+        ma20_chg_rate = (ma20_today - ma20_yesterday) / ma20_yesterday * 100
+
+        # ★★★★★ 20일선 기울기 ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+        # if ma20_chg_rate < -1.7:
+        #     continue
+
+
+        # 직전 날까지의 마지막 3일 거래대금 평균
+        today_tr_val = trading_value.iloc[-1]
+        mean_prev3 = trading_value.iloc[:-1].tail(3).mean()
+        if not np.isfinite(mean_prev3) or mean_prev3 == 0:
+            chg_tr_val = 0.0
+        else:
+            chg_tr_val = (today_tr_val-mean_prev3)/mean_prev3*100
+
+        # ★★★★★ 3거래일 평균 거래대금 5억보다 작으면 패스 ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+        if mean_prev3.round(1) / 100_000_000 < 5:
             continue
+
+
+
+        # ★★★★★ 거래대금 변동률, ++ 너무 크면 차익실현으로 하락 ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+        # -25/500: 46.46%
+        # -22/500: 46.22%
+        # -20/500: 46.64% ★★★★★
+        # -20/400: 46.05%
+        # -15/500: 45.97%
+        # -10/500: 46.63%
+        #  -5/500: 46.60%
+        #   0/500: 46.27%
+        if chg_tr_val < -25 or chg_tr_val > 500:
+            continue
+
+        # ★★★★★ 오늘 15% 이상 오르면 패스 ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+        # 10: 44.74%
+        # 11: 45.41%
+        # 12: 45.81%
+        # 13: 46.08%
+        # 14: 46.38%
+        # 15: 46.63% ★★★★★
+        if data.iloc[-1]['등락률'] > 15:
+            continue
+
+        # ★★★★★ 최근 20일 변동성 너무 낮으면 제외 (지루한 종목) ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+        last20_ret = data['등락률'].tail(20)           # 등락률이 % 단위라고 가정
+        last30_ret = data['등락률'].tail(30)
+        vol20 = last20_ret.std()                      # 표준편차
+        # if vol20 < 1.5:                               # 필요하면 2.0~3.0 사이로 튜닝
+        #     continue
+
+        # 4) 최근 20일 평균 등락률이 계속 마이너스인 종목 제외 (우하향 기는 느낌)
+        mean_ret20 = last30_ret.mean()
+        # if mean_ret20 < -0.5:                           # -3% 이하면 장기 하락 기조
+        #     continue
+
+        # 5) 최근 20일 중 양봉 비율이 30% 미만이면 제외 (계속 음봉 위주) ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+        pos_ratio = (last30_ret > 0).mean()           # True 비율 => 양봉 비율
+        # if pos_ratio < 0.3:
+        #     continue
+
+
+
 
         # 최근 12일 5일선이 20일선보다 낮은데 3% 하락이 있으면서 오늘 3% 상승
         # 변경점...  10일 +- 3일로 설정해봐야 할지도
         # 변경점... -2.5% +- 0.5% 설정해봐야 할지도
-        signal = signal_any_drop(data, 10, 4.0 ,-2.5)
+        signal = signal_any_drop(data, 12, 4.0 ,-3.0)
         if not signal:
             continue
 
         # ★★★★★ 오늘 13% 이상 오르면 패스 !!!!!!!!!!!!!!!!!!!
-        if data.iloc[-1]['등락률'] > 13:
+        if data.iloc[-1]['등락률'] > 15:
             continue
 
 
@@ -185,55 +197,44 @@ while idx <= origin_idx:
         c_chg_rate=(m_current-m_max)/m_max*100         # 최근 4개월 최고 대비 오늘 등락률 계산
 
         # ★★★★★ 최근 변동률 최소 기준: 횡보 or 심한 변동 제외
-        if m_chg_rate < 25 or m_chg_rate > 75:
+        if m_chg_rate < 30 or m_chg_rate > 80:
             continue
 
         # ★★★★★ 최근 4개월 최고 대비 너무 내려 앉으면 패스 (보수적으로)
-        if c_chg_rate > -10 or c_chg_rate < -40:
+        if c_chg_rate < -40:
             continue
 
 
-        result = weekly_check(m_data)
+        result = low_weekly_check(m_data)
         if result["ok"]:
             # print("이번주 주봉 종가가 저번주보다 더 높음 : ", result["is_higher_than_last_week"])
 
             # ★★★★★ 저번주 대비 이번주 증감률 -1%보다 낮으면 패스 (아직 하락 추세)
-            if result["is_drop_more_than_minus3pct"]:
+            if result["is_drop_more_than_minus1pct"]:
                 continue
 
             # ★★★★★ 지난주 대비 주봉 종가가 15% 이상 상승하면 패스
             if result['pct_change'] * 100 > 15:
                 continue
 
-            # 직전 날까지의 마지막 3일 거래대금 평균
-            today_tr_val = trading_value.iloc[-1]
-            mean_prev3 = trading_value.iloc[:-1].tail(3).mean()
-            chg_tr_val = (today_tr_val-mean_prev3)/mean_prev3*100
 
-            # ★★★★★ 3거래일 평균 거래대금 5억보다 작으면 패스
-            if mean_prev3.round(1) / 100_000_000 < 5:
-                continue
 
-            # ★★★★★ 4개월 첫주 대비 이번주 등락률: 너무 하락한것 제외 (목 돌아감) ++ 너무 상승하면 안올라감
-            if result['pct_vs_past_first'] > 30 or result['pct_vs_past_first'] < -25:
-                continue
 
             # 50/-20/-20 조건 테스트 !!!!!!!!!!!!!!!!!!!!
             # if m_chg_rate < 60 and result['pct_vs_past_first'] < -17 and c_chg_rate < -19:
             # if m_chg_rate < 60 and result['pct_vs_past_first'] < -20 and c_chg_rate < -20:
             #     continue
 
-            # ★★★★★ 거래대금 변동률, ++ 너무 크면 차익실현으로 하락
-            if chg_tr_val < -22 or chg_tr_val > 500:
-                continue
 
             # ★★★★★ 오늘이 이미 거의 피크 느낌인 장대양봉
             # 오늘 등락률 9이상
             # 지난주 대비 등락률 9이상
             # 첫주 대비 이번주 등락률 5% 미만)
-            if result['pct_change']*100 > 7 and data.iloc[-1]['등락률'] > 7 and result['pct_vs_past_first'] < -15:
-                continue
+            # if result['pct_change']*100 > 7 and data.iloc[-1]['등락률'] > 7 and result['pct_vs_past_first'] < -15:
+            #     continue
 
+            if result['pct_vs_past_first'] < -25:
+                continue
 
 
             print(f"\nProcessing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
@@ -256,7 +257,7 @@ while idx <= origin_idx:
             ratio = today_val / avg5 * 100
             ratio = round(ratio, 2)
             today_volatility_rate = round(data.iloc[-1]['등락률'], 2)
-            drop_over_3 = result['drop_over_3']
+            pct_change = result['pct_change']
 
 
         ########################################################################
@@ -283,7 +284,7 @@ while idx <= origin_idx:
         output_dir = 'D:\\5below20'
         os.makedirs(output_dir, exist_ok=True)
 
-        final_file_name = f'{today} {stock_name} [{ticker}] {today_volatility_rate}%.png'
+        final_file_name = f'{today} {stock_name} [{ticker}].png'
         final_file_path = os.path.join(output_dir, final_file_name)
         plt.savefig(final_file_path)
         plt.close()
