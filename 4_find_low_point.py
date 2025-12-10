@@ -142,8 +142,8 @@ def process_one(idx, count, ticker, tickers_dict):
     m_min = m_closes.min()
     m_current = m_closes[-1]
 
-    m_chg_rate=(m_max-m_min)/m_min*100              # 최근 3개월 동안의 등락률
-    c_chg_rate=(m_current-m_max)/m_max*100          # 최근 3개월 최고 대비 오늘 등락률 계산
+    three_m_chg_rate=(m_max-m_min)/m_min*100        # 최근 3개월 동안의 등락률
+    today_chg_rate=(m_current-m_max)/m_max*100      # 최근 3개월 최고 대비 오늘 등락률 계산
 
 
     result = low_weekly_check(m_data)
@@ -154,7 +154,31 @@ def process_one(idx, count, ticker, tickers_dict):
             pass
 
 
-    cond = False
+    ########################################################################
+
+    ma5_chg_rate = round(ma5_chg_rate, 2)
+    ma20_chg_rate = round(ma20_chg_rate, 2)
+    vol20 = round(vol20, 2)
+    vol30 = round(vol30, 2)
+    mean_ret20 = round(mean_ret20, 2)
+    mean_ret30 = round(mean_ret30, 2)
+    pos20_ratio = round(pos20_ratio*100, 2)
+    pos30_ratio = round(pos30_ratio*100, 2)
+    mean_prev3 = round(mean_prev3, 1)
+    today_tr_val = round(today_tr_val, 1)
+    chg_tr_val = round(chg_tr_val, 1)
+    three_m_chg_rate = round(three_m_chg_rate, 2)
+    today_chg_rate = round(today_chg_rate, 2)
+    pct_vs_firstweek = round(result['pct_vs_firstweek'], 2)
+    pct_vs_lastweek = round(result['pct_vs_lastweek'], 2)
+    pct_vs_last2week = round(result['pct_vs_last2week'], 2)
+    pct_vs_last3week = round(result['pct_vs_last3week'], 2)
+    today_pct = round(data.iloc[-1]['등락률'], 1)
+
+    # ----------------------------
+    # 조건 플래그 초기화
+    # ----------------------------
+    cond1 = False
     cond2 = False
     cond3 = False
     cond4 = False
@@ -163,54 +187,276 @@ def process_one(idx, count, ticker, tickers_dict):
     cond7 = False
     cond8 = False
     cond9 = False
+    cond10 = False
+    cond11 = False
+    cond12 = False
+    cond13 = False
+    cond14 = False
+    cond15 = False
+    cond16 = False
+    cond17 = False
+    cond18 = False
+    cond19 = False
+    cond20 = False
+    cond21 = False
+    cond22 = False
+    cond23 = False
+    cond24 = False
+    cond25 = False
 
-    # 100
-    if round(mean_prev3, 1) / 100_000_000 >= 1000:
-        cond5 = True
+    # --------------------------------
+    # [100] cond1 : 기본 유동성 필터
+    # --------------------------------
+    # 최근 3거래일 평균 거래대금이 1,000억 이상인 종목
+    # -> 너무 작은 종목은 제외하고, 어느 정도 유동성이 담보된 종목만 사용
+    if mean_prev3 / 100_000_000 >= 1000:
+        cond1 = True
 
-    # 60
-    if mean_ret20 >= 0.2 and chg_tr_val <= 400:
-        cond = True
-
-    # 60
-    if vol20 >= 4.1 and ma5_chg_rate <= 1.6:
+    # --------------------------------
+    # [100] cond2 : ratio_ge_080
+    # --------------------------------
+    # pct_vs_last2week <= 6.6 : 직전 2주의 과열은 제한
+    # vol30 <= 4.6, vol20 <= 4.86 : 20~30일 변동성이 전체적으로 낮은 종목만
+    # pos30_ratio > 38.3 : 최근 30일 상승일 비율이 너무 나쁘지 않은 종목
+    # ma5_chg_rate <= -1.88 : 단기(5일)는 조정이 나온 구간
+    # -> '저변동 + 구조적으로 나쁘지 않은 종목의 단기 눌림' 베스트 케이스
+    if (pct_vs_last2week <= 6.6 and
+            vol30 <= 4.6 and
+            vol20 <= 4.86 and
+            pos30_ratio > 38.3 and
+            ma5_chg_rate <= -1.88):
         cond2 = True
 
-    # 77
-    if vol20 <= 2.9 and ma5_chg_rate >= 2.2:
-        cond4 = True
-
-    # 9.2는 60 // 11.2로 변경하면 80
-    if vol20 <= 2.9 and round(result['pct_vs_lastweek']*100, 1) >= 9.2:
+    # --------------------------------
+    # [91] cond3 : vol20_le_2_95_and_pct_vs_last2week_ge_12_36
+    # --------------------------------
+    # 20일 변동성(vol20)이 낮으면서,
+    # 최근 2주 수익률이 12.36% 이상인 저변동 + 강한 2주 랠리 구간
+    if vol20 <= 2.95 and pct_vs_last2week >= 12.36:
         cond3 = True
 
-    # 70
-    if vol20 <= 2.7 and round(result['pct_vs_lastweek']*100, 1) >= 10.3:
-        cond7 = True
+    # --------------------------------
+    # [83] cond4 : ma5>=1.966_and_vol30<=2.5
+    # --------------------------------
+    # 단기(5일) 수익률이 1.966% 이상이고,
+    # 30일 변동성(vol30)이 2.5 이하인
+    # '중기(30일)는 매우 안정적 + 단기 모멘텀 양호' 패턴
+    if ma5_chg_rate >= 1.966 and vol30 <= 2.5:
+        cond4 = True
 
-    # 60
-    if vol20 <= 3.0 and round(result['pct_vs_last3week'], 1) >= 0.1:
+    # --------------------------------
+    # [83] cond5 : vol30_le_2_64_and_pct_vs_last2week_ge_12_36
+    # --------------------------------
+    # 30일 변동성(vol30)이 매우 낮고,
+    # 최근 2주 수익률이 12.36% 이상인 구간
+    if vol30 <= 2.64 and pct_vs_last2week >= 12.36:
+        cond5 = True
+
+    # --------------------------------
+    # [83] cond6 : vol30_le_2_36_and_ma5_ge_1_887
+    # --------------------------------
+    # 초저변동(30일 vol30 <= 2.36) + 단기(5일) 수익률 1.887% 이상
+    # -> '초저변동 + 단기 상승 모멘텀' 조합
+    if vol30 <= 2.36 and ma5_chg_rate >= 1.887:
         cond6 = True
 
-    # 70
-    if ma5_chg_rate >= 1.966 and vol30 <= 2.5:
-        cond9 = True
+    # --------------------------------
+    # [82] cond7 : firstweek_ge_20_85_and_2week_le_minus_1_992
+    # --------------------------------
+    # 첫 주에 20.85% 이상 강하게 오르고,
+    # 최근 2주는 -1.992% 이하로 쉬거나 조정
+    # -> '초기에 강하게 쏜 뒤 쉬고 있는 종목' 패턴
+    if pct_vs_firstweek >= 20.85 and pct_vs_last2week <= -1.992:
+        cond7 = True
 
-    # 80
-    if mean_ret20 <= -0.8 and pos30_ratio >= 50:
+    # --------------------------------
+    # [80] cond8 : pct_vs_last2week_ge_9_27_and_pct_vs_last3week_le_minus_1_69
+    # --------------------------------
+    # 최근 2주 수익률은 9.27% 이상으로 좋지만,
+    # 3주 전 기준 수익률은 -1.69% 이하로 여전히 안 좋은 구간
+    # -> 바닥권에서 돌아서는 턴어라운드 패턴
+    if pct_vs_last2week >= 9.27 and pct_vs_last3week <= -1.69:
         cond8 = True
 
-    if (cond is False and
-            cond2 is False and
-            cond3 is False and
-            cond4 is False and
-            cond5 is False and
-            cond6 is False and
-            cond7 is False and
-            cond8 is False and
-            cond9 is False):
-        return
+    # --------------------------------
+    # [80] cond9 : vol30_le_2_36_and_3week_ge_5_634
+    # --------------------------------
+    # 초저변동(vol30 <= 2.36) + 3주 전 대비 5.634% 이상 우상향
+    if vol30 <= 2.36 and pct_vs_last3week >= 5.634:
+        cond9 = True
 
+    # --------------------------------
+    # [80] cond10 : firstweek_ge_11_814_and_2week_le_minus_6_157
+    # --------------------------------
+    # 첫 주에는 11.814% 이상 올랐고,
+    # 최근 2주에는 -6.157% 이하로 과도한 눌림
+    # -> '초기 랠리 후 최근 2주 과도한 조정' 구간
+    if pct_vs_firstweek >= 11.814 and pct_vs_last2week <= -6.157:
+        cond10 = True
+
+    # --------------------------------
+    # [79] cond11 : firstweek_ge_minus_1_92_and_2week_le_minus_6_157
+    # --------------------------------
+    # 첫 주 기준으로는 크게 망가지지 않았지만(>= -1.92%),
+    # 최근 2주는 -6.157% 이하로 꽤 큰 조정
+    if pct_vs_firstweek >= -1.92 and pct_vs_last2week <= -6.157:
+        cond11 = True
+
+    # --------------------------------
+    # [79] cond12 : 2week_ge_9_268_and_3week_le_minus_4_06
+    # --------------------------------
+    # 3주 전 기준으로는 -4.06% 이하로 많이 눌려 있었고,
+    # 최근 2주는 9.268% 이상 강한 기술적 반등
+    if pct_vs_last2week >= 9.268 and pct_vs_last3week <= -4.06:
+        cond12 = True
+
+    # --------------------------------
+    # [78] cond13 : vol20<=2.7_and_week>=10.3
+    # --------------------------------
+    # 20일 변동성을 더 강하게 제한(vol20 <= 2.7)하면서도,
+    # 직전 1주 수익률이 10.3% 이상인
+    # '초저변동 + 직전 1주 급등' 구간
+    if vol20 <= 2.7 and pct_vs_lastweek >= 10.3:
+        cond13 = True
+
+    # --------------------------------
+    # [77] cond14 : vol20<=2.9_and_week>=11.2
+    # --------------------------------
+    # 20일 변동성이 낮고(vol20 <= 2.9),
+    # 직전 1주 수익률이 11.2% 이상인 고순도 급등 구간
+    if vol20 <= 2.9 and pct_vs_lastweek >= 11.2:
+        cond14 = True
+
+    # --------------------------------
+    # [77] cond15 : mean_ret20_ge_0_47_and_firstweek_le_minus_12_358
+    # --------------------------------
+    # 최근 20일 평균 수익률은 양호(mean_ret20 >= 0.47)한데,
+    # 첫 주에 -12.358% 이상 크게 눌린 자리
+    # -> 좋은 추세 종목의 일시적 급락 구간
+    if mean_ret20 >= 0.47 and pct_vs_firstweek <= -12.358:
+        cond15 = True
+
+    # --------------------------------
+    # [77] cond16 : mean_ret20_le_0_19_and_2week_ge_18_282
+    # --------------------------------
+    # 최근 20일은 밋밋하거나 살짝 약한 편(mean_ret20 <= 0.19)이지만,
+    # 최근 2주에 18.282% 이상 강하게 슈팅한 모멘텀주
+    if mean_ret20 <= 0.19 and pct_vs_last2week >= 18.282:
+        cond16 = True
+
+    # --------------------------------
+    # [76] cond17 : vol20_le_2_70_and_pct_vs_last3week_ge_8_89
+    # --------------------------------
+    # 20일 변동성이 낮고(vol20 <= 2.70),
+    # 3주 전 대비 수익률이 8.89% 이상인
+    # '저변동 + 최근 3주 우상향' 구간
+    if vol20 <= 2.70 and pct_vs_last3week >= 8.89:
+        cond17 = True
+
+    # --------------------------------
+    # [76] cond18 : vol30_le_3_17_and_pct_vs_last2week_ge_12_36
+    # --------------------------------
+    # 30일 변동성이 낮고(vol30 <= 3.17),
+    # 최근 2주 수익률이 12.36% 이상인
+    # '안정적인 종목 중 2주 기준 강한 랠리 대장 구간'
+    if vol30 <= 3.17 and pct_vs_last2week >= 12.36:
+        cond18 = True
+
+    # --------------------------------
+    # [75] cond19 : vol20<=2.9_and_ma5>=2.2
+    # --------------------------------
+    # 20일 변동성(vol20)이 낮으면서,
+    # 단기(5일) 수익률이 2.2% 이상인
+    # '저변동 + 단기 모멘텀 강한' 구간
+    if vol20 <= 2.9 and ma5_chg_rate >= 2.2:
+        cond19 = True
+
+    # --------------------------------
+    # [75] cond20 : vol20<2.953_and_week>10.374_and_2week>4.425
+    # --------------------------------
+    # 저변동(vol20 < 2.953) + 직전 1주 > 10.374% + 직전 2주 > 4.425%
+    # -> 최근 1~2주 모두 강한 상승이 이어진 모멘텀 구간
+    if (vol20 < 2.953 and
+            pct_vs_lastweek > 10.374 and
+            pct_vs_last2week > 4.425):
+        cond20 = True
+
+    # --------------------------------
+    # [75] cond21 : mean_ret20<=-0.8_and_pos30>=50
+    # --------------------------------
+    # 최근 20일 평균 수익률이 -0.8 이하로 많이 눌렸지만,
+    # 최근 30일 상승일 비율이 50% 이상인
+    # '강한 조정 + 구조적으로는 여전히 강한 종목' 리버전 조건
+    if mean_ret20 <= -0.8 and pos30_ratio >= 50:
+        cond21 = True
+
+    # --------------------------------
+    # [75] cond22 : ratio_ge_075 (mean_ret20<=-0.8_and_pos30>=50)
+    # --------------------------------
+    # 위와 같은 리버전 + 구조적 강세 조건 (백테스트 기준 0.75 수준)
+    if mean_ret20 <= -0.8 and pos30_ratio >= 50:
+        cond22 = True
+
+    # --------------------------------
+    # [73] cond23 : vol20<2.953_and_week>10.374
+    # --------------------------------
+    # 20일 변동성이 낮고(vol20 < 2.953),
+    # 직전 1주 수익률이 10.374% 이상인
+    # '저변동 + 직전 1주 급등' 모멘텀 구간
+    if vol20 < 2.953 and pct_vs_lastweek > 10.374:
+        cond23 = True
+
+    # --------------------------------
+    # [73] cond24 : vol20_le_2_70_and_ma5_chg_rate_ge_1_89
+    # --------------------------------
+    # 20일 변동성이 낮으면서(vol20 <= 2.70),
+    # 단기(5일) 수익률이 1.89% 이상인
+    # '저변동 종목 중 단기 모멘텀 살아난 케이스'
+    if vol20 <= 2.70 and ma5_chg_rate >= 1.89:
+        cond24 = True
+
+    # --------------------------------
+    # [70] cond25 : ratio_ge_070 (mean_ret20<=-0.7_and_pos30>=50)
+    # --------------------------------
+    # mean_ret20 조건을 -0.7까지 완화하는 대신,
+    # pos30_ratio를 50% 이상으로 유지하는 균형형 리버전 조건
+    if mean_ret20 <= -0.7 and pos30_ratio >= 50:
+        cond25 = True
+
+    # --------------------------------
+    # 모든 조건을 한 번에 모아서 체크
+    # --------------------------------
+    condition_flags = [
+        cond1,   # [100] 유동성 필터
+        cond2,   # [100] ratio_ge_080
+        cond3,   # [91] vol20_le_2_95_and_pct_vs_last2week_ge_12_36
+        cond4,   # [83] ma5>=1.966_and_vol30<=2.5
+        cond5,   # [83] vol30_le_2_64_and_pct_vs_last2week_ge_12_36
+        cond6,   # [83] vol30_le_2_36_and_ma5_ge_1_887
+        cond7,   # [82] firstweek_ge_20_85_and_2week_le_minus_1_992
+        cond8,   # [80] pct_vs_last2week_ge_9_27_and_pct_vs_last3week_le_minus_1_69
+        cond9,   # [80] vol30_le_2_36_and_3week_ge_5_634
+        cond10,  # [80] firstweek_ge_11_814_and_2week_le_minus_6_157
+        cond11,  # [79] firstweek_ge_minus_1_92_and_2week_le_minus_6_157
+        cond12,  # [79] 2week_ge_9_268_and_3week_le_minus_4_06
+        cond13,  # [78] vol20<=2.7_and_week>=10.3
+        cond14,  # [77] vol20<=2.9_and_week>=11.2
+        cond15,  # [77] mean_ret20_ge_0_47_and_firstweek_le_minus_12_358
+        cond16,  # [77] mean_ret20_le_0_19_and_2week_ge_18_282
+        cond17,  # [76] vol20_le_2_70_and_pct_vs_last3week_ge_8_89
+        cond18,  # [76] vol30_le_3_17_and_pct_vs_last2week_ge_12_36
+        cond19,  # [75] vol20<=2.9_and_ma5>=2.2
+        cond20,  # [75] vol20<2.953_and_week>10.374_and_2week>4.425
+        cond21,  # [75] mean_ret20<=-0.8_and_pos30>=50
+        cond22,  # [75] ratio_ge_075
+        cond23,  # [73] vol20<2.953_and_week>10.374
+        cond24,  # [73] vol20_le_2_70_and_ma5_chg_rate_ge_1_89
+        cond25,  # [70] ratio_ge_070
+    ]
+
+    # 조건들 중 하나도 만족하지 않으면 이 종목은 스킵
+    if not any(condition_flags):
+        return
 
 
     ########################################################################
@@ -219,33 +465,33 @@ def process_one(idx, count, ticker, tickers_dict):
         "ticker": ticker,
         "stock_name": stock_name,
         "today" : str(data.index[-1].date()),
-        "3_months_ago": str(m_data.index[0].date()),
-        "ma5_chg_rate": round(ma5_chg_rate, 2),                  # 5일선 기울기
-        "ma20_chg_rate": round(ma20_chg_rate, 2),                # 20일선 기울기
-        "vol20": round(vol20, 1),                                # 20일 평균 변동성
-        "vol30": round(vol30, 1),                                # 30일 평균 변동성
-        "mean_ret20": round(mean_ret20, 1),                      # 20일 평균 등락률
-        "mean_ret30": round(mean_ret30, 1),                      # 30일 평균 등락률
-        "pos20_ratio": round(pos20_ratio*100, 1),                # 20일 평균 양봉비율
-        "pos30_ratio": round(pos30_ratio*100, 1),                # 30일 평균 양봉비율
-        # "mean_prev3": round(mean_prev3, 1),                      # 직전 3일 평균 거래대금
-        # "today_tr_val": round(today_tr_val, 1),                  # 오늘 거래대금
-        "chg_tr_val": round(chg_tr_val, 1),                      # 거래대금 변동률
-        "m_chg_rate": round(m_chg_rate, 1),                      # 3개월 종가 최저 대비 최고 등락률
-        "c_chg_rate": round(c_chg_rate, 1),                      # 3개월 종가 최고 대비 오늘 등락률
-        "pct_vs_first": round(result['pct_vs_first'], 1),   # 3개월 주봉 첫주 대비 이번주 등락률
-        "pct_vs_last_oneweek": round(result['pct_vs_lastweek']*100, 1),   # 지난주 대비 등락률
-        "pct_vs_lastweek": round(result['pct_vs_lastweek'], 1),            # 저번주 대비 이번주 증감률
-        "pct_vs_last2week": round(result['pct_vs_last2week'], 1),          # 2주 전 대비 이번주 증감률
-        "pct_vs_last3week": round(result['pct_vs_last3week'], 1),          # 3주 전 대비 이번주 증감률
-        "today_pct": round(data.iloc[-1]['등락률'], 1),           # 오늘등락률
+        # "3_months_ago": str(m_data.index[0].date()),
+        # "predict_str": predict_str,                      # 상승/미달
+        "ma5_chg_rate": ma5_chg_rate,                    # 5일선 기울기
+        "ma20_chg_rate": ma20_chg_rate,                  # 20일선 기울기
+        "vol20": vol20,                                  # 20일 평균 변동성
+        "vol30": vol30,                                  # 30일 평균 변동성
+        "mean_ret20": mean_ret20,                        # 20일 평균 등락률
+        "mean_ret30": mean_ret30,                        # 30일 평균 등락률
+        "pos20_ratio": pos20_ratio,                      # 20일 평균 양봉비율
+        "pos30_ratio": pos30_ratio,                      # 30일 평균 양봉비율
+        # "mean_prev3": mean_prev3,                        # 직전 3일 평균 거래대금
+        # "today_tr_val": today_tr_val,                    # 오늘 거래대금
+        "chg_tr_val": chg_tr_val,                        # 거래대금 변동률
+        "three_m_chg_rate": three_m_chg_rate,            # 3개월 종가 최저 대비 최고 등락률
+        "today_chg_rate": today_chg_rate,                # 3개월 종가 최고 대비 오늘 등락률
+        "pct_vs_firstweek": pct_vs_firstweek,            # 3개월 주봉 첫주 대비 이번주 등락률
+        "pct_vs_lastweek": pct_vs_lastweek,              # 저번주 대비 이번주 등락률
+        "pct_vs_last2week": pct_vs_last2week,            # 2주 전 대비 이번주 등락률
+        "pct_vs_last3week": pct_vs_last3week,            # 3주 전 대비 이번주 등락률
+        "today_pct": today_pct,                          # 오늘등락률
     }
 
 
 
     today_str = str(today)
-    title = f"{today_str} {stock_name} [{ticker}] {round(data.iloc[-1]['등락률'], 2)}% Daily Chart"
-    final_file_name = f"{today} {stock_name} [{ticker}] {round(data.iloc[-1]['등락률'], 2)}%.png"
+    title = f"{today_str} {stock_name} [{ticker}] {today_pct}% Daily Chart"
+    final_file_name = f"{today} {stock_name} [{ticker}] {today_pct}%.png"
     output_dir = 'D:\\5below20'
     os.makedirs(output_dir, exist_ok=True)
     final_file_path = os.path.join(output_dir, final_file_name)
@@ -266,8 +512,6 @@ def process_one(idx, count, ticker, tickers_dict):
     today_val = trading_value.iloc[-1]
     ratio = today_val / avg5 * 100
     ratio = round(ratio, 2)
-    today_volatility_rate = round(data.iloc[-1]['등락률'], 2)
-    pct_vs_lastweek = result['pct_vs_lastweek']
 
     try:
         res = requests.post(
@@ -348,7 +592,6 @@ if __name__ == "__main__":
 
     tickers_dict = get_kor_ticker_dict_list()
     tickers = list(tickers_dict.keys())
-    # tickers = extract_numbers_from_filenames(directory = r'D:\5below20_test\4퍼', isToday=False)
 
     rows=[]
     plot_jobs = []
@@ -393,10 +636,10 @@ if __name__ == "__main__":
         print(f"  최근 20일 변동성                   ( > 1.5%): {row['vol20']}%")
         print(f"  최근 20일 평균 등락률            ( >= -0.5%): {row['mean_ret20']}%")      # -3% 보다 커야함
         # print(f"  최근 30일 중 양봉 비율              ( > 30%): {row['pos30_ratio']}%")
-        print(f"  3개월 종가 최저 대비 최고 등락률 (30% ~ 80%): {row['m_chg_rate']}%" )    # 30 ~ 65 선호, 28-30이하 애매, 70이상 과열
-        print(f"  3개월 종가 최고 대비 오늘 등락률   ( > -40%): {row['c_chg_rate']}%")     # -10(15) ~ -25(30) 선호, -10(15)이상은 아직 고점, -25(30) 아래는 미달일 경우가 있음
-        print(f"  3개월 주봉 첫주 대비 이번주 등락률 ( > -20%): {row['pct_vs_first']}%")   # -15 ~ 20 선호, -20이하는 장기 하락 추세, 30이상은 급등 끝물
-        print(f"  지난주 대비 등락률: {row['pct_vs_last_oneweek']}%")
+        print(f"  3개월 종가 최저 대비 최고 등락률 (30% ~ 80%): {row['three_m_chg_rate']}%" )    # 30 ~ 65 선호, 28-30이하 애매, 70이상 과열
+        print(f"  3개월 종가 최고 대비 오늘 등락률   ( > -40%): {row['today_chg_rate']}%")     # -10(15) ~ -25(30) 선호, -10(15)이상은 아직 고점, -25(30) 아래는 미달일 경우가 있음
+        print(f"  3개월 주봉 첫주 대비 이번주 등락률 ( > -20%): {row['pct_vs_firstweek']}%")   # -15 ~ 20 선호, -20이하는 장기 하락 추세, 30이상은 급등 끝물
+        print(f"  지난주 대비 등락률: {row['pct_vs_lastweek']}%")
         print(f"  오늘 등락률       : {row['today_pct']}%")
 
 
