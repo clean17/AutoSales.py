@@ -121,5 +121,16 @@ if __name__ == "__main__":
     API_URL = "https://chickchick.shop/func/stocks/update"
     post_stocks_update(API_URL, payload, batch_size=500)
 
+    # 항상 post_stocks_update() 다음 /delisted-stock을 요청해야한다
+    print('delete delisted stock')
+    payload = {}
+    API_URL = "https://chickchick.shop/func/stocks/delisted-stock"
+    with requests.Session() as s:
+        headers = {"Content-Type": "application/json"}
+        try:
+            resp = s.post(API_URL, json={}, headers=headers, timeout=15.0)
+            resp.raise_for_status()
+        except requests.RequestException as e:
+            raise
 
 
