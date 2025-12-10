@@ -203,6 +203,20 @@ def process_one(idx, count, ticker, tickers_dict):
     cond23 = False
     cond24 = False
     cond25 = False
+    cond26 = False
+    cond27 = False
+    cond28 = False
+    cond29 = False
+    cond30 = False
+    cond31 = False
+    cond32 = False
+    cond33 = False
+    cond34 = False
+    cond35 = False
+    cond36 = False
+    cond37 = False
+    cond38 = False
+    cond39 = False
 
     # --------------------------------
     # [100] cond1 : 기본 유동성 필터
@@ -423,6 +437,93 @@ def process_one(idx, count, ticker, tickers_dict):
     if mean_ret20 <= -0.7 and pos30_ratio >= 50:
         cond25 = True
 
+    # [100]
+    # vol20 <= 2.70 이면서, 3주 전 대비 수익률(pct_vs_last3week)이 8.888% 이상
+    # -> '더 타이트한 저변동 + 최근 3주 우상향' 패턴
+    if vol20 <= 2.70 and pct_vs_last3week >= 8.888:
+        cond26 = True
+
+    # [70]
+    # vol30 <= 3.174 이면서, 최근 2주 수익률이 12.358% 이상
+    # -> 위 조건보다 변동성을 조금 완화해서 종목 수를 늘린 버전
+    if vol30 <= 3.174 and pct_vs_last2week >= 12.358:
+        cond27 = True
+
+    # [83]
+    # vol30 <= 2.64 이면서, 3주 전 대비 수익률이 8.888% 이상
+    # -> '초저변동 + 최근 3주 우상향' 패턴 (2주보다 조금 긴 추세)
+    if vol30 <= 2.64 and pct_vs_last3week >= 8.888:
+        cond28 = True
+
+    # [83]
+    # 최근 2주 수익률이 12.358% 이상이지만,
+    # 3주 전 기준 수익률(pct_vs_last3week)은 -1.694% 이하
+    # -> '3주 전 기준으로는 아직 저점 인식인데, 최근 2주에 강하게 턴한' 구간
+    if pct_vs_last2week >= 12.358 and pct_vs_last3week <= -1.694:
+        cond29 = True
+
+    # [100]
+    # vol30 <= 2.36 이면서, 3주 전 대비 수익률이 5.634% 이상
+    #  -> '초저변동 + 완만하지만 꾸준한 3주 우상향'
+    if vol30 <= 2.36 and pct_vs_last3week >= 5.634:
+        cond30 = True
+
+    # [89]
+    # 최근 2주 수익률이 9.268% 이상인데,
+    # 3주 전 기준 수익률은 -1.694% 이하
+    #  -> '3주 전 기준으로는 아직 저점권인데, 최근 2주에 강하게 턴한 구간'
+    if pct_vs_last2week >= 9.268 and pct_vs_last3week <= -1.694:
+        cond31 = True
+
+    # [86]
+    # vol30 <= 3.886 이면서, 첫 주 수익률이 68.298% 이상인 구간
+    #  -> '30일 변동성은 적당히 낮고, 첫 주에 거의 급발진한 초강세 구간'
+    if vol30 <= 3.886 and pct_vs_firstweek >= 68.298:
+        cond32 = True
+
+    # [78]
+    # 첫 주 수익률이 -21.71% 이하로 크게 빠졌고,
+    # 직전 1주 수익률도 -0.862% 이하로 약한 구간
+    #  -> '초기에 크게 깨지고, 최근 1주도 부진한 극저점 구간의 기술적 반등'
+    if pct_vs_firstweek <= -21.71 and pct_vs_lastweek <= -0.862:
+        cond33 = True
+
+    # [71]
+    # vol20 >= 6.834 이면서, 직전 1주 수익률이 -0.862% 이하인 구간
+    #  -> '변동성은 큰 종목들 중에서, 최근 1주 조정이 나온 고위험 반등 후보'
+    if vol20 >= 6.834 and pct_vs_lastweek <= -0.862:
+        cond34 = True
+
+    # [71]
+    # pos30_ratio >= 50 이면서, 직전 1주 수익률이 11.362% 이상
+    #  -> '최근 30일 중 절반 이상이 양봉 + 바로 직전 1주 강하게 급등한 추세주'
+    if pos30_ratio >= 50.0 and pct_vs_lastweek >= 11.362:
+        cond35 = True
+
+    # [71]
+    # pos30_ratio >= 46.67 이면서, 첫 주 수익률이 -7.774% 이하
+    #  -> '구조적으로는 나쁘지 않은데(pos30 높음), 첫 주에 눌린 리버전 후보'
+    if pos30_ratio >= 46.67 and pct_vs_firstweek <= -7.774:
+        cond36 = True
+
+    # [71]
+    # mean_ret20 >= 0 이면서, 최근 2주 수익률이 1.426% 이하인 구간
+    #  -> '20일 기준 우상향이지만, 최근 2주는 숨 고르기/조정인 추세 지속 구간'
+    if mean_ret20 >= 0.0 and pct_vs_last2week <= 1.426:
+        cond37 = True
+
+    # [70]
+    # 첫 주 수익률이 -7.774% 이하, 직전 1주 수익률도 -0.862% 이하
+    #  -> '초기부터 계속 얻어맞은 종목들 중에서 기술적 반등이 많이 나왔던 구간'
+    if pct_vs_firstweek <= -7.774 and pct_vs_lastweek <= -0.862:
+        cond38 = True
+
+    # [70]
+    # mean_ret20 >= 0.412 이면서, 첫 주 수익률이 0.626% 이하
+    #  -> '최근 20일 평균은 꽤 좋은데, 첫 주에는 상대적으로 덜 오른 저점 추세주'
+    if mean_ret20 >= 0.412 and pct_vs_firstweek <= 0.626:
+        cond39 = True
+
     # --------------------------------
     # 모든 조건을 한 번에 모아서 체크
     # --------------------------------
@@ -452,6 +553,20 @@ def process_one(idx, count, ticker, tickers_dict):
         cond23,  # [73] vol20<2.953_and_week>10.374
         cond24,  # [73] vol20_le_2_70_and_ma5_chg_rate_ge_1_89
         cond25,  # [70] ratio_ge_070
+        cond26,  # [100] vol20<=2.70 AND 3week>=8.888
+        cond27,  # [70]  vol30<=3.174 AND 2week>=12.358
+        cond28,  # [83]  vol30<=2.64  AND 3week>=8.888
+        cond29,  # [83]  2week>=12.358 AND 3week<=-1.694
+        cond30,  # [100] vol30<=2.36  AND 3week>=5.634
+        cond31,  # [89]  2week>=9.268  AND 3week<=-1.694
+        cond32,  # [86]  vol30<=3.886 AND firstweek>=68.298
+        cond33,  # [78]  firstweek<=-21.71 AND week<=-0.862
+        cond34,  # [71]  vol20>=6.834 AND week<=-0.862
+        cond35,  # [71]  pos30_ratio>=50 AND week>=11.362
+        cond36,  # [71]  pos30_ratio>=46.67 AND firstweek<=-7.774
+        cond37,  # [71]  mean_ret20>=0 AND 2week<=1.426
+        cond38,  # [70]  firstweek<=-7.774 AND week<=-0.862
+        cond39,  # [70]  mean_ret20>=0.412 AND firstweek<=0.626
     ]
 
     # 조건들 중 하나도 만족하지 않으면 이 종목은 스킵
@@ -491,7 +606,7 @@ def process_one(idx, count, ticker, tickers_dict):
 
     today_str = str(today)
     title = f"{today_str} {stock_name} [{ticker}] {today_pct}% Daily Chart"
-    final_file_name = f"{today} {stock_name} [{ticker}] {today_pct}%.png"
+    final_file_name = f"{today} {stock_name} [{ticker}].png"
     output_dir = 'D:\\5below20'
     os.makedirs(output_dir, exist_ok=True)
     final_file_path = os.path.join(output_dir, final_file_name)
