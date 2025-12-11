@@ -583,10 +583,20 @@ def extract_numbers_from_filenames(directory, isToday):
             # match = re.search(r'\s(\d{6})\s*\[', filename)
 
             # 마지막 대괄호 안의 6자리 숫자 추출
-            match = re.search(r'\[(\d{6})\]\.png$', filename)
+            # match = re.search(r'\[(\d{6})\]\.png$', filename)
+            match = re.search(r'\[(\d{6})\]', filename)
             if match:
                 numbers.append(match.group(1))
-    return numbers
+
+    # 중복제거
+    seen = set()
+    uniq = []
+    for n in numbers:
+        if n not in seen:
+            seen.add(n)
+            uniq.append(n)
+
+    return uniq
 
 def extract_stock_code_from_filenames(directory):
     stock_codes = []
@@ -873,6 +883,7 @@ def plot_candles_daily(
         future_dates=None,           # iterable of datetime/date/str
         predicted_prices=None,       # iterable of float
         date_tick=10,
+        today=None,
 ):
     # 입력 표준화
     df = pd.DataFrame(data).copy()
@@ -970,6 +981,32 @@ def plot_candles_daily(
     ax_volume.set_xticks(tick_idx)
     ax_volume.set_xticklabels(ds[tick_idx], rotation=45, ha='right')
     # ax_volume.set_xticklabels(ds[tick_idx], rotation=0, ha='center')
+
+    # ==============================
+    # 오늘 캔들 위에 날짜 텍스트 표시
+    # ==============================
+    if today is not None:
+        today_ts = pd.to_datetime(today)
+
+        # df는 이미 show_months 만큼 슬라이싱된 데이터
+        if today_ts in df.index:
+            # x좌표: 오늘이 df 안에서 몇 번째 캔들인지 (0,1,2,...)
+            x_pos = df.index.get_loc(today_ts)
+
+            # y좌표: 오늘 캔들의 '고가' 기준으로 살짝 위
+            high_price = df.loc[today_ts, col_h]   # '고가' 직통 말고 col_h 사용
+            y_pos = high_price * 1.01  # 고가보다 1% 위에 글자
+
+            ax_price.text(
+                x_pos,
+                y_pos,
+                # today_ts.strftime('%m-%d'),
+                '◀◀◀',
+                ha='center',
+                va='bottom',
+                fontsize=8,
+                rotation=90,
+            )
 
     return fig, ax_price, ax_volume
 
@@ -1627,34 +1664,29 @@ def low_weekly_check(data: pd.DataFrame):
 
     # 직전 2주 추출
     prev_close = weekly.iloc[-2][col_c]
+    two_w_close = weekly.iloc[-3][col_c]
+    three_w_close = weekly.iloc[-4][col_c]
     this_close = weekly.iloc[-1][col_c]   # 마지막 주 종가
     first      = weekly.iloc[0][col_c]    # 첫번째 주 종가
-
-    past_min   = this_close.min()  # 이번 주 제외 과거 최저
-
-    # 20% 이상 하락? (현재가가 과거최저의 80% 이하)
-    is_drop_20 = this_close <= first * 0.8
-    pct_from_first = this_close / first - 1.0  # 이번 주 종가(this_close)가 첫 번째 주 종가(first) 대비 몇 % 변했는지
 
     '''
     prev_close = 100
     this_close = 105
-
-    pct = (105 / 100) - 1   # 1.05 - 1 = 0.05    >> pct = 0.05 (5% 상승)
+    one_w_ago_pct = (105 / 100) - 1   # 1.05 - 1 = 0.05    >> one_w_ago_pct = 0.05 (5% 상승)
     '''
-    pct = (this_close / prev_close) - 1  # 저번주 대비 이번주 증감률
-    is_higher = this_close > prev_close
-    # is_drop_over_3 = pct < -0.005   # -0.5% 보다 더 하락했는가
-    is_drop_over_3 = pct < -0.01   # -0.5% 보다 더 하락했는가
+    pct_from_first = this_close / first - 1.0  # 이번 주 종가(this_close)가 첫 번째 주 종가(first) 대비 몇 % 변했는지
+    one_w_ago_pct = (this_close / prev_close) - 1  # 저번주 대비 이번주 증감률
+    two_w_ago_pct = (this_close / two_w_close) - 1  # 저번주 대비 이번주 증감률
+    three_w_ago_pct = (this_close / three_w_close) - 1  # 저번주 대비 이번주 증감률
+    is_drop_over_1 = one_w_ago_pct < -0.01   # -1% 보다 더 하락했는가 // -0.005   # -0.5%
 
     return {
         "ok": True,
-        "this_week_close": float(this_close),
-        "last_week_close": float(prev_close),
-        "pct_change": float(pct),                              # 예: -0.0312 == -3.12%
-        "is_higher_than_last_week": bool(is_higher),           # 이번주 주봉이 저번주 보다 더 높은지
-        "is_drop_more_than_minus3pct": bool(is_drop_over_3),   # 주봉 증감률이 기준보다 하락했는지
-        "drop_over_3": pct,                                    # 저번주 대비 이번주 증감률
-        "pct_vs_past_first": float(pct_from_first * 100),      # -0.22 -> -22% 하락
-        "is_drop_more_than_20pct": bool(is_drop_20),           # 주봉 첫번째 대비 20% 이상 하락했는지
+        # "this_week_close": float(this_close),
+        # "last_week_close": float(prev_close),
+        "pct_vs_lastweek": float(one_w_ago_pct*100),                    # 저번주 대비 이번주 증감률, 예: -0.0312 == -3.12%
+        "pct_vs_last2week": float(two_w_ago_pct*100),                   # 2주 전 대비 이번주 증감률
+        "pct_vs_last3week": float(three_w_ago_pct*100),                 # 3주 전 대비 이번주 증감률
+        "is_drop_more_than_minus1pct": bool(is_drop_over_1),            # 주봉 증감률이 기준보다 하락했는지
+        "pct_vs_firstweek": float(pct_from_first*100),                  # -0.22 -> -22% 하락
     }
