@@ -20,8 +20,8 @@ for parent in [here.parent, *here.parents]:
     if (parent / "utils.py").exists():
         sys.path.insert(0, str(parent))
         break
-    else:
-        raise FileNotFoundError("utils.py를 상위 디렉터리에서 찾지 못했습니다.")
+else:
+    raise FileNotFoundError("utils.py를 상위 디렉터리에서 찾지 못했습니다.")
 
 from utils import fetch_stock_data, get_kor_interest_ticker_dick_list, add_technical_features, \
     plot_candles_weekly, plot_candles_daily, drop_sparse_columns, drop_trading_halt_rows

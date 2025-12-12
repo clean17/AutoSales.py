@@ -12,8 +12,8 @@ for parent in [here.parent, *here.parents]:
     if (parent / "utils.py").exists():
         sys.path.insert(0, str(parent))
         break
-    else:
-        raise FileNotFoundError("utils.py를 상위 디렉터리에서 찾지 못했습니다.")
+else:
+    raise FileNotFoundError("utils.py를 상위 디렉터리에서 찾지 못했습니다.")
 
 from utils import create_model, create_multistep_dataset, fetch_stock_data
 
