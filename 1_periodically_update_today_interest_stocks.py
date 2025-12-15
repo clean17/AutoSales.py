@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import time
 
 nowTime = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
-print(f'        {nowTime}: running 1_periodically_update_today_interest_stocks.py...')
+print(f'🕒 {nowTime}: running 1_periodically_update_today_interest_stocks.py...')
 
 # 자동 탐색 (utils.py를 찾을 때까지 위로 올라가 탐색)
 here = Path(__file__).resolve()
@@ -159,7 +159,7 @@ for count, ticker in enumerate(tickers):
         product_code = json_data["result"][0]["data"]["items"][0]["productCode"]
 
     except Exception as e:
-        print(f"info 요청 실패-1: {str(ticker)} {e}")
+        print(f"info 요청 실패-1: {str(ticker)} {stock_name} {e}")
         pass  # 오류
 
     if product_code is not None:

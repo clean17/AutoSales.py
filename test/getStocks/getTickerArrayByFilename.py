@@ -58,6 +58,7 @@ directory = r'D:\kospi_stocks'  # 역슬래시 r''로 표기
 directory = r'D:\5below20_test'  # 역슬래시 r''로 표기
 extracted_numbers = extract_numbers_from_filenames(directory, False)
 print("Extracted numbers:", extracted_numbers)
+print(len(extracted_numbers))
 
 
 # directory = r'D:\sp500'  # 역슬래시 r''로 표기

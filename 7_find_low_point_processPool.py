@@ -740,7 +740,7 @@ if __name__ == "__main__":
     start = time.time()   # 시작 시간(초)
     print('signal_any_drop 를 통해서 5일선이 20일선보다 아래에 있으면서 최근 -3%이 존재 + 오늘 3% 이상 상승')
     nowTime = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
-    print(f'        {nowTime}: running 4_find_low_point.py...')
+    print(f'🕒 {nowTime}: running 4_find_low_point.py...')
 
     tickers_dict = get_kor_ticker_dict_list()
     tickers = list(tickers_dict.keys())
