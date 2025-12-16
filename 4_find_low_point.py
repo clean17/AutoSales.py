@@ -33,6 +33,8 @@ from utils import _col, get_kor_ticker_dict_list, add_technical_features, plot_c
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
 root_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(=루트)
 pickle_dir = os.path.join(root_dir, 'pickle')
+output_dir = 'D:\\5below20'
+# output_dir = 'D:\\5below20_test'
 
 
 
@@ -46,6 +48,10 @@ def process_one(idx, count, ticker, tickers_dict):
         return
 
     df = pd.read_pickle(filepath)
+
+    # 데이터가 부족하면 패스
+    if df.empty or len(df) < 70:
+        return
 
     # idx만큼 뒤에서 자른다 (idx가 2라면 2일 전 데이터셋)
     if idx != 0:
@@ -80,9 +86,6 @@ def process_one(idx, count, ticker, tickers_dict):
     if round(mean_prev3, 1) / 100_000_000 < 5:
         return
 
-    # 데이터가 부족하면 패스
-    if data.empty or len(data) < 70:
-        return
 
     # 2차 생성 feature
     data = add_technical_features(data)
@@ -109,7 +112,7 @@ def process_one(idx, count, ticker, tickers_dict):
     ma20_chg_rate = (ma20_today - ma20_yesterday) / ma20_yesterday * 100
 
 
-    # 최근 12일 5일선이 20일선보다 낮은데 3% 하락이 있으면서 오늘 3% 상승 ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+    # 최근 10일 5일선이 20일선보다 낮은데 3% 하락이 있으면서 오늘 3% 상승 ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
     # 변경점...  10일 +- 3일로 설정해봐야 할지도
     signal = signal_any_drop(data, 10, 4.0 ,-3.0) # 45/71 ---
     if not signal:
@@ -527,52 +530,59 @@ def process_one(idx, count, ticker, tickers_dict):
     # --------------------------------
     # 모든 조건을 한 번에 모아서 체크
     # --------------------------------
-    condition_flags = [
-        cond1,   # [100] 유동성 필터
-        cond2,   # [100] ratio_ge_080
-        cond3,   # [91] vol20_le_2_95_and_pct_vs_last2week_ge_12_36
-        cond4,   # [83] ma5>=1.966_and_vol30<=2.5
-        cond5,   # [83] vol30_le_2_64_and_pct_vs_last2week_ge_12_36
-        cond6,   # [83] vol30_le_2_36_and_ma5_ge_1_887
-        cond7,   # [82] firstweek_ge_20_85_and_2week_le_minus_1_992
-        cond8,   # [80] pct_vs_last2week_ge_9_27_and_pct_vs_last3week_le_minus_1_69
-        cond9,   # [80] vol30_le_2_36_and_3week_ge_5_634
-        cond10,  # [80] firstweek_ge_11_814_and_2week_le_minus_6_157
-        cond11,  # [79] firstweek_ge_minus_1_92_and_2week_le_minus_6_157
-        cond12,  # [79] 2week_ge_9_268_and_3week_le_minus_4_06
-        cond13,  # [78] vol20<=2.7_and_week>=10.3
-        cond14,  # [77] vol20<=2.9_and_week>=11.2
-        cond15,  # [77] mean_ret20_ge_0_47_and_firstweek_le_minus_12_358
-        cond16,  # [77] mean_ret20_le_0_19_and_2week_ge_18_282
-        cond17,  # [76] vol20_le_2_70_and_pct_vs_last3week_ge_8_89
-        cond18,  # [76] vol30_le_3_17_and_pct_vs_last2week_ge_12_36
-        cond19,  # [75] vol20<=2.9_and_ma5>=2.2
-        cond20,  # [75] vol20<2.953_and_week>10.374_and_2week>4.425
-        cond21,  # [75] mean_ret20<=-0.8_and_pos30>=50
-        cond22,  # [75] ratio_ge_075
-        cond23,  # [73] vol20<2.953_and_week>10.374
-        cond24,  # [73] vol20_le_2_70_and_ma5_chg_rate_ge_1_89
-        cond25,  # [70] ratio_ge_070
-        cond26,  # [100] vol20<=2.70 AND 3week>=8.888
-        cond27,  # [70]  vol30<=3.174 AND 2week>=12.358
-        cond28,  # [83]  vol30<=2.64  AND 3week>=8.888
-        cond29,  # [83]  2week>=12.358 AND 3week<=-1.694
-        cond30,  # [100] vol30<=2.36  AND 3week>=5.634
-        cond31,  # [89]  2week>=9.268  AND 3week<=-1.694
-        cond32,  # [86]  vol30<=3.886 AND firstweek>=68.298
-        cond33,  # [78]  firstweek<=-21.71 AND week<=-0.862
-        cond34,  # [71]  vol20>=6.834 AND week<=-0.862
-        cond35,  # [71]  pos30_ratio>=50 AND week>=11.362
-        cond36,  # [71]  pos30_ratio>=46.67 AND firstweek<=-7.774
-        cond37,  # [71]  mean_ret20>=0 AND 2week<=1.426
-        cond38,  # [70]  firstweek<=-7.774 AND week<=-0.862
-        cond39,  # [70]  mean_ret20>=0.412 AND firstweek<=0.626
+    # ✅ 마지막에 "True인 조건 이름/설명"만 뽑기
+    conditions = [
+        ("cond1",  "[100] 유동성 필터", cond1),
+        ("cond2",  "[100] ratio_ge_080", cond2),
+        ("cond3",  "[91] vol20_le_2_95_and_pct_vs_last2week_ge_12_36", cond3),
+        ("cond4",  "[83] ma5>=1.966_and_vol30<=2.5", cond4),
+        ("cond5",  "[83] vol30_le_2_64_and_pct_vs_last2week_ge_12_36", cond5),
+        ("cond6",  "[83] vol30_le_2_36_and_ma5_ge_1_887", cond6),
+        ("cond7",  "[82] firstweek_ge_20_85_and_2week_le_minus_1_992", cond7),
+        ("cond8",  "[80] pct_vs_last2week_ge_9_27_and_pct_vs_last3week_le_minus_1_69", cond8),
+        ("cond9",  "[80] vol30_le_2_36_and_3week_ge_5_634", cond9),
+        ("cond10", "[80] firstweek_ge_11_814_and_2week_le_minus_6_157", cond10),
+        ("cond11", "[79] firstweek_ge_minus_1_92_and_2week_le_minus_6_157", cond11),
+        ("cond12", "[79] 2week_ge_9_268_and_3week_le_minus_4_06", cond12),
+        ("cond13", "[78] vol20<=2.7_and_week>=10.3", cond13),
+        ("cond14", "[77] vol20<=2.9_and_week>=11.2", cond14),
+        ("cond15", "[77] mean_ret20_ge_0_47_and_firstweek_le_minus_12_358", cond15),
+        ("cond16", "[77] mean_ret20_le_0_19_and_2week_ge_18_282", cond16),
+        ("cond17", "[76] vol20_le_2_70_and_pct_vs_last3week_ge_8_89", cond17),
+        ("cond18", "[76] vol30_le_3_17_and_pct_vs_last2week_ge_12_36", cond18),
+        ("cond19", "[75] vol20<=2.9_and_ma5>=2.2", cond19),
+        ("cond20", "[75] vol20<2.953_and_week>10.374_and_2week>4.425", cond20),
+        ("cond21", "[75] mean_ret20<=-0.8_and_pos30>=50", cond21),
+        ("cond22", "[75] ratio_ge_075", cond22),
+        ("cond23", "[73] vol20<2.953_and_week>10.374", cond23),
+        ("cond24", "[73] vol20_le_2_70_and_ma5_chg_rate_ge_1_89", cond24),
+        ("cond25", "[70] ratio_ge_070", cond25),
+        ("cond26", "[100] vol20<=2.70 AND 3week>=8.888", cond26),
+        ("cond27", "[70] vol30<=3.174 AND 2week>=12.358", cond27),
+        ("cond28", "[83] vol30<=2.64 AND 3week>=8.888", cond28),
+        ("cond29", "[83] 2week>=12.358 AND 3week<=-1.694", cond29),
+        ("cond30", "[100] vol30<=2.36 AND 3week>=5.634", cond30),
+        ("cond31", "[89] 2week>=9.268 AND 3week<=-1.694", cond31),
+        ("cond32", "[86] vol30<=3.886 AND firstweek>=68.298", cond32),
+        ("cond33", "[78] firstweek<=-21.71 AND week<=-0.862", cond33),
+        ("cond34", "[71] vol20>=6.834 AND week<=-0.862", cond34),
+        ("cond35", "[71] pos30_ratio>=50 AND week>=11.362", cond35),
+        ("cond36", "[71] pos30_ratio>=46.67 AND firstweek<=-7.774", cond36),
+        ("cond37", "[71] mean_ret20>=0 AND 2week<=1.426", cond37),
+        ("cond38", "[70] firstweek<=-7.774 AND week<=-0.862", cond38),
+        ("cond39", "[70] mean_ret20>=0.412 AND firstweek<=0.626", cond39),
     ]
 
-    # 조건들 중 하나도 만족하지 않으면 이 종목은 스킵
-    if not any(condition_flags):
+    true_conds = [(name, desc) for name, desc, ok in conditions if ok]
+    if not true_conds:
         return
 
+    # 원하는 출력 형태 1) "cond17, cond30" 처럼 이름만
+    print(", ".join(name for name, _ in true_conds))
+
+    # # 조건들 중 하나도 만족하지 않으면 이 종목은 스킵
+    # if not any(condition_flags):
+    #     return
 
     ########################################################################
 
@@ -607,7 +617,6 @@ def process_one(idx, count, ticker, tickers_dict):
     today_str = str(today)
     title = f"{today_str} {stock_name} [{ticker}] {today_pct}% Daily Chart"
     final_file_name = f"{today} {stock_name} [{ticker}].png"
-    output_dir = 'D:\\5below20'
     os.makedirs(output_dir, exist_ok=True)
     final_file_path = os.path.join(output_dir, final_file_name)
 
@@ -701,9 +710,9 @@ def process_one(idx, count, ticker, tickers_dict):
 
 if __name__ == "__main__":
     start = time.time()   # 시작 시간(초)
-    print('signal_any_drop 를 통해서 5일선이 20일선보다 아래에 있으면서 최근 -3%이 존재 + 오늘 3% 이상 상승')
     nowTime = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
     print(f'🕒 {nowTime}: running 4_find_low_point.py...')
+    print(' 10일 이상 5일선이 20일선 보다 아래에 있으면서 최근 -3%이 존재 + 오늘 4% 이상 상승')
 
     tickers_dict = get_kor_ticker_dict_list()
     tickers = list(tickers_dict.keys())
@@ -711,7 +720,8 @@ if __name__ == "__main__":
     rows=[]
     plot_jobs = []
 
-    origin_idx = idx = -1
+    origin_idx = idx = -1  # 오늘 // 3 (5일 전)
+    # origin_idx = idx = 1
     workers = os.cpu_count()
     # with ThreadPoolExecutor(max_workers=workers) as executor:   # GIL(Global Interpreter Lock) >> I/O가 많은 경우
     with ProcessPoolExecutor(max_workers=workers-4) as executor:   # CPU를 진짜로 병렬로 돌리고 싶으면 >> CPU연산이 많은 경우
