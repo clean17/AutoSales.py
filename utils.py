@@ -441,8 +441,19 @@ def fetch_stock_data(ticker, fromdate, todate):
 
 # 미국 주식 데이터를 가져오는 함수
 def fetch_stock_data_us(ticker, fromdate, todate):
-    stock_data = yf.download(ticker, start=fromdate, end=todate, auto_adjust=True, progress=False)
-    if stock_data.empty:
+    try:
+        stock_data = yf.download(
+            ticker,
+            start=fromdate,
+            end=todate,
+            auto_adjust=True,
+            progress=False,
+            threads=False,   # 가끔 안정성 ↑
+        )
+    except Exception as e:
+        print("download(start/end) failed:", e)
+
+    if stock_data is None or stock_data.empty:
         return pd.DataFrame()
 
     # 컬럼 구조 확인
