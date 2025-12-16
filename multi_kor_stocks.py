@@ -78,7 +78,8 @@ for count, ticker in enumerate(tickers):
     time.sleep(0.2)  # 200ms 대기
     stock_name = tickers_dict.get(ticker, 'Unknown Stock')
     # stock_name = '파인엠텍' # 테스트용
-    print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
+    if count % 100 == 0:
+        print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
 
 
     # 학습하기전에 요청을 보낸다
@@ -639,7 +640,7 @@ for count, ticker in enumerate(tickers):
     future_dates = get_next_business_days()
     # print('future_dates', future_dates)
     avg_future_return = (predicted_prices.mean() / last_close - 1.0) * 100
-    print(f"    predicted rate of increase : {avg_future_return:.2f}%")
+    # print(f"    predicted rate of increase : {avg_future_return:.2f}%")
 
     # 기대 성장률 미만이면 건너뜀
     if avg_future_return < EXPECTED_GROWTH_RATE and avg_future_return < 20:
@@ -671,7 +672,7 @@ for count, ticker in enumerate(tickers):
     ax_w_price = fig.add_subplot(gs[2, 0])
     ax_w_vol   = fig.add_subplot(gs[3, 0], sharex=ax_w_price)
 
-    daily_chart_title = f'{today_us}   {stock_name} [ {ticker} ] (예상 상승률: {avg_future_return:.2f}%) {predicted_prices.mean():1f}'
+    daily_chart_title = f'{today_us}   {stock_name} [ {ticker} ] (예상 상승률: {avg_future_return:.2f}%)'
     plot_candles_daily(data, show_months=6  , title=daily_chart_title,
                        ax_price=ax_d_price, ax_volume=ax_d_vol,
                        future_dates=future_dates, predicted_prices=predicted_prices)

@@ -36,7 +36,7 @@ pickle_dir = os.path.join(root_dir, 'pickle')
 
 # 목표 검증 수익률
 VALIDATION_TARGET_RETURN = 7
-
+output_dir = 'D:\\5below20_test'
 
 
 def process_one(idx, count, ticker, tickers_dict):
@@ -48,6 +48,10 @@ def process_one(idx, count, ticker, tickers_dict):
         return
 
     df = pd.read_pickle(filepath)
+    
+    # 데이터가 부족하면 패스
+    if df.empty or len(df) < 70:
+        return
 
     # idx만큼 뒤에서 자른다 (idx가 2라면 2일 전 데이터셋)
     if idx != 0:
@@ -82,9 +86,6 @@ def process_one(idx, count, ticker, tickers_dict):
     if round(mean_prev3, 1) / 100_000_000 < 5:
         return
 
-    # 데이터가 부족하면 패스
-    if data.empty or len(data) < 70:
-        return
 
     # 2차 생성 feature
     data = add_technical_features(data)
@@ -644,7 +645,6 @@ def process_one(idx, count, ticker, tickers_dict):
     today_str = str(today)
     title = f"{today_str} {stock_name} [{ticker}] {round(data.iloc[-1]['등락률'], 2)}% Daily Chart - {predict_str} {validation_chg_rate}%"
     final_file_name = f"{today} {stock_name} [{ticker}] {round(data.iloc[-1]['등락률'], 2)}%_{predict_str}.png"
-    output_dir = 'D:\\5below20_test'
     os.makedirs(output_dir, exist_ok=True)
     final_file_path = os.path.join(output_dir, final_file_name)
 

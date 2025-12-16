@@ -11,8 +11,9 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import time
 
+start = time.time()   # 시작 시간(초)
 nowTime = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
-print(f'🕒 {nowTime}: running 1_periodically_update_today_interest_stocks.py...')
+print(f'🕒 running 1_periodically_update_today_interest_stocks.py...')
 
 # 자동 탐색 (utils.py를 찾을 때까지 위로 올라가 탐색)
 here = Path(__file__).resolve()
@@ -203,3 +204,7 @@ for count, ticker in enumerate(tickers):
             # logging.warning(f"progress-update 요청 실패: {e}")
             print(f"progress-update 요청 실패-1-2: {e}")
             pass  # 오류
+
+end = time.time()     # 끝 시간(초)
+elapsed = end - start
+print(f"총 소요 시간: {elapsed:.2f}초")

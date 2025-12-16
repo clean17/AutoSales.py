@@ -13,6 +13,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import time
 
+start = time.time()   # 시작 시간(초)
 nowTime = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
 print(f'🕒 {nowTime}: running 2_finding_stocks_with_increased_volume.py...')
 
@@ -56,8 +57,8 @@ for count, ticker in enumerate(tickers):
     condition_passed2 = True
     time.sleep(0.1)  # x00ms 대기
     stock_name = tickers_dict.get(ticker, 'Unknown Stock')
-    if count % 100 == 0:
-        print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
+    # if count % 100 == 0:
+        # print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
 
 
     # 데이터가 없으면 1년 데이터 요청, 있으면 5일 데이터 요청
@@ -193,6 +194,11 @@ for count, ticker in enumerate(tickers):
         # if data2 is not None:
         market_value = data2["result"]["marketValueKrw"]
         company_code = data2["result"]["company"]["code"]
+
+        if market_value is None:
+            print(f"overview marketValueKrw is None: {product_code}")
+            continue
+
         # 시가총액이 500억보다 작으면 패스
         if (market_value < 50_000_000_000):
             # condition_passed = False
@@ -260,7 +266,13 @@ for count, ticker in enumerate(tickers):
             json={"company_code": str(company_code)},
             timeout=15
         )
-        json_data = res.json()
+        json_data = res.json() or {}
+        result = json_data.get("result")
+        if not result:
+            # result가 없을 때 응답 구조 확인용(원인 파악)
+            print("/func/stocks/company result 없음:", json_data)
+            # raise KeyError("result")
+
         category = json_data["result"]["majorList"][0]["title"]
     except Exception as e:
         print(f"/func/stocks/company 요청 실패: {e}")
@@ -403,3 +415,7 @@ if len(results2) > 0:
 
     for ratio, stock_name, ticker, today_val, avg5 in results2:
         print(f"==== {pad_visual(stock_name, max_name_vis_len)} [{ticker}]  {avg5/100_000_000:.2f}억 >>> {today_val/100_000_000:.2f}억, 거래대금 상승률 : {ratio:,.2f}% ====")
+
+end = time.time()     # 끝 시간(초)
+elapsed = end - start
+print(f"2_finding_stocks_with_increased_volume 총 소요 시간: {elapsed:.2f}초")
