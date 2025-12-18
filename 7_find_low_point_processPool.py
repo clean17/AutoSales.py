@@ -1,6 +1,6 @@
 '''
 저점을 찾는 스크립트
-signal_any_drop 를 통해서 5일선이 20일선보다 아래에 있으면서 최근 -3%이 존재 + 오늘 3% 이상 상승
+signal_any_drop 를 통해서 5일선이 20일선보다 아래에 있으면서 최근 -3%이 존재 + 오늘 4% 이상 상승
 3일 평균 거래대금이 1000억 이상이면 무조건 사야한다
 '''
 import matplotlib
@@ -60,6 +60,9 @@ def process_one(idx, count, ticker, tickers_dict):
     else:
         data = df
         remaining_data = None
+
+    if data.empty:
+        return None
 
     today = data.index[-1].strftime("%Y%m%d") # 마지막 인덱스
     if count == 0:
@@ -243,6 +246,12 @@ def process_one(idx, count, ticker, tickers_dict):
     cond37 = False
     cond38 = False
     cond39 = False
+    cond40 = False
+    cond41 = False
+    cond43 = False
+    cond44 = False
+    cond45 = False
+    cond46 = False
 
     # --------------------------------
     # [100] cond1 : 기본 유동성 필터
@@ -550,6 +559,41 @@ def process_one(idx, count, ticker, tickers_dict):
     if mean_ret20 >= 0.412 and pct_vs_firstweek <= 0.626:
         cond39 = True
 
+    # [83]
+    # 최근 30일 변동성이 크고, 오늘 과열되지 않은 종목
+    if vol30 > 5.32 and today_pct < 6.5:
+        cond40 = True
+
+    # [86]
+    # 변동성 크고, 오늘 과열 아님 + 첫 주 흐름이 크게 무너지지 않은 종목
+    if vol30 > 5.32 and today_pct < 6.5 and pct_vs_firstweek > -5.87:
+        cond41 = True
+
+    # [85]
+    # 변동성 크고, 오늘 과열 아님 + 최근 1주 상승 모멘텀 보유 종목
+    if vol30 > 5.32 and today_pct < 7.1 and pct_vs_lastweek > 4.61:
+        cond42 = True
+
+    # [86.67] (13/15)
+    # pct_vs_firstweek < 27.98 이면서 mean_ret20 < -1.07 이면서 mean_ret30 > -0.26
+    if pct_vs_firstweek < 27.98 and mean_ret20 < -1.07 and mean_ret30 > -0.26:
+        cond43 = True
+
+    # [83.33] (15/18)
+    # pct_vs_firstweek < 49.8 이면서 mean_ret20 < -1.07 이면서 mean_ret30 > -0.26
+    if pct_vs_firstweek < 49.8 and mean_ret20 < -1.07 and mean_ret30 > -0.26:
+        cond44 = True
+
+    # [81.25] (13/16)
+    # mean_ret30 > -0.26 이면서 pct_vs_lastweek < 4.51 이면서 mean_ret20 < -1.07
+    if mean_ret30 > -0.26 and pct_vs_lastweek < 4.51 and mean_ret20 < -1.07:
+        cond45 = True
+
+    # [81.25] (13/16)
+    # mean_ret30 > -0.15 이면서 pct_vs_lastweek < 5.48 이면서 mean_ret20 < -1.07
+    if mean_ret30 > -0.15 and pct_vs_lastweek < 5.48 and mean_ret20 < -1.07:
+        cond46 = True
+
     # --------------------------------
     # 모든 조건을 한 번에 모아서 체크
     # --------------------------------
@@ -593,6 +637,9 @@ def process_one(idx, count, ticker, tickers_dict):
         cond37,  # [71]  mean_ret20>=0 AND 2week<=1.426
         cond38,  # [70]  firstweek<=-7.774 AND week<=-0.862
         cond39,  # [70]  mean_ret20>=0.412 AND firstweek<=0.626
+        cond40,  #
+        cond41,  #
+        cond42,  #
     ]
 
     # 조건들 중 하나도 만족하지 않으면 이 종목은 스킵
@@ -632,14 +679,14 @@ def process_one(idx, count, ticker, tickers_dict):
 
     origin = df.copy()
 
-    #연산하는 시간 걸리니 그래프 안그리면 패스
-    # 2차 생성 feature
-    origin = add_technical_features(origin)
-    # 결측 제거
-    o_cleaned, o_cols_to_drop = drop_sparse_columns(origin, threshold=0.10, check_inf=True, inplace=True)
-    origin = o_cleaned
-    # 거래정지/이상치 행 제거
-    origin, o_removed_idx = drop_trading_halt_rows(origin)
+    # #연산하는 시간 걸리니 그래프 안그리면 패스
+    # # 2차 생성 feature
+    # origin = add_technical_features(origin)
+    # # 결측 제거
+    # o_cleaned, o_cols_to_drop = drop_sparse_columns(origin, threshold=0.10, check_inf=True, inplace=True)
+    # origin = o_cleaned
+    # # 거래정지/이상치 행 제거
+    # origin, o_removed_idx = drop_trading_halt_rows(origin)
 
 
     today_str = str(today)
@@ -704,7 +751,7 @@ def process_one(idx, count, ticker, tickers_dict):
     #
     # try:
     #     requests.post(
-    #         'https://chickchick.shop/func/stocks/interest',
+    #         'https://chickchick.shop/func/stocks/interest/insert',
     #         json={
     #             "nation": "kor",
     #             "stock_code": str(ticker),
@@ -721,7 +768,7 @@ def process_one(idx, count, ticker, tickers_dict):
     #             "category": str(category),
     #             "target": "low",
     #         },
-    #         timeout=5
+    #         timeout=10
     #     )
     # except Exception as e:
     #     # logging.warning(f"progress-update 요청 실패: {e}")
@@ -738,9 +785,9 @@ def process_one(idx, count, ticker, tickers_dict):
 
 if __name__ == "__main__":
     start = time.time()   # 시작 시간(초)
-    print('signal_any_drop 를 통해서 5일선이 20일선보다 아래에 있으면서 최근 -3%이 존재 + 오늘 3% 이상 상승')
+    print('signal_any_drop 를 통해서 5일선이 20일선보다 아래에 있으면서 최근 -3%이 존재 + 오늘 4% 이상 상승')
     nowTime = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
-    print(f'🕒 {nowTime}: running 4_find_low_point.py...')
+    print(f'🕒 {nowTime}: running 7_find_low_point.py...')
 
     tickers_dict = get_kor_ticker_dict_list()
     tickers = list(tickers_dict.keys())
@@ -751,16 +798,31 @@ if __name__ == "__main__":
     rows=[]
     plot_jobs = []
 
-    origin_idx = idx = 70
+    # 10이면, 10거래일의 하루전부터
+    origin_idx = idx = 9
     workers = os.cpu_count()
-    # with ThreadPoolExecutor(max_workers=workers) as executor:   # GIL(Global Interpreter Lock) >> I/O가 많은 경우
-    with ProcessPoolExecutor(max_workers=workers-2) as executor:   # CPU를 진짜로 병렬로 돌리고 싶으면 >> CPU연산이 많은 경우
+    BATCH_SIZE = 20
+
+    end_idx = origin_idx + 120  # 마지막 idx
+
+    with ProcessPoolExecutor(max_workers=workers - 2) as executor:
         futures = []
 
-        while idx <= origin_idx + 30:
-            idx += 1
-            for count, ticker in enumerate(tickers):
-                futures.append(executor.submit(process_one, idx, count, ticker, tickers_dict))
+        while idx < end_idx:
+            batch_end = min(idx + BATCH_SIZE, end_idx)
+
+            # idx를 배치 단위로 1씩 증가시키며(최대 10번) 작업 제출
+            for cur_idx in range(idx + 1, batch_end + 1):
+                # print('cur_idx', cur_idx)
+                for count, ticker in enumerate(tickers):
+                    futures.append(executor.submit(process_one, cur_idx, count, ticker, tickers_dict))
+
+            # 이번 배치가 끝날 때까지 대기
+            for fut in as_completed(futures):
+                fut.result()   # 예외 발생 시 여기서 터져서 디버깅 쉬움
+
+            # 다음 배치로 idx 이동
+            idx = batch_end
 
         # 완료된 것부터 하나씩 받아서 집계
         for f in as_completed(futures):
@@ -777,7 +839,7 @@ if __name__ == "__main__":
             plot_job = res["plot_job"]
 
             rows.append(row)
-            plot_jobs.append(plot_job)
+            # plot_jobs.append(plot_job)
 
             if row["predict_str"] == "미달":
                 shortfall_cnt += 1

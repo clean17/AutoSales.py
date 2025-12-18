@@ -13,7 +13,7 @@ import time
 
 start = time.time()   # 시작 시간(초)
 nowTime = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
-print(f'🕒 running 1_periodically_update_today_interest_stocks.py...')
+print(f'1_periodically_update_today_interest_stocks.py...')
 
 # 자동 탐색 (utils.py를 찾을 때까지 위로 올라가 탐색)
 here = Path(__file__).resolve()
@@ -171,7 +171,7 @@ for count, ticker in enumerate(tickers):
                 json={
                     "product_code": str(product_code)
                 },
-                timeout=5
+                timeout=10
             )
             json_data = res.json()
             last_close = json_data["result"]["candles"][0]["close"]
@@ -182,7 +182,7 @@ for count, ticker in enumerate(tickers):
     if last_close is not None:
         try:
             requests.post(
-                'https://chickchick.shop/func/stocks/interest',
+                'https://chickchick.shop/func/stocks/interest/insert',
                 json={
                     "nation": "kor",
                     "stock_code": str(ticker),
@@ -198,7 +198,7 @@ for count, ticker in enumerate(tickers):
                     "market_value": "",
                     "last_close": str(last_close),
                 },
-                timeout=5
+                timeout=10
             )
         except Exception as e:
             # logging.warning(f"progress-update 요청 실패: {e}")
@@ -207,4 +207,4 @@ for count, ticker in enumerate(tickers):
 
 end = time.time()     # 끝 시간(초)
 elapsed = end - start
-print(f"총 소요 시간: {elapsed:.2f}초")
+# print(f"총 소요 시간: {elapsed:.2f}초")

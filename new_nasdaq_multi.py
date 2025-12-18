@@ -140,7 +140,7 @@ for count, ticker in enumerate(tickers):
     col_v = _col(df, '거래량', 'Volume')
 
     if data is None or col_c not in data.columns or data.empty:
-        print(f"{ticker}: 데이터가 비었거나 'Close' 컬럼이 없습니다. pass.")
+        # print(f"{ticker}: 데이터가 비었거나 'Close' 컬럼이 없습니다. pass.")
         continue
 
 #     check_column_types(fetch_stock_data_us(ticker, start_date_us, end_date), ['Close', 'Open', 'High', 'Low', 'Volume', 'PBR']) # 타입과 shape 확인 > Series 가 나와야 한다
@@ -190,7 +190,7 @@ for count, ticker in enumerate(tickers):
         close_3ago = actual_prices[-4]
         ratio = (last_close - close_3ago) / close_3ago * 100
         if last_close >= close_3ago * 2:  # 100% 이상 상승
-            print(f"                                                        3일 전 대비 100% 이상 상승: {close_3ago} -> {last_close}  {ratio:.2f}% → pass")
+            # print(f"                                                        3일 전 대비 100% 이상 상승: {close_3ago} -> {last_close}  {ratio:.2f}% → pass")
             continue
 
     # rolling window로 5일 전 대비 현재가 3배 이상 오른 지점 찾기
@@ -249,7 +249,7 @@ for count, ticker in enumerate(tickers):
     data = cleaned
 
     if 'MA5' not in data.columns or 'MA20' not in data.columns:
-        print(f"                                                        이동평균선이 존재하지 않음 → pass")
+        # print(f"                                                        이동평균선이 존재하지 않음 → pass")
         continue
 
     # 5일선이 너무 하락하면
@@ -262,7 +262,7 @@ for count, ticker in enumerate(tickers):
     # 현재 5일선이 20일선보다 낮으면서 하락중이면 패스
     min_slope = -3
     if ma5_today < data['MA20'].iloc[-1] and change_rate * 100 < min_slope:
-        print(f"                                                        5일선이 20일선 보다 낮으면서 {min_slope}기울기보다 낮게 하락중[{change_rate * 100:.2f}] → pass")
+        # print(f"                                                        5일선이 20일선 보다 낮으면서 {min_slope}기울기보다 낮게 하락중[{change_rate * 100:.2f}] → pass")
         continue
         # pass
 
@@ -626,7 +626,7 @@ try:
     requests.post(
         'https://chickchick.shop/func/stocks/progress-update/nasdaq',
         json={"percent": 100, "done": True},
-        timeout=5
+        timeout=10
     )
 except Exception as e:
     # logging.warning(f"progress-update 요청 실패: {e}")

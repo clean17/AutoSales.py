@@ -1,6 +1,6 @@
 '''
 저점을 찾는 스크립트
-signal_any_drop 를 통해서 5일선이 20일선보다 아래에 있으면서 최근 -3%이 존재 + 오늘 3% 이상 상승
+signal_any_drop 를 통해서 5일선이 20일선보다 아래에 있으면서 최근 -3%이 존재 + 오늘 4% 이상 상승
 3일 평균 거래대금이 1000억 이상이면 무조건 사야한다
 '''
 import matplotlib
@@ -60,6 +60,9 @@ def process_one(idx, count, ticker, tickers_dict):
     else:
         data = df
         remaining_data = None
+
+    if data.empty:
+        return None
 
     today = data.index[-1].strftime("%Y%m%d") # 마지막 인덱스
     if count == 0:
@@ -220,6 +223,8 @@ def process_one(idx, count, ticker, tickers_dict):
     cond37 = False
     cond38 = False
     cond39 = False
+    cond40 = False
+
 
     # --------------------------------
     # [100] cond1 : 기본 유동성 필터
@@ -229,349 +234,248 @@ def process_one(idx, count, ticker, tickers_dict):
     if mean_prev3 / 100_000_000 >= 1000:
         cond1 = True
 
-    # --------------------------------
-    # [100] cond2 : ratio_ge_080
-    # --------------------------------
-    # pct_vs_last2week <= 6.6 : 직전 2주의 과열은 제한
-    # vol30 <= 4.6, vol20 <= 4.86 : 20~30일 변동성이 전체적으로 낮은 종목만
-    # pos30_ratio > 38.3 : 최근 30일 상승일 비율이 너무 나쁘지 않은 종목
-    # ma5_chg_rate <= -1.88 : 단기(5일)는 조정이 나온 구간
-    # -> '저변동 + 구조적으로 나쁘지 않은 종목의 단기 눌림' 베스트 케이스
-    if (pct_vs_last2week <= 6.6 and
-            vol30 <= 4.6 and
-            vol20 <= 4.86 and
-            pos30_ratio > 38.3 and
-            ma5_chg_rate <= -1.88):
-        cond2 = True
 
-    # --------------------------------
-    # [91] cond3 : vol20_le_2_95_and_pct_vs_last2week_ge_12_36
-    # --------------------------------
     # 20일 변동성(vol20)이 낮으면서,
     # 최근 2주 수익률이 12.36% 이상인 저변동 + 강한 2주 랠리 구간
     if vol20 <= 2.95 and pct_vs_last2week >= 12.36:
-        cond3 = True
+        cond2 = True
 
-    # --------------------------------
-    # [83] cond4 : ma5>=1.966_and_vol30<=2.5
-    # --------------------------------
-    # 단기(5일) 수익률이 1.966% 이상이고,
-    # 30일 변동성(vol30)이 2.5 이하인
-    # '중기(30일)는 매우 안정적 + 단기 모멘텀 양호' 패턴
-    if ma5_chg_rate >= 1.966 and vol30 <= 2.5:
-        cond4 = True
 
-    # --------------------------------
-    # [83] cond5 : vol30_le_2_64_and_pct_vs_last2week_ge_12_36
-    # --------------------------------
     # 30일 변동성(vol30)이 매우 낮고,
     # 최근 2주 수익률이 12.36% 이상인 구간
     if vol30 <= 2.64 and pct_vs_last2week >= 12.36:
-        cond5 = True
+        cond3 = True
 
-    # --------------------------------
-    # [83] cond6 : vol30_le_2_36_and_ma5_ge_1_887
-    # --------------------------------
-    # 초저변동(30일 vol30 <= 2.36) + 단기(5일) 수익률 1.887% 이상
-    # -> '초저변동 + 단기 상승 모멘텀' 조합
-    if vol30 <= 2.36 and ma5_chg_rate >= 1.887:
-        cond6 = True
 
-    # --------------------------------
-    # [82] cond7 : firstweek_ge_20_85_and_2week_le_minus_1_992
-    # --------------------------------
-    # 첫 주에 20.85% 이상 강하게 오르고,
-    # 최근 2주는 -1.992% 이하로 쉬거나 조정
-    # -> '초기에 강하게 쏜 뒤 쉬고 있는 종목' 패턴
-    if pct_vs_firstweek >= 20.85 and pct_vs_last2week <= -1.992:
-        cond7 = True
-
-    # --------------------------------
-    # [80] cond8 : pct_vs_last2week_ge_9_27_and_pct_vs_last3week_le_minus_1_69
-    # --------------------------------
     # 최근 2주 수익률은 9.27% 이상으로 좋지만,
     # 3주 전 기준 수익률은 -1.69% 이하로 여전히 안 좋은 구간
     # -> 바닥권에서 돌아서는 턴어라운드 패턴
     if pct_vs_last2week >= 9.27 and pct_vs_last3week <= -1.69:
-        cond8 = True
+        cond4 = True
 
-    # --------------------------------
-    # [80] cond9 : vol30_le_2_36_and_3week_ge_5_634
-    # --------------------------------
+
     # 초저변동(vol30 <= 2.36) + 3주 전 대비 5.634% 이상 우상향
     if vol30 <= 2.36 and pct_vs_last3week >= 5.634:
-        cond9 = True
+        cond5 = True
 
-    # --------------------------------
-    # [80] cond10 : firstweek_ge_11_814_and_2week_le_minus_6_157
-    # --------------------------------
-    # 첫 주에는 11.814% 이상 올랐고,
-    # 최근 2주에는 -6.157% 이하로 과도한 눌림
-    # -> '초기 랠리 후 최근 2주 과도한 조정' 구간
-    if pct_vs_firstweek >= 11.814 and pct_vs_last2week <= -6.157:
-        cond10 = True
 
-    # --------------------------------
-    # [79] cond11 : firstweek_ge_minus_1_92_and_2week_le_minus_6_157
-    # --------------------------------
-    # 첫 주 기준으로는 크게 망가지지 않았지만(>= -1.92%),
-    # 최근 2주는 -6.157% 이하로 꽤 큰 조정
-    if pct_vs_firstweek >= -1.92 and pct_vs_last2week <= -6.157:
-        cond11 = True
-
-    # --------------------------------
-    # [79] cond12 : 2week_ge_9_268_and_3week_le_minus_4_06
-    # --------------------------------
     # 3주 전 기준으로는 -4.06% 이하로 많이 눌려 있었고,
     # 최근 2주는 9.268% 이상 강한 기술적 반등
     if pct_vs_last2week >= 9.268 and pct_vs_last3week <= -4.06:
-        cond12 = True
+        cond6 = True
 
-    # --------------------------------
-    # [78] cond13 : vol20<=2.7_and_week>=10.3
-    # --------------------------------
-    # 20일 변동성을 더 강하게 제한(vol20 <= 2.7)하면서도,
-    # 직전 1주 수익률이 10.3% 이상인
-    # '초저변동 + 직전 1주 급등' 구간
-    if vol20 <= 2.7 and pct_vs_lastweek >= 10.3:
-        cond13 = True
 
-    # --------------------------------
-    # [77] cond14 : vol20<=2.9_and_week>=11.2
-    # --------------------------------
-    # 20일 변동성이 낮고(vol20 <= 2.9),
-    # 직전 1주 수익률이 11.2% 이상인 고순도 급등 구간
-    if vol20 <= 2.9 and pct_vs_lastweek >= 11.2:
-        cond14 = True
-
-    # --------------------------------
-    # [77] cond15 : mean_ret20_ge_0_47_and_firstweek_le_minus_12_358
-    # --------------------------------
-    # 최근 20일 평균 수익률은 양호(mean_ret20 >= 0.47)한데,
-    # 첫 주에 -12.358% 이상 크게 눌린 자리
-    # -> 좋은 추세 종목의 일시적 급락 구간
-    if mean_ret20 >= 0.47 and pct_vs_firstweek <= -12.358:
-        cond15 = True
-
-    # --------------------------------
-    # [77] cond16 : mean_ret20_le_0_19_and_2week_ge_18_282
-    # --------------------------------
-    # 최근 20일은 밋밋하거나 살짝 약한 편(mean_ret20 <= 0.19)이지만,
-    # 최근 2주에 18.282% 이상 강하게 슈팅한 모멘텀주
-    if mean_ret20 <= 0.19 and pct_vs_last2week >= 18.282:
-        cond16 = True
-
-    # --------------------------------
-    # [76] cond17 : vol20_le_2_70_and_pct_vs_last3week_ge_8_89
-    # --------------------------------
     # 20일 변동성이 낮고(vol20 <= 2.70),
     # 3주 전 대비 수익률이 8.89% 이상인
     # '저변동 + 최근 3주 우상향' 구간
     if vol20 <= 2.70 and pct_vs_last3week >= 8.89:
-        cond17 = True
+        cond7 = True
 
-    # --------------------------------
-    # [76] cond18 : vol30_le_3_17_and_pct_vs_last2week_ge_12_36
-    # --------------------------------
-    # 30일 변동성이 낮고(vol30 <= 3.17),
-    # 최근 2주 수익률이 12.36% 이상인
-    # '안정적인 종목 중 2주 기준 강한 랠리 대장 구간'
-    if vol30 <= 3.17 and pct_vs_last2week >= 12.36:
-        cond18 = True
 
-    # --------------------------------
-    # [75] cond19 : vol20<=2.9_and_ma5>=2.2
-    # --------------------------------
     # 20일 변동성(vol20)이 낮으면서,
     # 단기(5일) 수익률이 2.2% 이상인
     # '저변동 + 단기 모멘텀 강한' 구간
     if vol20 <= 2.9 and ma5_chg_rate >= 2.2:
-        cond19 = True
+        cond8 = True
 
-    # --------------------------------
-    # [75] cond20 : vol20<2.953_and_week>10.374_and_2week>4.425
-    # --------------------------------
+
     # 저변동(vol20 < 2.953) + 직전 1주 > 10.374% + 직전 2주 > 4.425%
     # -> 최근 1~2주 모두 강한 상승이 이어진 모멘텀 구간
     if (vol20 < 2.953 and
             pct_vs_lastweek > 10.374 and
             pct_vs_last2week > 4.425):
-        cond20 = True
+        cond9 = True
 
-    # --------------------------------
-    # [75] cond21 : mean_ret20<=-0.8_and_pos30>=50
-    # --------------------------------
+
     # 최근 20일 평균 수익률이 -0.8 이하로 많이 눌렸지만,
     # 최근 30일 상승일 비율이 50% 이상인
     # '강한 조정 + 구조적으로는 여전히 강한 종목' 리버전 조건
     if mean_ret20 <= -0.8 and pos30_ratio >= 50:
-        cond21 = True
+        cond10 = True
 
-    # --------------------------------
-    # [75] cond22 : ratio_ge_075 (mean_ret20<=-0.8_and_pos30>=50)
-    # --------------------------------
+
     # 위와 같은 리버전 + 구조적 강세 조건 (백테스트 기준 0.75 수준)
     if mean_ret20 <= -0.8 and pos30_ratio >= 50:
-        cond22 = True
+        cond11 = True
 
-    # --------------------------------
-    # [73] cond23 : vol20<2.953_and_week>10.374
-    # --------------------------------
-    # 20일 변동성이 낮고(vol20 < 2.953),
-    # 직전 1주 수익률이 10.374% 이상인
-    # '저변동 + 직전 1주 급등' 모멘텀 구간
-    if vol20 < 2.953 and pct_vs_lastweek > 10.374:
-        cond23 = True
 
-    # --------------------------------
-    # [73] cond24 : vol20_le_2_70_and_ma5_chg_rate_ge_1_89
-    # --------------------------------
     # 20일 변동성이 낮으면서(vol20 <= 2.70),
     # 단기(5일) 수익률이 1.89% 이상인
     # '저변동 종목 중 단기 모멘텀 살아난 케이스'
     if vol20 <= 2.70 and ma5_chg_rate >= 1.89:
-        cond24 = True
+        cond12 = True
 
-    # --------------------------------
-    # [70] cond25 : ratio_ge_070 (mean_ret20<=-0.7_and_pos30>=50)
-    # --------------------------------
+
     # mean_ret20 조건을 -0.7까지 완화하는 대신,
     # pos30_ratio를 50% 이상으로 유지하는 균형형 리버전 조건
     if mean_ret20 <= -0.7 and pos30_ratio >= 50:
-        cond25 = True
+        cond13 = True
+
 
     # [100]
     # vol20 <= 2.70 이면서, 3주 전 대비 수익률(pct_vs_last3week)이 8.888% 이상
     # -> '더 타이트한 저변동 + 최근 3주 우상향' 패턴
     if vol20 <= 2.70 and pct_vs_last3week >= 8.888:
-        cond26 = True
+        cond14 = True
 
-    # [70]
-    # vol30 <= 3.174 이면서, 최근 2주 수익률이 12.358% 이상
-    # -> 위 조건보다 변동성을 조금 완화해서 종목 수를 늘린 버전
-    if vol30 <= 3.174 and pct_vs_last2week >= 12.358:
-        cond27 = True
 
     # [83]
     # vol30 <= 2.64 이면서, 3주 전 대비 수익률이 8.888% 이상
     # -> '초저변동 + 최근 3주 우상향' 패턴 (2주보다 조금 긴 추세)
     if vol30 <= 2.64 and pct_vs_last3week >= 8.888:
-        cond28 = True
+        cond15 = True
+
 
     # [83]
     # 최근 2주 수익률이 12.358% 이상이지만,
     # 3주 전 기준 수익률(pct_vs_last3week)은 -1.694% 이하
     # -> '3주 전 기준으로는 아직 저점 인식인데, 최근 2주에 강하게 턴한' 구간
     if pct_vs_last2week >= 12.358 and pct_vs_last3week <= -1.694:
-        cond29 = True
+        cond16 = True
+
 
     # [100]
     # vol30 <= 2.36 이면서, 3주 전 대비 수익률이 5.634% 이상
     #  -> '초저변동 + 완만하지만 꾸준한 3주 우상향'
     if vol30 <= 2.36 and pct_vs_last3week >= 5.634:
-        cond30 = True
+        cond17 = True
+
 
     # [89]
     # 최근 2주 수익률이 9.268% 이상인데,
     # 3주 전 기준 수익률은 -1.694% 이하
     #  -> '3주 전 기준으로는 아직 저점권인데, 최근 2주에 강하게 턴한 구간'
     if pct_vs_last2week >= 9.268 and pct_vs_last3week <= -1.694:
-        cond31 = True
+        cond18 = True
+
 
     # [86]
     # vol30 <= 3.886 이면서, 첫 주 수익률이 68.298% 이상인 구간
     #  -> '30일 변동성은 적당히 낮고, 첫 주에 거의 급발진한 초강세 구간'
     if vol30 <= 3.886 and pct_vs_firstweek >= 68.298:
-        cond32 = True
+        cond19 = True
 
-    # [78]
-    # 첫 주 수익률이 -21.71% 이하로 크게 빠졌고,
-    # 직전 1주 수익률도 -0.862% 이하로 약한 구간
-    #  -> '초기에 크게 깨지고, 최근 1주도 부진한 극저점 구간의 기술적 반등'
-    if pct_vs_firstweek <= -21.71 and pct_vs_lastweek <= -0.862:
-        cond33 = True
-
-    # [71]
-    # vol20 >= 6.834 이면서, 직전 1주 수익률이 -0.862% 이하인 구간
-    #  -> '변동성은 큰 종목들 중에서, 최근 1주 조정이 나온 고위험 반등 후보'
-    if vol20 >= 6.834 and pct_vs_lastweek <= -0.862:
-        cond34 = True
-
-    # [71]
-    # pos30_ratio >= 50 이면서, 직전 1주 수익률이 11.362% 이상
-    #  -> '최근 30일 중 절반 이상이 양봉 + 바로 직전 1주 강하게 급등한 추세주'
-    if pos30_ratio >= 50.0 and pct_vs_lastweek >= 11.362:
-        cond35 = True
-
-    # [71]
-    # pos30_ratio >= 46.67 이면서, 첫 주 수익률이 -7.774% 이하
-    #  -> '구조적으로는 나쁘지 않은데(pos30 높음), 첫 주에 눌린 리버전 후보'
-    if pos30_ratio >= 46.67 and pct_vs_firstweek <= -7.774:
-        cond36 = True
-
-    # [71]
-    # mean_ret20 >= 0 이면서, 최근 2주 수익률이 1.426% 이하인 구간
-    #  -> '20일 기준 우상향이지만, 최근 2주는 숨 고르기/조정인 추세 지속 구간'
-    if mean_ret20 >= 0.0 and pct_vs_last2week <= 1.426:
-        cond37 = True
 
     # [70]
     # 첫 주 수익률이 -7.774% 이하, 직전 1주 수익률도 -0.862% 이하
     #  -> '초기부터 계속 얻어맞은 종목들 중에서 기술적 반등이 많이 나왔던 구간'
     if pct_vs_firstweek <= -7.774 and pct_vs_lastweek <= -0.862:
-        cond38 = True
+        cond20 = True
 
-    # [70]
-    # mean_ret20 >= 0.412 이면서, 첫 주 수익률이 0.626% 이하
-    #  -> '최근 20일 평균은 꽤 좋은데, 첫 주에는 상대적으로 덜 오른 저점 추세주'
-    if mean_ret20 >= 0.412 and pct_vs_firstweek <= 0.626:
-        cond39 = True
+
+    # [86.67] (13/15)
+    # pct_vs_firstweek < 27.98 이면서 mean_ret20 < -1.07 이면서 mean_ret30 > -0.26
+    if pct_vs_firstweek < 27.98 and mean_ret20 < -1.07 and mean_ret30 > -0.26:
+        cond21 = True
+
+
+    # [83.33] (15/18)
+    # pct_vs_firstweek < 49.8 이면서 mean_ret20 < -1.07 이면서 mean_ret30 > -0.26
+    if pct_vs_firstweek < 49.8 and mean_ret20 < -1.07 and mean_ret30 > -0.26:
+        cond22 = True
+
+
+    # [81.25] (13/16)
+    # mean_ret30 > -0.26 이면서 pct_vs_lastweek < 4.51 이면서 mean_ret20 < -1.07
+    if mean_ret30 > -0.26 and pct_vs_lastweek < 4.51 and mean_ret20 < -1.07:
+        cond23 = True
+
+
+    # [81.25] (13/16)
+    # mean_ret30 > -0.15 이면서 pct_vs_lastweek < 5.48 이면서 mean_ret20 < -1.07
+    if mean_ret30 > -0.15 and pct_vs_lastweek < 5.48 and mean_ret20 < -1.07:
+        cond24 = True
+
+
+    # [75%] (15/20)
+    # 최근 30일 동안 상승한 날 비율은 낮지만,
+    # 30일 평균 수익률은 양수인 종목
+    # → 많이 오르진 않았지만, 오를 때는 강하게 오르는 눌림 반등형
+    if pos30_ratio < 36.67 and mean_ret30 > 0.26:
+        cond25 = True
+
+
+    # [76.19%] (16/21)
+    # 최근 30일 상승일 비율이 높고,
+    # 최근 3주 수익률이 크지만,
+    # 30일 평균 수익률은 아직 과하지 않은 종목
+    # → 최근에 추세가 막 살아난 초중반 상승 구간
+    if pos30_ratio > 46.67 and pct_vs_last3week > 13.535 and mean_ret30 < 0.52:
+        cond26 = True
+
+
+    # [75%] (18/24)
+    # 30일 기준 변동성이 있고,
+    # 최근 20일 중 상승일 비율이 높으며,
+    # 거래대금 변화가 큰 종목
+    # → 단순 기술적 반등이 아닌 실제 수급이 붙은 종목
+    if vol30 > 3.32 and pos20_ratio > 45.0 and chg_tr_val > 719.8:
+        cond27 = True
+
+
+    # [72.73%] (16/22)
+    # 최근 20일 평균 수익률은 나빴지만,
+    # 30일 평균은 크게 무너지지 않았고,
+    # 최근 5일 급등 상태는 아닌 종목
+    # → 바닥권에서 서서히 회복 중인 눌림 구간
+    if mean_ret20 < -1.07 and mean_ret30 > -0.15 and ma5_chg_rate < 2.82:
+        cond28 = True
+
+
+    # [72%] (18/25)
+    # 오늘 급락은 아니고,
+    # 최근 5일 상승 탄력은 강하지만,
+    # 첫 주에 과도하게 오르지 않은 종목
+    # → 단기 모멘텀이 막 붙기 시작한 초기 상승 단계
+    if today_chg_rate > -18.71 and ma5_chg_rate > 4.015 and pct_vs_firstweek < 8.91:
+        cond29 = True
+
+
+    # [71.43%] (20/28)
+    # 최근 20일 동안 상승한 날은 많지 않지만,
+    # 최근 2주 수익률은 매우 강하고,
+    # 20일 이동평균이 상승 중인 종목
+    # → 조용하다가 한 번에 터지는 변동성 돌파형
+    if pos20_ratio < 40.0 and pct_vs_last2week > 18.89 and ma20_chg_rate > 0.31:
+        cond30 = True
 
     # --------------------------------
     # 모든 조건을 한 번에 모아서 체크
     # --------------------------------
     # ✅ 마지막에 "True인 조건 이름/설명"만 뽑기
     conditions = [
-        ("cond1",  "[100] 유동성 필터", cond1),
-        ("cond2",  "[100] ratio_ge_080", cond2),
-        ("cond3",  "[91] vol20_le_2_95_and_pct_vs_last2week_ge_12_36", cond3),
-        ("cond4",  "[83] ma5>=1.966_and_vol30<=2.5", cond4),
-        ("cond5",  "[83] vol30_le_2_64_and_pct_vs_last2week_ge_12_36", cond5),
-        ("cond6",  "[83] vol30_le_2_36_and_ma5_ge_1_887", cond6),
-        ("cond7",  "[82] firstweek_ge_20_85_and_2week_le_minus_1_992", cond7),
-        ("cond8",  "[80] pct_vs_last2week_ge_9_27_and_pct_vs_last3week_le_minus_1_69", cond8),
-        ("cond9",  "[80] vol30_le_2_36_and_3week_ge_5_634", cond9),
-        ("cond10", "[80] firstweek_ge_11_814_and_2week_le_minus_6_157", cond10),
-        ("cond11", "[79] firstweek_ge_minus_1_92_and_2week_le_minus_6_157", cond11),
-        ("cond12", "[79] 2week_ge_9_268_and_3week_le_minus_4_06", cond12),
-        ("cond13", "[78] vol20<=2.7_and_week>=10.3", cond13),
-        ("cond14", "[77] vol20<=2.9_and_week>=11.2", cond14),
-        ("cond15", "[77] mean_ret20_ge_0_47_and_firstweek_le_minus_12_358", cond15),
-        ("cond16", "[77] mean_ret20_le_0_19_and_2week_ge_18_282", cond16),
-        ("cond17", "[76] vol20_le_2_70_and_pct_vs_last3week_ge_8_89", cond17),
-        ("cond18", "[76] vol30_le_3_17_and_pct_vs_last2week_ge_12_36", cond18),
-        ("cond19", "[75] vol20<=2.9_and_ma5>=2.2", cond19),
-        ("cond20", "[75] vol20<2.953_and_week>10.374_and_2week>4.425", cond20),
-        ("cond21", "[75] mean_ret20<=-0.8_and_pos30>=50", cond21),
-        ("cond22", "[75] ratio_ge_075", cond22),
-        ("cond23", "[73] vol20<2.953_and_week>10.374", cond23),
-        ("cond24", "[73] vol20_le_2_70_and_ma5_chg_rate_ge_1_89", cond24),
-        ("cond25", "[70] ratio_ge_070", cond25),
-        ("cond26", "[100] vol20<=2.70 AND 3week>=8.888", cond26),
-        ("cond27", "[70] vol30<=3.174 AND 2week>=12.358", cond27),
-        ("cond28", "[83] vol30<=2.64 AND 3week>=8.888", cond28),
-        ("cond29", "[83] 2week>=12.358 AND 3week<=-1.694", cond29),
-        ("cond30", "[100] vol30<=2.36 AND 3week>=5.634", cond30),
-        ("cond31", "[89] 2week>=9.268 AND 3week<=-1.694", cond31),
-        ("cond32", "[86] vol30<=3.886 AND firstweek>=68.298", cond32),
-        ("cond33", "[78] firstweek<=-21.71 AND week<=-0.862", cond33),
-        ("cond34", "[71] vol20>=6.834 AND week<=-0.862", cond34),
-        ("cond35", "[71] pos30_ratio>=50 AND week>=11.362", cond35),
-        ("cond36", "[71] pos30_ratio>=46.67 AND firstweek<=-7.774", cond36),
-        ("cond37", "[71] mean_ret20>=0 AND 2week<=1.426", cond37),
-        ("cond38", "[70] firstweek<=-7.774 AND week<=-0.862", cond38),
-        ("cond39", "[70] mean_ret20>=0.412 AND firstweek<=0.626", cond39),
+        ("cond1",  "", cond1),
+        ("cond2",  "", cond2),
+        ("cond3",  "", cond3),
+        ("cond4",  "", cond4),
+        ("cond5",  "", cond5),
+        ("cond6",  "", cond6),
+        ("cond7",  "", cond7),
+        ("cond8",  "", cond8),
+        ("cond9",  "", cond9),
+        ("cond10", "", cond10),
+        ("cond11", "", cond11),
+        ("cond12", "", cond12),
+        ("cond13", "", cond13),
+        ("cond14", "", cond14),
+        ("cond15", "", cond15),
+        ("cond16", "", cond16),
+        ("cond17", "", cond17),
+        ("cond18", "", cond18),
+        ("cond19", "", cond19),
+        ("cond20", "", cond20),
+        ("cond21", "", cond21),
+        ("cond22", "", cond22),
+        ("cond23", "", cond23),
+        ("cond24", "", cond24),
+        ("cond25", "", cond25),
+        ("cond26", "", cond26),
+        ("cond27", "", cond27),
+        ("cond28", "", cond28),
+        ("cond29", "", cond29),
+        ("cond30", "", cond30),
     ]
+
 
     true_conds = [(name, desc) for name, desc, ok in conditions if ok]
     if not true_conds:
@@ -676,7 +580,7 @@ def process_one(idx, count, ticker, tickers_dict):
 
     try:
         requests.post(
-            'https://chickchick.shop/func/stocks/interest',
+            'https://chickchick.shop/func/stocks/interest/insert',
             json={
                 "nation": "kor",
                 "stock_code": str(ticker),
@@ -693,7 +597,7 @@ def process_one(idx, count, ticker, tickers_dict):
                 "category": str(category),
                 "target": "low",
             },
-            timeout=5
+            timeout=10
         )
     except Exception as e:
         # logging.warning(f"progress-update 요청 실패: {e}")

@@ -576,7 +576,7 @@ try:
     requests.post(
         'https://chickchick.shop/func/stocks/progress-update/kospi',
         json={"percent": 100, "done": True},
-        timeout=5
+        timeout=10
     )
 except Exception as e:
     # logging.warning(f"progress-update 요청 실패: {e}")

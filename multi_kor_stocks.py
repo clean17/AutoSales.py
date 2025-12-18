@@ -95,7 +95,7 @@ for count, ticker in enumerate(tickers):
                 "stock_name":stock_name,
                 "done": False,
             },
-            timeout=5
+            timeout=10
         )
     except Exception as e:
         # logging.warning(f"progress-update 요청 실패: {e}")
@@ -198,14 +198,14 @@ for count, ticker in enumerate(tickers):
     close_3ago = actual_prices[-4]
     ratio = (last_close - close_3ago) / close_3ago * 100
     if last_close >= close_3ago * 2:  # 100% 이상 상승
-        print(f"                                                        3일 전 대비 100% 이상 상승: {close_3ago} -> {last_close}  {ratio:.2f}% → pass")
+        # print(f"                                                        3일 전 대비 100% 이상 상승: {close_3ago} -> {last_close}  {ratio:.2f}% → pass")
         continue
 
     # 2. 당일의 종가가 5일 전날의 종가보다 60% 이상 상승
     close_5ago = actual_prices[-6]
     ratio = (last_close - close_5ago) / close_5ago * 100
     if last_close >= close_5ago * 1.6:  # 60% 이상 상승
-        print(f"                                                        5일 전 대비 60% 이상 상승: {close_5ago} -> {last_close}  {ratio:.2f}% → pass")
+        # print(f"                                                        5일 전 대비 60% 이상 상승: {close_5ago} -> {last_close}  {ratio:.2f}% → pass")
         continue
 
     # 3. 당일의 종가가 15일 전날의 종가보다 100% 이상 상승
@@ -249,7 +249,7 @@ for count, ticker in enumerate(tickers):
     # 현재 5일선이 20일선보다 낮으면서 하락중이면 패스
     min_slope = -3
     if ma5_today < data['MA20'].iloc[-1] and change_rate * 100 < min_slope:
-        print(f"                                                        5일선이 20일선 보다 낮으면서 {min_slope}기울기보다 낮게 하락중[{change_rate * 100:.2f}] → pass")
+        # print(f"                                                        5일선이 20일선 보다 낮으면서 {min_slope}기울기보다 낮게 하락중[{change_rate * 100:.2f}] → pass")
         continue
         # pass
 
@@ -700,7 +700,7 @@ try:
     requests.post(
         'https://chickchick.shop/func/stocks/progress-update/kospi',
         json={"percent": 100, "done": True},
-        timeout=5
+        timeout=10
     )
 except Exception as e:
     # logging.warning(f"progress-update 요청 실패: {e}")

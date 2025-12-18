@@ -288,7 +288,7 @@ for count, ticker in enumerate(tickers):
             json={
                 "product_code": str(product_code)
             },
-            timeout=5
+            timeout=10
         )
         json_data = res.json()
         last_close = json_data["result"]["candles"][0]["close"]
@@ -304,7 +304,7 @@ for count, ticker in enumerate(tickers):
 
         try:
             requests.post(
-                'https://chickchick.shop/func/stocks/interest',
+                'https://chickchick.shop/func/stocks/interest/insert',
                 json={
                     "nation": "kor",
                     "stock_code": str(ticker),
@@ -321,7 +321,7 @@ for count, ticker in enumerate(tickers):
                     "category": str(category),
                     "last_close": str(last_close),
                 },
-                timeout=5
+                timeout=10
             )
         except Exception as e:
             # logging.warning(f"progress-update 요청 실패: {e}")
@@ -334,7 +334,7 @@ for count, ticker in enumerate(tickers):
 
         try:
             requests.post(
-                'https://chickchick.shop/func/stocks/interest',
+                'https://chickchick.shop/func/stocks/interest/insert',
                 json={
                     "nation": "kor",
                     "stock_code": str(ticker),
@@ -351,7 +351,7 @@ for count, ticker in enumerate(tickers):
                     "category": str(category),
                     "last_close": str(last_close),
                 },
-                timeout=5
+                timeout=10
             )
         except Exception as e:
             # logging.warning(f"progress-update 요청 실패: {e}")
