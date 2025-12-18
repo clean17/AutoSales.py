@@ -226,13 +226,6 @@ def process_one(idx, count, ticker, tickers_dict):
     cond40 = False
 
 
-    # --------------------------------
-    # [100] cond1 : 기본 유동성 필터
-    # --------------------------------
-    # 최근 3거래일 평균 거래대금이 1,000억 이상인 종목
-    # -> 너무 작은 종목은 제외하고, 어느 정도 유동성이 담보된 종목만 사용
-    if mean_prev3 / 100_000_000 >= 1000:
-        cond1 = True
 
 
     # 20일 변동성(vol20)이 낮으면서,
@@ -409,8 +402,8 @@ def process_one(idx, count, ticker, tickers_dict):
     # 최근 20일 중 상승일 비율이 높으며,
     # 거래대금 변화가 큰 종목
     # → 단순 기술적 반등이 아닌 실제 수급이 붙은 종목
-    if vol30 > 3.32 and pos20_ratio > 45.0 and chg_tr_val > 719.8:
-        cond27 = True
+    # if vol30 > 3.32 and pos20_ratio > 45.0 and chg_tr_val > 719.8:
+    #     cond27 = True
 
 
     # [72.73%] (16/22)
@@ -477,16 +470,15 @@ def process_one(idx, count, ticker, tickers_dict):
     ]
 
 
+    # True가 하나도 없으면 pass
     true_conds = [(name, desc) for name, desc, ok in conditions if ok]
     if not true_conds:
         return
 
     # 원하는 출력 형태 1) "cond17, cond30" 처럼 이름만
-    print(", ".join(name for name, _ in true_conds))
+    # print(", ".join(name for name, _ in true_conds))
+    print(f'{stock_name}: {", ".join(name for name, _ in true_conds)}')
 
-    # # 조건들 중 하나도 만족하지 않으면 이 종목은 스킵
-    # if not any(condition_flags):
-    #     return
 
     ########################################################################
 
