@@ -4,6 +4,22 @@ from pykrx import stock
 import requests
 import itertools
 import time
+from dotenv import load_dotenv
+import os
+
+
+
+load_dotenv()  # .env 파일을 현재 환경변수로 로드
+
+MUD_VPN = os.environ.get('MUD_VPN')
+MUD_USERNAME = os.environ.get('MUDFISH_USERNAME')
+MUD_PASSWORD = os.environ.get('MUDFISH_PASSWORD')
+
+# 프록시 설정
+os.environ["HTTP_PROXY"]  = f"socks5h://{MUD_USERNAME}:{MUD_PASSWORD}@{MUD_VPN}"
+os.environ["HTTPS_PROXY"] = f"socks5h://{MUD_USERNAME}:{MUD_PASSWORD}@{MUD_VPN}"
+
+
 
 def get_safe_ticker_list(market="KOSPI"):
     def fetch_tickers_for_date(date):
@@ -107,7 +123,11 @@ def post_stocks_update(
                         # 재시도 모두 실패
                         raise
 
+
 if __name__ == "__main__":
+    print('─────────────────────────────────────────────────────────────')
+    print('🕒 update_kor_stocks_periodically')
+    print('─────────────────────────────────────────────────────────────')
     # 1) 페이로드 구성
     print('update KOSPI')
     payload = build_stock_payload(market="KOSPI")
