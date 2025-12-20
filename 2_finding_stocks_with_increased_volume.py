@@ -15,7 +15,7 @@ import time
 
 start = time.time()   # 시작 시간(초)
 nowTime = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
-print(f'🕒 {nowTime}: running 2_finding_stocks_with_increased_volume.py...')
+print(f'{nowTime}: running 2_finding_stocks_with_increased_volume.py...')
 
 # 자동 탐색 (utils.py를 찾을 때까지 위로 올라가 탐색)
 here = Path(__file__).resolve()
@@ -46,7 +46,6 @@ tickers_dict = get_kor_ticker_dict_list()
 tickers = list(tickers_dict.keys())
 # tickers = ['089030']
 # ticker_to_name = {ticker: stock.get_market_ticker_name(ticker) for ticker in tickers}
-
 
 # 결과를 저장할 배열
 results = []
@@ -239,11 +238,11 @@ for count, ticker in enumerate(tickers):
     ax_w_price = fig.add_subplot(gs[2, 0])
     ax_w_vol   = fig.add_subplot(gs[3, 0], sharex=ax_w_price)
 
-    plot_candles_daily(data, show_months=6, title=f'{today} {stock_name} [{ticker}] Daily Chart',
-                       ax_price=ax_d_price, ax_volume=ax_d_vol)
+    plot_candles_daily(data, show_months=4, title=f'{today} {stock_name} [{ticker}] Daily Chart',
+                       ax_price=ax_d_price, ax_volume=ax_d_vol, date_tick=5)
 
     plot_candles_weekly(data, show_months=12, title="Weekly Chart",
-                        ax_price=ax_w_price, ax_volume=ax_w_vol)
+                        ax_price=ax_w_price, ax_volume=ax_w_vol, date_tick=5)
 
     plt.tight_layout()
     # plt.show()
