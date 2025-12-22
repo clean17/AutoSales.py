@@ -427,11 +427,11 @@ for iteration in range(MAX_ITERATIONS):
                 os.remove(os.path.join(output_dir, file_name))
 
         # timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
-        # file_path = os.path.join(output_dir, f'{today} [ {future_return:.2f}% ] {stock_name} {ticker} [ {last_price} ] {timestamp}.png')
-        final_file_name = f'{today} [ {future_return:.2f}% ] {stock_name} {ticker} [ {last_price} ].png'
+        # file_path = os.path.join(output_dir, f'{today} [ {future_return:.2f}% ] {stock_name} {ticker} [ {last_price} ] {timestamp}.webp')
+        final_file_name = f'{today} [ {future_return:.2f}% ] {stock_name} {ticker} [ {last_price} ].webp'
         final_file_path = os.path.join(output_dir, final_file_name)
         # print(final_file_name)
-        plt.savefig(final_file_path)
+        plt.savefig(final_file_path, format="webp", dpi=100, bbox_inches="tight", pad_inches=0.1)
         plt.close()
 
 

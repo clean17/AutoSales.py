@@ -176,11 +176,16 @@ for count, ticker in enumerate(tickers):
             timeout=10
         )
         json_data = res.json()
-        # json_data["result"][0]
-        product_code = json_data["result"][0]["data"]["items"][0]["productCode"]
+        result = json_data["result"]
+
+        # 거래정지는 데이터를 주지 않는다
+        if len(result) == 0:
+            continue
+
+        product_code = result[0]["data"]["items"][0]["productCode"]
 
     except Exception as e:
-        print(f"info 요청 실패-2: {str(ticker)} {stock_name} {e}")
+        print(f"info 요청 실패-2: (코드: {str(ticker)}, 종목명: {stock_name}) {e}")
         pass  # 오류
 
     try:
@@ -251,9 +256,9 @@ for count, ticker in enumerate(tickers):
     output_dir = 'D:\\interest_stocks'
     os.makedirs(output_dir, exist_ok=True)
 
-    final_file_name = f'{today} {stock_name} [{ticker}].png'
+    final_file_name = f'{today} {stock_name} [{ticker}].webp'
     final_file_path = os.path.join(output_dir, final_file_name)
-    plt.savefig(final_file_path)
+    plt.savefig(final_file_path, format="webp", dpi=100, bbox_inches="tight", pad_inches=0.1)
     plt.close()
 
 

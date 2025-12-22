@@ -146,9 +146,9 @@ for count, ticker in enumerate(tickers):
     output_dir = 'D:\\5below20-3'
     os.makedirs(output_dir, exist_ok=True)
 
-    final_file_name = f'{today} {stock_name} [{ticker}].png'
+    final_file_name = f'{today} {stock_name} [{ticker}].webp'
     final_file_path = os.path.join(output_dir, final_file_name)
-    plt.savefig(final_file_path)
+    plt.savefig(final_file_path, format="webp", dpi=100, bbox_inches="tight", pad_inches=0.1)
     plt.close()
 
 
