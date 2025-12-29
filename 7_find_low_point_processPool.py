@@ -573,7 +573,7 @@ def process_one(idx, count, ticker, tickers_dict):
     #             "avg5d_trading_value": str(avg5),
     #             "current_trading_value": str(today_val),
     #             "trading_value_change_pct": str(ratio),
-    #             "image_url": str(final_file_name),
+    #             "graph_file": str(final_file_name),
     #             "market_value": str(market_value),
     #             "category": str(category),
     #             "target": "low",
