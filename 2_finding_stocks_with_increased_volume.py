@@ -14,8 +14,8 @@ import matplotlib.pyplot as plt
 import time
 
 start = time.time()   # 시작 시간(초)
-nowTime = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
-print(f'{nowTime}: running 2_finding_stocks_with_increased_volume.py...')
+nowTime = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
+print(f'🕒 {nowTime}: running 2_finding_stocks_with_increased_volume.py...')
 
 # 자동 탐색 (utils.py를 찾을 때까지 위로 올라가 탐색)
 here = Path(__file__).resolve()

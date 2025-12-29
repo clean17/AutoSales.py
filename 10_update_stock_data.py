@@ -5,7 +5,7 @@ from utils import fetch_stock_data, get_kor_ticker_dict_list
 import time
 
 start = time.time()   # 시작 시간(초)
-nowTime = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
+nowTime = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
 print(f'{nowTime}: running 10_update_stock_data.py...')
 
 

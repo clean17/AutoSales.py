@@ -595,7 +595,7 @@ def process_one(idx, count, ticker, tickers_dict):
 
 if __name__ == "__main__":
     start = time.time()   # 시작 시간(초)
-    nowTime = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
+    nowTime = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
     print(f'🕒 {nowTime}: running 7_find_low_point.py...')
     print(' 10일 이상 5일선이 20일선 보다 아래에 있으면서 최근 -3%이 존재 + 오늘 4% 이상 상승')
 

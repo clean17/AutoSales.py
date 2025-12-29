@@ -354,6 +354,22 @@ def get_kor_ticker_dict_list():
         if "stock_code" in item and "stock_name" in item
     }
 
+def get_kor_summary_ticker_dict_list():
+    days_ago_14 = (datetime.today() - timedelta(days=14)).strftime('%Y%m%d')
+    res = requests.post(
+        'https://chickchick.shop/func/stocks/interest/data/info',
+        json={
+            "date": str(days_ago_14)
+        },
+        timeout=5
+    )
+    data = res.json() or {}
+    return {
+        item["stock_code"]: item["stock_name"]
+        for item in data
+        if "stock_code" in item and "stock_name" in item
+    }
+
 def get_kor_interest_ticker_dick_list():
     url = "https://chickchick.shop/func/stocks/interest/data"
     payload = {
@@ -978,7 +994,9 @@ def plot_candles_daily(
     # plt.setp(ax_price.get_xticklabels(), rotation=0, ha='center')    # 회전/정렬
     ax_price.set_title(title, fontsize=14)
     ax_price.grid(True, alpha=0.25)
-    ax_price.legend(loc='upper left')
+    handles, labels = ax_price.get_legend_handles_labels()
+    if labels:
+        ax_price.legend(loc='upper left')
 
     # 아랫 패널: 거래량
     ax_volume.bar(x, df[col_v].to_numpy(), color=colors, alpha=1)
