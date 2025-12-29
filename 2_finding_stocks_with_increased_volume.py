@@ -15,7 +15,7 @@ import time
 
 start = time.time()   # 시작 시간(초)
 nowTime = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
-print(f'🕒 {nowTime}: running 2_finding_stocks_with_increased_volume.py...')
+print(f'🕒 {nowTime} - running 2_finding_stocks_with_increased_volume.py...')
 
 # 자동 탐색 (utils.py를 찾을 때까지 위로 올라가 탐색)
 here = Path(__file__).resolve()
@@ -205,7 +205,6 @@ for count, ticker in enumerate(tickers):
 
         # 시가총액이 500억보다 작으면 패스
         if (market_value < 50_000_000_000):
-            # condition_passed = False
             continue
 
     except Exception as e:
@@ -225,8 +224,8 @@ for count, ticker in enumerate(tickers):
     today_val = trading_value.iloc[-1]
     # print('today', today_val)
 
-    # 거래대금 x배 증가 종목 찾기
-    TARGET_VALUE = 5
+    # 거래대금 x배 보다 크면 과열 > 제외
+    TARGET_VALUE = 6
     # 0 나눗셈 방지 및 조건 체크
     if avg5 > 0 and np.isfinite(avg5) and today_val >= TARGET_VALUE * avg5:
         condition_passed2 = False
@@ -280,6 +279,9 @@ for count, ticker in enumerate(tickers):
         print(f"progress-update 요청 실패-2-1: {e}")
         pass  # 오류
 
+    """
+    5% 이상 상승 + 10일동안 4-5% 박스권 
+    """
     # DB 등록
     if condition_passed:
         # 부합하면 결과에 저장 (상승률, 종목명, 코드)}
@@ -311,7 +313,9 @@ for count, ticker in enumerate(tickers):
             print(f"progress-update 요청 실패-2-2: {e}")
             pass  # 오류
 
-
+    """
+    5% 이상 상승 + 거래대금 증가 5-6배 이하(과열 제외)  
+    """
     if condition_passed2:
         results2.append((ratio, stock_name, ticker, float(today_val), float(avg5)))
 
@@ -396,7 +400,7 @@ if len(results2) > 0:
         return text + ' ' * gap
 
     for ratio, stock_name, ticker, today_val, avg5 in results2:
-        print(f"==== {pad_visual(stock_name, max_name_vis_len)} [{ticker}]  {avg5/100_000_000:.2f}억 >>> {today_val/100_000_000:.2f}억, 거래대금 상승률 : {ratio:,.2f}% ====")
+        print(f"==== {pad_visual(stock_name, max_name_vis_len)} [{ticker}]  {avg5/100_000_000:.1f}억 >>> {today_val/100_000_000:.2f}억, 거래대금 상승률 : {ratio:,.1f}% ====")
 
 end = time.time()     # 끝 시간(초)
 elapsed = end - start

@@ -80,7 +80,6 @@ def process_one(idx, count, ticker, tickers_dict):
                 "stock_code": str(ticker),
                 "stock_name": str(stock_name),
                 "graph_file": str(final_file_name),
-                "created_at": created_at
             },
             timeout=10
         )
@@ -99,7 +98,7 @@ def process_one(idx, count, ticker, tickers_dict):
 if __name__ == "__main__":
     start = time.time()   # 시작 시간(초)
     nowTime = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
-    print(f'🕒 {nowTime}: running 5_generate_interest_stocks_graph.py...')
+    print(f'🕒 {nowTime} - running 5_generate_interest_stocks_graph.py...')
 
     tickers_dict = get_kor_summary_ticker_dict_list()
     tickers = list(tickers_dict.keys())

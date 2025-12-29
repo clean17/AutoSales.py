@@ -13,7 +13,7 @@ import time
 
 start = time.time()   # 시작 시간(초)
 nowTime = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
-print(f'🕒 {nowTime}: running 1_periodically_update_today_interest_stocks.py...')
+print(f'🕒 {nowTime} - running 1_periodically_update_today_interest_stocks.py...')
 
 # 자동 탐색 (utils.py를 찾을 때까지 위로 올라가 탐색)
 here = Path(__file__).resolve()

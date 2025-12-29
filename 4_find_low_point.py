@@ -427,6 +427,53 @@ def process_one(idx, count, ticker, tickers_dict):
     print(f'{stock_name}: {", ".join(name for name, _ in true_conds)}')
 
 
+
+    # ─────────────────────────────────────────────────────────────
+    # 2) 시가 총액 500억 이하 패스
+    # ─────────────────────────────────────────────────────────────
+    try:
+        res = requests.post(
+            'https://chickchick.shop/func/stocks/info',
+            json={"stock_name": str(ticker)},
+            timeout=10
+        )
+        json_data = res.json()
+        result = json_data["result"]
+
+        # 거래정지는 데이터를 주지 않는다
+        if len(result) == 0:
+            return
+
+        product_code = result[0]["data"]["items"][0]["productCode"]
+
+    except Exception as e:
+        print(f"info 요청 실패-2: (코드: {str(ticker)}, 종목명: {stock_name}) {e}")
+        pass  # 오류
+
+    try:
+        res2 = requests.post(
+            'https://chickchick.shop/func/stocks/overview',
+            json={"product_code": str(product_code)},
+            timeout=10
+        )
+        data2 = res2.json()
+        # if data2 is not None:
+        market_value = data2["result"]["marketValueKrw"]
+        company_code = data2["result"]["company"]["code"]
+
+        if market_value is None:
+            print(f"overview marketValueKrw is None: {product_code}")
+            return
+
+        # 시가총액이 500억보다 작으면 패스
+        if (market_value < 50_000_000_000):
+            return
+
+    except Exception as e:
+        print(f"overview 요청 실패-2: {e} {product_code}")
+        pass  # 오류
+
+
     ########################################################################
 
     row = {
@@ -541,7 +588,7 @@ def process_one(idx, count, ticker, tickers_dict):
 if __name__ == "__main__":
     start = time.time()   # 시작 시간(초)
     nowTime = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
-    print(f'🕒 {nowTime}: running 4_find_low_point.py...')
+    print(f'🕒 {nowTime} - running 4_find_low_point.py...')
     print(' 10일 이상 5일선이 20일선 보다 아래에 있으면서 최근 -3%이 존재 + 오늘 4% 이상 상승')
 
     tickers_dict = get_kor_ticker_dict_list()
