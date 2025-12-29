@@ -133,7 +133,7 @@ for count, ticker in enumerate(tickers):
     ax_w_price = fig.add_subplot(gs[2, 0])
     ax_w_vol   = fig.add_subplot(gs[3, 0], sharex=ax_w_price)
 
-    plot_candles_daily(data, show_months=6, title=f'{today} {stock_name} [{ticker}] Daily Chart',
+    plot_candles_daily(data, show_months=4, title=f'{today} {stock_name} [{ticker}] Daily Chart',
                        ax_price=ax_d_price, ax_volume=ax_d_vol)
 
     plot_candles_weekly(data, show_months=12, title="Weekly Chart",

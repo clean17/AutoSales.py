@@ -160,7 +160,7 @@ for count, ticker in enumerate(tickers):
     change_pct_today = (today_close - yesterday_close) / yesterday_close * 100
 
     # 오늘 상승률이 X% 가 안되면 제외
-    if change_pct_today < 6:
+    if change_pct_today < 5:
         condition_passed = False
         condition_passed2 = False
         # continue  # 오늘 10% 미만 상승이면 제외
@@ -214,7 +214,7 @@ for count, ticker in enumerate(tickers):
 
 
     # ─────────────────────────────────────────────────────────────
-    # 3) 5일 평균 거래대금 * 10 < 오늘 거래대금 찾기
+    # 3) 5일 평균 거래대금 * X < 오늘 거래대금 찾기
     # ─────────────────────────────────────────────────────────────
     # 지난 5거래일 평균 거래대금(오늘 제외: -6:-1), 오늘값: -1
     avg5 = trading_value.iloc[-6:-1].mean()
@@ -262,26 +262,6 @@ for count, ticker in enumerate(tickers):
     plt.close()
 
 
-
-    # 카테고리 조회
-    try:
-        res = requests.post(
-            'https://chickchick.shop/func/stocks/company',
-            json={"company_code": str(company_code)},
-            timeout=15
-        )
-        json_data = res.json() or {}
-        result = json_data.get("result")
-        if not result:
-            # result가 없을 때 응답 구조 확인용(원인 파악)
-            print("/func/stocks/company result 없음:", json_data)
-            # raise KeyError("result")
-
-        category = json_data["result"]["majorList"][0]["title"]
-    except Exception as e:
-        print(f"/func/stocks/company 요청 실패: {e}")
-        pass  # 오류
-
     ratio = today_val / avg5 * 100
     ratio = round(ratio, 2)
 
@@ -322,7 +302,6 @@ for count, ticker in enumerate(tickers):
                     "trading_value_change_pct": str(ratio),
                     "image_url": str(final_file_name),
                     "market_value": "0" if market_value is None else str(market_value),
-                    "category": str(category),
                     "last_close": str(last_close),
                 },
                 timeout=10
@@ -352,7 +331,6 @@ for count, ticker in enumerate(tickers):
                     "trading_value_change_pct": str(ratio),
                     "image_url": str(final_file_name),
                     "market_value": str(market_value),
-                    "category": str(category),
                     "last_close": str(last_close),
                 },
                 timeout=10

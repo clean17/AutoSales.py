@@ -181,7 +181,7 @@ for count, ticker in enumerate(tickers):
     recent_average_trading_value = recent_trading_value.mean()
     if recent_average_trading_value * exchangeRate <= KR_AVERAGE_TRADING_VALUE:
         formatted_recent_value = f"{(recent_average_trading_value * exchangeRate)/ 100_000_000:.0f}억"
-        print(f"                                                        최근 2주 평균 거래액({formatted_recent_value})이 부족하여 작업을 건너뜁니다.")
+        # print(f"                                                        최근 2주 평균 거래액({formatted_recent_value})이 부족하여 작업을 건너뜁니다.")
         continue
 
     # ----- 투경 조건 -----

@@ -458,7 +458,7 @@ def process_one(idx, count, ticker, tickers_dict):
 
 
     today_str = str(today)
-    title = f"{today_str} {stock_name} [{ticker}] {today_pct}% Daily Chart"
+    title = f"{today_str} {stock_name} [{ticker}] Daily Chart"
     final_file_name = f"{today} {stock_name} [{ticker}].webp"
     os.makedirs(output_dir, exist_ok=True)
     final_file_path = os.path.join(output_dir, final_file_name)
@@ -506,18 +506,6 @@ def process_one(idx, count, ticker, tickers_dict):
         pass  # 오류
 
     try:
-        res = requests.post(
-            'https://chickchick.shop/func/stocks/company',
-            json={"company_code": str(company_code)},
-            timeout=15
-        )
-        json_data = res.json()
-        category = json_data["result"]["majorList"][0]["title"]
-    except Exception as e:
-        print(f"/func/stocks/company 요청 실패-4(3): {e}")
-        pass  # 오류
-
-    try:
         requests.post(
             'https://chickchick.shop/func/stocks/interest/insert',
             json={
@@ -533,7 +521,6 @@ def process_one(idx, count, ticker, tickers_dict):
                 "trading_value_change_pct": str(ratio),
                 "image_url": str(final_file_name),
                 "market_value": str(market_value),
-                "category": str(category),
                 "target": "low",
             },
             timeout=10
@@ -622,7 +609,7 @@ if __name__ == "__main__":
         ax_w_price = fig.add_subplot(gs[2, 0])
         ax_w_vol   = fig.add_subplot(gs[3, 0], sharex=ax_w_price)
 
-        plot_candles_daily(job["origin"], show_months=6, title=f'{job["title"]}',
+        plot_candles_daily(job["origin"], show_months=4, title=f'{job["title"]}',
                            ax_price=ax_d_price, ax_volume=ax_d_vol, date_tick=5)
 
         plot_candles_weekly(job["origin"], show_months=12, title="Weekly Chart",
