@@ -6,7 +6,7 @@ import time
 
 start = time.time()   # 시작 시간(초)
 nowTime = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
-print(f'{nowTime}: running 10_update_stock_data.py...')
+print(f'{nowTime} - 🕒 running 10_update_stock_data.py...')
 
 
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
@@ -45,4 +45,8 @@ for count, ticker in enumerate(tickers):
 
 end = time.time()     # 끝 시간(초)
 elapsed = end - start
-print(f"10_update_stock_data.py 총 소요 시간: {elapsed:.2f}초")
+
+hours, remainder = divmod(int(elapsed), 3600)
+minutes, seconds = divmod(remainder, 60)
+
+print(f"총 소요 시간: {hours}시간 {minutes}분 {seconds}초")

@@ -98,7 +98,7 @@ def process_one(idx, count, ticker, tickers_dict):
 if __name__ == "__main__":
     start = time.time()   # 시작 시간(초)
     nowTime = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
-    print(f'🕒 {nowTime} - running 5_generate_interest_stocks_graph.py...')
+    print(f'{nowTime} - 🕒 running 5_generate_interest_stocks_graph.py...')
 
     tickers_dict = get_kor_summary_ticker_dict_list()
     tickers = list(tickers_dict.keys())
@@ -159,4 +159,9 @@ if __name__ == "__main__":
 
     end = time.time()     # 끝 시간(초)
     elapsed = end - start
-    print(f"총 소요 시간: {elapsed:.2f}초")
+
+    hours, remainder = divmod(int(elapsed), 3600)
+    minutes, seconds = divmod(remainder, 60)
+
+    print(f"총 소요 시간: {hours}시간 {minutes}분 {seconds}초")
+

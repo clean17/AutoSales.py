@@ -15,7 +15,7 @@ import time
 
 start = time.time()   # 시작 시간(초)
 nowTime = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
-print(f'🕒 {nowTime} - running 2_finding_stocks_with_increased_volume.py...')
+print(f'{nowTime} - 🕒 running 2_finding_stocks_with_increased_volume.py...')
 
 # 자동 탐색 (utils.py를 찾을 때까지 위로 올라가 탐색)
 here = Path(__file__).resolve()
@@ -40,6 +40,7 @@ os.makedirs(pickle_dir, exist_ok=True)
 
 today = datetime.today().strftime('%Y%m%d')
 start_yesterday = (datetime.today() - timedelta(days=1)).strftime('%Y%m%d')
+TRADING_VALUE = 4_000_000_000 # 거래대금 40억
 
 # tickers = get_kor_ticker_list()
 tickers_dict = get_kor_ticker_dict_list()
@@ -84,8 +85,8 @@ for count, ticker in enumerate(tickers):
     last_close = closes[-1]
 
     trading_value = data['거래량'] * data['종가']
-    # 금일 거래대금 50억 이하 패스
-    if trading_value.iloc[-1] < 5_000_000_000:
+    # 금일 거래대금 40억 이하 패스
+    if trading_value.iloc[-1] < TRADING_VALUE:
         continue
 
     # 데이터가 부족하면 패스
@@ -148,7 +149,7 @@ for count, ticker in enumerate(tickers):
     range_pct = (max_close - min_close) / min_close * 100
 
     # 10일 동안 5% 이상 변화가 없다 -> 박스권으로 간주
-    if range_pct >= 5:
+    if range_pct >= 6:
         condition_passed = False
         # continue  # 4% 이상 움직이면 박스권 X
 
@@ -157,10 +158,11 @@ for count, ticker in enumerate(tickers):
     # print('today', today_close)
     yesterday_close = closes[-2]
     # print('yesterday', yesterday_close)
-    change_pct_today = (today_close - yesterday_close) / yesterday_close * 100
+    today_price_change_pct = (today_close - yesterday_close) / yesterday_close * 100
+    today_price_change_pct = round(today_price_change_pct, 2)
 
     # 오늘 상승률이 X% 가 안되면 제외
-    if change_pct_today < 5:
+    if today_price_change_pct < 5:
         condition_passed = False
         condition_passed2 = False
         # continue  # 오늘 10% 미만 상승이면 제외
@@ -280,13 +282,12 @@ for count, ticker in enumerate(tickers):
         pass  # 오류
 
     """
-    5% 이상 상승 + 10일동안 4-5% 박스권 
+    5% 이상 상승 + 10일동안 박스권 
     """
     # DB 등록
     if condition_passed:
         # 부합하면 결과에 저장 (상승률, 종목명, 코드)}
-        change_pct_today = round(change_pct_today, 2)
-        results.append((change_pct_today, stock_name, ticker, today_close, yesterday_close))
+        results.append((today_price_change_pct, stock_name, ticker, today_close, yesterday_close))
 
         try:
             requests.post(
@@ -298,7 +299,7 @@ for count, ticker in enumerate(tickers):
                     "pred_price_change_3d_pct": "",
                     "yesterday_close": str(yesterday_close),
                     "current_price": str(today_close),
-                    "today_price_change_pct": str(change_pct_today),
+                    "today_price_change_pct": str(today_price_change_pct),
                     "avg5d_trading_value": str(avg5),
                     "current_trading_value": str(today_val),
                     "trading_value_change_pct": str(ratio),
@@ -314,7 +315,7 @@ for count, ticker in enumerate(tickers):
             pass  # 오류
 
     """
-    5% 이상 상승 + 거래대금 증가 5-6배 이하(과열 제외)  
+    5% 이상 상승 + 거래대금 증가 x배 이하(과열 제외)  
     """
     if condition_passed2:
         results2.append((ratio, stock_name, ticker, float(today_val), float(avg5)))
@@ -329,12 +330,12 @@ for count, ticker in enumerate(tickers):
                     "pred_price_change_3d_pct": "",
                     "yesterday_close": str(yesterday_close),
                     "current_price": str(today_close),
-                    "today_price_change_pct": str(change_pct_today),
+                    "today_price_change_pct": str(today_price_change_pct),
                     "avg5d_trading_value": str(avg5),
                     "current_trading_value": str(today_val),
                     "trading_value_change_pct": str(ratio),
                     "graph_file": str(final_file_name),
-                    "market_value": str(market_value),
+                    "market_value": "0" if market_value is None else str(market_value),
                     "last_close": str(last_close),
                 },
                 timeout=10
@@ -404,4 +405,8 @@ if len(results2) > 0:
 
 end = time.time()     # 끝 시간(초)
 elapsed = end - start
-print(f"2_finding_stocks_with_increased_volume 총 소요 시간: {elapsed:.2f}초")
+
+hours, remainder = divmod(int(elapsed), 3600)
+minutes, seconds = divmod(remainder, 60)
+
+print(f"총 소요 시간: {hours}시간 {minutes}분 {seconds}초")

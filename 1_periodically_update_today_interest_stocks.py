@@ -13,7 +13,7 @@ import time
 
 start = time.time()   # 시작 시간(초)
 nowTime = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
-print(f'🕒 {nowTime} - running 1_periodically_update_today_interest_stocks.py...')
+print(f'{nowTime} - 🕒 running 1_periodically_update_today_interest_stocks.py...')
 
 # 자동 탐색 (utils.py를 찾을 때까지 위로 올라가 탐색)
 here = Path(__file__).resolve()
@@ -97,14 +97,8 @@ for count, ticker in enumerate(tickers):
     # print('today', today_close)
     yesterday_close = closes[-2]
     # print('yesterday', yesterday_close)
-    change_pct_today = (today_close - yesterday_close) / yesterday_close * 100
-
-    if change_pct_today < 5:
-        # 주기적으로 데이터를 갱신하기 위한 스크립트는 체크하지 않는다
-        pass
-        # continue  # 오늘 10% 미만 상승이면 제외
-
-
+    today_price_change_pct = (today_close - yesterday_close) / yesterday_close * 100
+    today_price_change_pct = round(today_price_change_pct, 2)
 
 
     # ─────────────────────────────────────────────────────────────
@@ -144,10 +138,8 @@ for count, ticker in enumerate(tickers):
         avg5 = trading_value.iloc[-21:-1].mean()
     today_val = trading_value.iloc[-1]
 
-    ratio = today_val / avg5 * 100
-    ratio = round(ratio, 2)
-    # 부합하면 결과에 저장 (상승률, 종목명, 코드)}
-    change_pct_today = round(change_pct_today, 2)
+    trading_value_change_pct = today_val / avg5 * 100
+    trading_value_change_pct = round(trading_value_change_pct, 2)
 
     try:
         res = requests.post(
@@ -190,10 +182,10 @@ for count, ticker in enumerate(tickers):
                     "pred_price_change_3d_pct": "",
                     "yesterday_close": str(yesterday_close),
                     "current_price": str(today_close),
-                    "today_price_change_pct": str(change_pct_today),
+                    "today_price_change_pct": str(today_price_change_pct),
                     "avg5d_trading_value": str(avg5),
                     "current_trading_value": str(today_val),
-                    "trading_value_change_pct": str(ratio),
+                    "trading_value_change_pct": str(trading_value_change_pct),
                     "graph_file": str(final_file_name),
                     "market_value": "",
                     "last_close": str(last_close),
@@ -207,4 +199,8 @@ for count, ticker in enumerate(tickers):
 
 end = time.time()     # 끝 시간(초)
 elapsed = end - start
-# print(f"총 소요 시간: {elapsed:.2f}초")
+
+# hours, remainder = divmod(int(elapsed), 3600)
+# minutes, seconds = divmod(remainder, 60)
+
+# print(f"총 소요 시간: {hours}시간 {minutes}분 {seconds}초")

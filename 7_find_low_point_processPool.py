@@ -596,7 +596,7 @@ def process_one(idx, count, ticker, tickers_dict):
 if __name__ == "__main__":
     start = time.time()   # 시작 시간(초)
     nowTime = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
-    print(f'🕒 {nowTime} - running 7_find_low_point.py...')
+    print(f'{nowTime} - 🕒 running 7_find_low_point.py...')
     print(' 10일 이상 5일선이 20일선 보다 아래에 있으면서 최근 -3%이 존재 + 오늘 4% 이상 상승')
 
     tickers_dict = get_kor_ticker_dict_list()
@@ -727,4 +727,9 @@ if __name__ == "__main__":
 
     end = time.time()     # 끝 시간(초)
     elapsed = end - start
-    print(f"총 소요 시간: {elapsed:.2f}초")
+
+    hours, remainder = divmod(int(elapsed), 3600)
+    minutes, seconds = divmod(remainder, 60)
+
+    print(f"총 소요 시간: {hours}시간 {minutes}분 {seconds}초")
+

@@ -520,8 +520,8 @@ def process_one(idx, count, ticker, tickers_dict):
 
     today_close = closes[-1]
     yesterday_close = closes[-2]
-    change_pct_today = (today_close - yesterday_close) / yesterday_close * 100
-    change_pct_today = round(change_pct_today, 2)
+    today_price_change_pct = (today_close - yesterday_close) / yesterday_close * 100
+    today_price_change_pct = round(today_price_change_pct, 2)
     avg5 = trading_value.iloc[-6:-1].mean()
     today_val = trading_value.iloc[-1]
     ratio = today_val / avg5 * 100
@@ -562,7 +562,7 @@ def process_one(idx, count, ticker, tickers_dict):
                 "pred_price_change_3d_pct": "",
                 "yesterday_close": str(yesterday_close),
                 "current_price": str(today_close),
-                "today_price_change_pct": str(change_pct_today),
+                "today_price_change_pct": str(today_price_change_pct),
                 "avg5d_trading_value": str(avg5),
                 "current_trading_value": str(today_val),
                 "trading_value_change_pct": str(ratio),
@@ -588,7 +588,7 @@ def process_one(idx, count, ticker, tickers_dict):
 if __name__ == "__main__":
     start = time.time()   # 시작 시간(초)
     nowTime = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
-    print(f'🕒 {nowTime} - running 4_find_low_point.py...')
+    print(f'{nowTime} - 🕒 running 4_find_low_point.py...')
     print(' 10일 이상 5일선이 20일선 보다 아래에 있으면서 최근 -3%이 존재 + 오늘 4% 이상 상승')
 
     tickers_dict = get_kor_ticker_dict_list()
@@ -672,4 +672,9 @@ if __name__ == "__main__":
 
     end = time.time()     # 끝 시간(초)
     elapsed = end - start
-    print(f"총 소요 시간: {elapsed:.2f}초")
+
+    hours, remainder = divmod(int(elapsed), 3600)
+    minutes, seconds = divmod(remainder, 60)
+
+    print(f"총 소요 시간: {hours}시간 {minutes}분 {seconds}초")
+
