@@ -163,5 +163,6 @@ if __name__ == "__main__":
     hours, remainder = divmod(int(elapsed), 3600)
     minutes, seconds = divmod(remainder, 60)
 
-    print(f"총 소요 시간: {hours}시간 {minutes}분 {seconds}초")
+    if elapsed > 20:
+        print(f"총 소요 시간: {hours}시간 {minutes}분 {seconds}초")
 

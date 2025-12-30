@@ -66,6 +66,10 @@ for count, ticker in enumerate(tickers):
     if os.path.exists(filepath):
         df = pd.read_pickle(filepath)
         data = fetch_stock_data(ticker, start_yesterday, today)
+        date_str = data.index[0].strftime("%Y%m%d")
+
+        if date_str != today:
+            continue
 
     # 중복 제거 & 새로운 날짜만 추가 >> 덮어쓰는 방식으로 수정
     if not df.empty:
@@ -409,4 +413,5 @@ elapsed = end - start
 hours, remainder = divmod(int(elapsed), 3600)
 minutes, seconds = divmod(remainder, 60)
 
-print(f"총 소요 시간: {hours}시간 {minutes}분 {seconds}초")
+if elapsed > 20:
+    print(f"총 소요 시간: {hours}시간 {minutes}분 {seconds}초")

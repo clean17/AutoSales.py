@@ -49,6 +49,12 @@ def process_one(idx, count, ticker, tickers_dict):
 
     df = pd.read_pickle(filepath)
 
+    date_str = df.index[0].strftime("%Y%m%d")
+    today = datetime.today().strftime('%Y%m%d')
+
+    if date_str != today:
+        return
+
     # 데이터가 부족하면 패스
     if df.empty or len(df) < 70:
         return
@@ -668,7 +674,9 @@ if __name__ == "__main__":
         # 파일 저장 (옵션)
         plt.savefig(job["save_path"], format="webp", dpi=100, bbox_inches="tight", pad_inches=0.1)
         plt.close()
-    print('\n그래프 생성 완료')
+
+    if len(plot_jobs) != 0:
+        print('\n그래프 생성 완료')
 
     end = time.time()     # 끝 시간(초)
     elapsed = end - start
@@ -676,5 +684,6 @@ if __name__ == "__main__":
     hours, remainder = divmod(int(elapsed), 3600)
     minutes, seconds = divmod(remainder, 60)
 
-    print(f"총 소요 시간: {hours}시간 {minutes}분 {seconds}초")
+    if elapsed > 20:
+        print(f"총 소요 시간: {hours}시간 {minutes}분 {seconds}초")
 
