@@ -845,6 +845,30 @@ def add_technical_features(data, window=20, num_std=2):
 
     return data
 
+
+# 전일 대비 오늘 등락률['today_chg_rate'] 추가
+def add_today_change_rate(df: pd.DataFrame,
+                          close_col: str = "Close",
+                          out_col: str = "today_chg_rate") -> pd.DataFrame:
+    """
+    전일 Close 대비 당일 Close 등락률(%) 컬럼 추가.
+    today_chg_rate = (Close / prev_Close - 1) * 100
+
+    - df: 인덱스는 날짜(정렬 가능한 형태)라고 가정
+    - close_col: 종가 컬럼명
+    - out_col: 결과 컬럼명
+    """
+    out = df.copy()
+
+    # 날짜 오름차순 정렬(전일/당일 계산 정확히)
+    out = out.sort_index()
+
+    prev_close = out[close_col].shift(1)
+    out[out_col] = (out[close_col] / prev_close - 1) * 100
+
+    return out
+
+
 # columns 각각에 대해 객체의 파이썬 타입과 shape를 출력
 def check_column_types(data, columns):
     for col in columns:
@@ -1637,7 +1661,8 @@ def drop_sparse_columns(df: pd.DataFrame, threshold: float = 0.10, *, check_inf:
 def signal_any_drop(data: pd.DataFrame,
                     days: int = 12,
                     up_thr: float = 3.0,
-                    down_thr: float = -3.0) -> bool:
+                    down_thr: float = -3.0,
+                    today_chg_rate: str = "등락률") -> bool:
     """
     요구 조건:
       - 오늘 등락률(마지막 행) >= up_thr  (단위: %)
@@ -1647,7 +1672,7 @@ def signal_any_drop(data: pd.DataFrame,
     """
 
     # 안전 변환
-    chg  = pd.to_numeric(data['등락률'], errors='coerce')
+    chg  = pd.to_numeric(data[today_chg_rate], errors='coerce')
     ma5  = pd.to_numeric(data['MA5'],   errors='coerce')
     ma20 = pd.to_numeric(data['MA20'],  errors='coerce')
 
@@ -1719,3 +1744,32 @@ def low_weekly_check(data: pd.DataFrame):
         "is_drop_more_than_minus1pct": bool(is_drop_over_1),            # 주봉 증감률이 기준보다 하락했는지
         "pct_vs_firstweek": float(pct_from_first*100),                  # -0.22 -> -22% 하락
     }
+
+
+# csv 데이터를 날짜순으로 내림차순
+def sort_csv_by_today_desc(
+        in_path: str,
+        out_path: Optional[str] = None,
+        date_col: str = "today",
+        secondary_col: str = "ticker",
+        encoding: str = "utf-8-sig",
+) -> str:
+    """
+    CSV를 date_col(기본: today) 기준 내림차순(최신 먼저)으로 정렬해서 저장.
+    - ticker처럼 앞자리 0 유지하려고 secondary_col은 문자열로 읽음.
+    - out_path가 None이면 원본 파일명 뒤에 '_sorted'를 붙여 저장.
+    반환: 저장된 out_path 문자열
+    """
+    if out_path is None:
+        p = Path(in_path)
+        out_path = str(p.with_name(p.stem + "_sorted" + p.suffix))
+
+    df = pd.read_csv(in_path, dtype={secondary_col: str})
+    df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
+
+    df = df.sort_values([date_col, secondary_col], ascending=[False, True])
+
+    df[date_col] = df[date_col].dt.strftime("%Y-%m-%d")
+
+    df.to_csv(out_path, index=False, encoding=encoding)
+    return out_path

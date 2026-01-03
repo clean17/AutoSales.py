@@ -121,8 +121,8 @@ for count, ticker in enumerate(tickers):
         df = data.copy()
 
     # 너무 먼 과거 데이터 버리기
-    if len(df) > 500:
-        df = df.iloc[-500:]
+    if len(df) > 700:
+        df = df.iloc[-700:]
 
     # 파일 저장
     df.to_pickle(filepath)

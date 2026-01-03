@@ -14,6 +14,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import requests
 import time
+import pytz
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
 
 
@@ -27,32 +28,31 @@ else:
     raise FileNotFoundError("utils.py를 상위 디렉터리에서 찾지 못했습니다.")
 
 from utils import _col, get_kor_ticker_dict_list, add_technical_features, plot_candles_weekly, plot_candles_daily, \
-    drop_sparse_columns, drop_trading_halt_rows, signal_any_drop, low_weekly_check, extract_numbers_from_filenames
-
+    drop_sparse_columns, drop_trading_halt_rows, signal_any_drop, low_weekly_check, extract_numbers_from_filenames, \
+    get_usd_krw_rate, get_nasdaq_symbols, add_today_change_rate
 
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
 root_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(=루트)
-pickle_dir = os.path.join(root_dir, 'pickle')
-output_dir = 'D:\\5below20'
-# output_dir = 'D:\\5below20_test'
+pickle_dir = os.path.join(root_dir, 'pickle_us')
+output_dir = 'D:\\5below20_us'
 
 
 
 
-def process_one(idx, count, ticker, tickers_dict):
-    stock_name = tickers_dict.get(ticker, 'Unknown Stock')
-
+def process_one(idx, count, ticker, exchangeRate):
     filepath = os.path.join(pickle_dir, f'{ticker}.pkl')
     if not os.path.exists(filepath):
         print(f"[idx={idx}] {ticker} 파일 없음")
         return
 
     df = pd.read_pickle(filepath)
+    if df.empty:
+        return
 
     date_str = df.index[-1].strftime("%Y%m%d")
-    today = datetime.today().strftime('%Y%m%d')
+    today_us = datetime.now(pytz.timezone('America/New_York')).strftime('%Y%m%d')
 
-    if date_str != today:
+    if date_str != today_us:
         return
 
     # 데이터가 부족하면 패스
@@ -79,8 +79,8 @@ def process_one(idx, count, ticker, tickers_dict):
 
     ########################################################################
 
-    closes = data['종가'].values
-    trading_value = data['거래량'] * data['종가']
+    closes = data['Close'].values
+    trading_value = data['Volume'] * data['Close']
 
 
     # 직전 날까지의 마지막 3일 거래대금 평균
@@ -92,12 +92,14 @@ def process_one(idx, count, ticker, tickers_dict):
         chg_tr_val = (today_tr_val-mean_prev3)/mean_prev3*100
 
     # ★★★★★ 3거래일 평균 거래대금 5억보다 작으면 패스 ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-    if round(mean_prev3, 1) / 100_000_000 < 5:
+    if round(mean_prev3, 1) * exchangeRate / 100_000_000 < 5:
         return
 
 
     # 2차 생성 feature
     data = add_technical_features(data)
+    # 등락률 추가
+    data = add_today_change_rate(data)
 
     # 결측 제거
     cleaned, cols_to_drop = drop_sparse_columns(data, threshold=0.10, check_inf=True, inplace=True)
@@ -123,7 +125,7 @@ def process_one(idx, count, ticker, tickers_dict):
 
     # 최근 10일 5일선이 20일선보다 낮은데 3% 하락이 있으면서 오늘 3% 상승 ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
     # 변경점...  10일 +- 3일로 설정해봐야 할지도
-    signal = signal_any_drop(data, 10, 4.0 ,-3.0) # 45/71 ---
+    signal = signal_any_drop(data, 10, 4.0 ,-3.0, 'today_chg_rate') # 45/71 ---
     if not signal:
         return
 
@@ -131,8 +133,8 @@ def process_one(idx, count, ticker, tickers_dict):
     ########################################################################
 
     # ★★★★★ 최근 20일 변동성 너무 낮으면 제외 (지루한 종목)
-    last20_ret = data['등락률'].tail(20)           # 등락률이 % 단위라고 가정
-    last30_ret = data['등락률'].tail(30)
+    last20_ret = data['today_chg_rate'].tail(20)           # 등락률이 % 단위라고 가정
+    last30_ret = data['today_chg_rate'].tail(30)
     vol20 = last20_ret.std()                      # 표준편차
     vol30 = last30_ret.std()                      # 표준편차
 
@@ -149,7 +151,7 @@ def process_one(idx, count, ticker, tickers_dict):
 
     m_data = data[-60:] # 뒤에서 x개 (3개월 정도)
 
-    m_closes = m_data['종가']
+    m_closes = m_data['Close']
     m_max = m_closes.max()
     m_min = m_closes.min()
     m_current = m_closes[-1]
@@ -185,7 +187,7 @@ def process_one(idx, count, ticker, tickers_dict):
     pct_vs_lastweek = round(result['pct_vs_lastweek'], 2)
     pct_vs_last2week = round(result['pct_vs_last2week'], 2)
     pct_vs_last3week = round(result['pct_vs_last3week'], 2)
-    today_pct = round(data.iloc[-1]['등락률'], 1)
+    today_pct = round(data.iloc[-1]['today_chg_rate'], 1)
 
     # ----------------------------
     # 조건 플래그 초기화
@@ -224,166 +226,153 @@ def process_one(idx, count, ticker, tickers_dict):
 
 
 
-    # 30일 변동성(vol30)이 매우 낮고,
-    # 최근 2주 수익률이 12.36% 이상인 구간
-    if vol30 <= 2.64 and pct_vs_last2week >= 12.36:
-        cond01 = True
+    # (1) hi80_rule_us_A_ratio_0_844_n32
+    if pct_vs_last2week < -39.0846 and today_tr_val < 9.20874e+08:
+        cond101 = True
 
+    # (2) hi80_rule_us_B_ratio_0_806_n36
+    if pct_vs_last2week < -39.0846 and today_tr_val < 1.02635e+09:
+        cond102 = True
 
-    # 최근 2주 수익률은 9.27% 이상으로 좋지만,
-    # 3주 전 기준 수익률은 -1.69% 이하로 여전히 안 좋은 구간
-    # -> 바닥권에서 돌아서는 턴어라운드 패턴
-    if pct_vs_last2week >= 9.27 and pct_vs_last3week <= -1.69:
-        cond02 = True
+    # (3) hi80_rule_us_C_ratio_0_870_n23
+    if pct_vs_last2week < -39.0846 and today_tr_val < 6.41818e+08:
+        cond103 = True
 
+    # (4) hi80_us_941_n17_last2w_lt_-39_0846_and_tr_lt_447_1m
+    if pct_vs_last2week < -39.0846 and today_tr_val < 447130958.5:
+        cond104 = True
 
-    # 3주 전 기준으로는 -4.06% 이하로 많이 눌려 있었고,
-    # 최근 2주는 9.268% 이상 강한 기술적 반등
-    if pct_vs_last2week >= 9.268 and pct_vs_last3week <= -4.06:
-        cond03 = True
+    # (5) hi80_us_870_n23_last2w_lt_-39_0846_and_tr_lt_641_8m
+    if pct_vs_last2week < -39.0846 and today_tr_val < 641818383.82:
+        cond105 = True
 
+    # (6) hi80_us_850_n20_last2w_lt_-39_0846_and_tr_lt_523_0m
+    if pct_vs_last2week < -39.0846 and today_tr_val < 522960472.58:
+        cond106 = True
 
-    # 20일 변동성이 낮고(vol20 <= 2.70),
-    # 3주 전 대비 수익률이 8.89% 이상인
-    # '저변동 + 최근 3주 우상향' 구간
-    if vol20 <= 2.70 and pct_vs_last3week >= 8.89:
-        cond04 = True
+    # (7) hi80_us_828_n29_last2w_lt_-39_0846_and_tr_lt_869_0m
+    if pct_vs_last2week < -39.0846 and today_tr_val < 869029586.805:
+        cond107 = True
 
+    # (8) hi80_us_826_n23_last2w_lt_-33_2714_and_tr_lt_447_1m
+    if pct_vs_last2week < -33.2714 and today_tr_val < 447130958.5:
+        cond108 = True
 
-    # vol20 <= 2.70 이면서, 3주 전 대비 수익률(pct_vs_last3week)이 8.888% 이상
-    # -> '더 타이트한 저변동 + 최근 3주 우상향' 패턴
-    if vol20 <= 2.70 and pct_vs_last3week >= 8.888:
-        cond05 = True
+    # (9) hi80_us_806_n31_last2w_lt_-29_2584_and_tr_lt_447_1m
+    if pct_vs_last2week < -29.2584 and today_tr_val < 447130958.5:
+        cond109 = True
 
+    # (10) hi80_us_810_n21_todaychg_lt_-96_2615_and_ma5_gt_2_18
+    if today_chg_rate < -96.2615 and ma5_chg_rate > 2.18:
+        cond110 = True
 
-    # vol30 <= 2.36 이면서, 3주 전 대비 수익률이 5.634% 이상
-    #  -> '초저변동 + 완만하지만 꾸준한 3주 우상향'
-    if vol30 <= 2.36 and pct_vs_last3week >= 5.634:
-        cond06 = True
+    # (11) hi80_us_833_n18_tr_lt_148_2m_and_ma20_lt_-1_38
+    if today_tr_val < 148169623.835 and ma20_chg_rate < -1.38:
+        cond111 = True
 
+    # (12) hi80_us_824_n17_tr_lt_148_2m_and_todaychg_lt_-46_107
+    if today_tr_val < 148169623.835 and today_chg_rate < -46.107:
+        cond112 = True
 
-    # vol30 <= 3.886 이면서, 첫 주 수익률이 68.298% 이상인 구간
-    #  -> '30일 변동성은 적당히 낮고, 첫 주에 거의 급발진한 초강세 구간'
-    if vol30 <= 3.886 and pct_vs_firstweek >= 68.298:
-        cond07 = True
+    # (13) hi80_us_800_n20_tr_lt_148_2m_and_todaychg_lt_-42_391
+    if today_tr_val < 148169623.835 and today_chg_rate < -42.391:
+        cond113 = True
 
+    # (14) hi80_us_rule_1_r1.000_n31
+    if (chg_tr_val <= 31.35 and
+            ma5_chg_rate > -11.895 and
+            mean_ret30 <= -0.945 and
+            pct_vs_firstweek > -64.24 and
+            pct_vs_last2week <= -38.495 and
+            vol20 <= 19.4 and
+            vol30 > 3.795):
+        cond114 = True
 
-    # pct_vs_firstweek < 27.98 이면서 mean_ret20 < -1.07 이면서 mean_ret30 > -0.26
-    if pct_vs_firstweek < 27.98 and mean_ret20 < -1.07 and mean_ret30 > -0.26:
-        cond08 = True
+    # (15) hi80_us_rule_2_r1.000_n26
+    if (ma5_chg_rate > -11.895 and
+            mean_ret30 <= -0.945 and
+            pct_vs_firstweek > -64.24 and
+            pct_vs_last2week <= -38.495 and
+            vol20 <= 19.4 and
+            vol30 > 8.415):
+        cond115 = True
 
+    # (16) hi80_us_rule_3_r1.000_n26
+    if (ma5_chg_rate > -11.895 and
+            mean_ret30 <= -0.945 and
+            pct_vs_firstweek > -64.24 and
+            pct_vs_last2week <= -38.495 and
+            vol20 > 9.315 and
+            vol20 <= 19.4 and
+            vol30 > 3.795):
+        cond116 = True
 
-    # pct_vs_firstweek < 49.8 이면서 mean_ret20 < -1.07 이면서 mean_ret30 > -0.26
-    if pct_vs_firstweek < 49.8 and mean_ret20 < -1.07 and mean_ret30 > -0.26:
-        cond09 = True
+    # (17) hi80_us_rule_4_r1.000_n21
+    if (ma5_chg_rate > -11.895 and
+            mean_prev3 > 2665270784 and
+            mean_ret30 <= -0.945 and
+            pct_vs_firstweek > -64.24 and
+            pct_vs_last2week <= -38.495 and
+            vol20 <= 19.4 and
+            vol30 > 3.795):
+        cond117 = True
 
+    # (18) hi80_us_rule_5_r1.000_n21
+    if (ma5_chg_rate > -11.895 and
+            mean_ret30 <= -0.945 and
+            pct_vs_firstweek > -64.24 and
+            pct_vs_last2week <= -38.495 and
+            vol20 <= 19.4 and
+            vol30 > 8.93):
+        cond118 = True
 
-    # mean_ret30 > -0.26 이면서 pct_vs_lastweek < 4.51 이면서 mean_ret20 < -1.07
-    if mean_ret30 > -0.26 and pct_vs_lastweek < 4.51 and mean_ret20 < -1.07:
-        cond10 = True
+    # (19) hi80_us_rule_6_r0.927_n41
+    if (ma5_chg_rate > -11.895 and
+            mean_ret30 <= -0.945 and
+            pct_vs_firstweek > -64.24 and
+            pct_vs_last2week <= -38.495 and
+            vol20 <= 19.4 and
+            vol30 > 3.795):
+        cond119 = True
 
+    # (20) hi80_us_rule_7_r0.864_n22
+    if (mean_ret30 > -0.945 and
+            pct_vs_firstweek <= -36.175 and
+            pct_vs_last2week <= -10.995 and
+            pct_vs_last3week <= -16.79 and
+            pct_vs_lastweek > 4.07 and
+            three_m_chg_rate > 84.15 and
+            today_pct <= 41.45 and
+            vol30 > 3.795):
+        cond120 = True
 
-    # mean_ret30 > -0.15 이면서 pct_vs_lastweek < 5.48 이면서 mean_ret20 < -1.07
-    if mean_ret30 > -0.15 and pct_vs_lastweek < 5.48 and mean_ret20 < -1.07:
-        cond11 = True
+    # (21) hi80_us_rule_10_r0.857_n21
+    if (chg_tr_val > 48.05 and
+            mean_ret20 <= -0.655 and
+            mean_ret30 > 0.135 and
+            three_m_chg_rate <= 84.15 and
+            today_pct <= 41.45 and
+            vol30 > 3.795):
+        cond121 = True
 
+    # (22) hi80_us_rule_11_r0.850_n20
+    if (ma5_chg_rate > -11.895 and
+            mean_ret30 <= -0.945 and
+            pct_vs_firstweek <= -75.465 and
+            pct_vs_last2week <= -38.495 and
+            vol20 <= 19.4 and
+            vol30 > 3.795):
+        cond122 = True
 
-    # 최근 30일 동안 상승한 날 비율은 낮지만,
-    # 30일 평균 수익률은 양수인 종목
-    # → 많이 오르진 않았지만, 오를 때는 강하게 오르는 눌림 반등형
-    if pos30_ratio < 36.67 and mean_ret30 > 0.26:
-        cond12 = True
-
-
-    # 최근 30일 상승일 비율이 높고,
-    # 최근 3주 수익률이 크지만,
-    # 30일 평균 수익률은 아직 과하지 않은 종목
-    # → 최근에 추세가 막 살아난 초중반 상승 구간
-    if pos30_ratio > 46.67 and pct_vs_last3week > 13.535 and mean_ret30 < 0.52:
-        cond13 = True
-
-
-    # 30일 기준 변동성이 있고,
-    # 최근 20일 중 상승일 비율이 높으며,
-    # 거래대금 변화가 큰 종목
-    # → 단순 기술적 반등이 아닌 실제 수급이 붙은 종목
-    if vol30 > 3.32 and pos20_ratio > 45.0 and chg_tr_val > 719.8:
-        cond14 = True
-
-
-    # 최근 20일 평균 수익률은 나빴지만,
-    # 30일 평균은 크게 무너지지 않았고,
-    # 최근 5일 급등 상태는 아닌 종목
-    # → 바닥권에서 서서히 회복 중인 눌림 구간
-    if mean_ret20 < -1.07 and mean_ret30 > -0.15 and ma5_chg_rate < 2.82:
-        cond15 = True
-
-
-    # 오늘 급락은 아니고,
-    # 최근 5일 상승 탄력은 강하지만,
-    # 첫 주에 과도하게 오르지 않은 종목
-    # → 단기 모멘텀이 막 붙기 시작한 초기 상승 단계
-    if today_chg_rate > -18.71 and ma5_chg_rate > 4.015 and pct_vs_firstweek < 8.91:
-        cond16 = True
-
-
-    # 최근 20일 동안 상승한 날은 많지 않지만,
-    # 최근 2주 수익률은 매우 강하고,
-    # 20일 이동1평균이 상승 중인 종목
-    # → 조용하다가 한 번에 터지는 변동성 돌파형
-    if pos20_ratio < 40.0 and pct_vs_last2week > 18.89 and ma20_chg_rate > 0.31:
-        cond17 = True
-
-
-    # 고거래대금 + 30일 평균수익률이 이미 높고,
-    # 당일 상승률은 과열(급등) 수준까진 아니면서,
-    # 거래대금 변화율/30일 변동성이 함께 커진 종목
-    # → "강한 추세가 이어지는 중, 과열 없이 수급이 붙는 지속형"
-    if (today_tr_val > 4151089792 and mean_ret30 > 0.265 and today_pct <= 7.05 and
-            chg_tr_val > 30.9 and vol30 > 6.675):
-        cont18 = True
-
-
-    # 고거래대금이면서,
-    # 30일 평균수익률은 상대적으로 낮지만(=아직 덜 올라온 편),
-    # 3개월 누적 상승률이 44~52% 구간에 있고,
-    # 당일 상승률이 강하게 터지는 종목
-    # → "중기 추세는 이미 형성, 단기 모멘텀으로 재가속하는 돌파형"
-    if (today_tr_val > 4151089792 and mean_ret30 <= 0.265 and three_m_chg_rate <= 51.9 and
-            today_pct > 7.15 and three_m_chg_rate > 43.92):
-        cond19 = True
-
-
-    # 20일 변동성은 낮은 편(=조용함)인데,
-    # 최근 3일 평균 거래대금이 크고,
-    # 최근 3주 대비 수익률이 강한 종목
-    # → "조용한 구간에서 수급이 들어오며 추세가 붙는 잠복-확장형"
-    if vol20 <= 3.30 and mean_prev3 > 2.21162e9 and pct_vs_last3week > 8.78:
-        cond20 = True
-
-
-    # 30일 평균수익률은 플러스(=기본 추세는 있음)이고,
-    # 최근 3일 평균 거래대금이 크지만,
-    # 최근 3주 대비 수익률은 오히려 음수(=단기 조정 구간)
-    # → "추세는 살아있고 조정 중 수급이 유지되는 눌림목 재시동형"
-    if mean_ret30 > 0.10 and mean_prev3 > 3.22394e9 and pct_vs_last3week <= -4.458:
-        cond21 = True
-
-
-    # 5일 변화율이 강하게 플러스(=단기 모멘텀)이고,
-    # 30일 변동성은 낮거나 제한적이며,
-    # 최근 3일 평균 거래대금이 큰 종목
-    # → "단기 모멘텀 + 과열 아닌 변동성 + 수급 동반의 안정 돌파형"
-    if ma5_chg_rate > 2.10 and vol30 <= 3.06 and mean_prev3 > 2.21162e9:
-        cond22 = True
-
-
-    # 거래대금 변화율은 과도하지 않은 범위인데,
-    # 당일 변화율은 크게 음수(=급락/쇼크성 하락)이고,
-    # 당일 등락률은 오히려 높은 편(=위아래로 크게 흔들리는 날)
-    # → "급격한 흔들림 이후 반등/변동성 이벤트가 나오는 급변동 이벤트형"
-    if chg_tr_val <= 211.44 and today_chg_rate <= -34.016 and today_pct > 9.70:
-        cond23 = True
+    # (23) hi80_us_rule_12_r0.850_n20
+    if (ma5_chg_rate > -11.895 and
+            mean_prev3 <= 2665270784 and
+            mean_ret30 <= -0.945 and
+            pct_vs_firstweek > -64.24 and
+            pct_vs_last2week <= -38.495 and
+            vol20 <= 19.4 and
+            vol30 > 3.795):
+        cond123 = True
 
     # --------------------------------
     # 모든 조건을 한 번에 모아서 체크
@@ -430,7 +419,7 @@ def process_one(idx, count, ticker, tickers_dict):
 
     # 원하는 출력 형태 1) "cond17, cond30" 처럼 이름만
     # print(", ".join(name for name, _ in true_conds))
-    print(f'{stock_name}: {", ".join(name for name, _ in true_conds)}')
+    print(f'{ticker}: {", ".join(name for name, _ in true_conds)}')
 
 
 
@@ -453,7 +442,7 @@ def process_one(idx, count, ticker, tickers_dict):
         product_code = result[0]["data"]["items"][0]["productCode"]
 
     except Exception as e:
-        print(f"info 요청 실패-2: (코드: {str(ticker)}, 종목명: {stock_name}) {e}")
+        print(f"info 요청 실패-2: (코드: {str(ticker)}) {e}")
         pass  # 오류
 
     try:
@@ -484,7 +473,6 @@ def process_one(idx, count, ticker, tickers_dict):
 
     row = {
         "ticker": ticker,
-        "stock_name": stock_name,
         "today" : str(data.index[-1].date()),
         # "3_months_ago": str(m_data.index[0].date()),
         # "predict_str": predict_str,                      # 상승/미달
@@ -511,8 +499,8 @@ def process_one(idx, count, ticker, tickers_dict):
 
 
     today_str = str(today)
-    title = f"{today_str} {stock_name} [{ticker}] Daily Chart"
-    final_file_name = f"{today} {stock_name} [{ticker}].webp"
+    title = f"{today_str} [{ticker}] Daily Chart"
+    final_file_name = f"{today} [{ticker}].webp"
     os.makedirs(output_dir, exist_ok=True)
     final_file_path = os.path.join(output_dir, final_file_name)
 
@@ -542,7 +530,7 @@ def process_one(idx, count, ticker, tickers_dict):
         json_data = res.json()
         product_code = json_data["result"][0]["data"]["items"][0]["productCode"]
     except Exception as e:
-        print(f"info 요청 실패-4: {str(ticker)} {stock_name} {e}")
+        print(f"info 요청 실패-4: {str(ticker)} {e}")
         pass  # 오류
 
     try:
@@ -564,7 +552,6 @@ def process_one(idx, count, ticker, tickers_dict):
             json={
                 "nation": "kor",
                 "stock_code": str(ticker),
-                "stock_name": str(stock_name),
                 "pred_price_change_3d_pct": "",
                 "yesterday_close": str(yesterday_close),
                 "current_price": str(today_close),
@@ -574,7 +561,7 @@ def process_one(idx, count, ticker, tickers_dict):
                 "trading_value_change_pct": str(ratio),
                 "graph_file": str(final_file_name),
                 "market_value": str(market_value),
-                "target": "low",
+                "target": "low-us",
             },
             timeout=10
         )
@@ -594,11 +581,17 @@ def process_one(idx, count, ticker, tickers_dict):
 if __name__ == "__main__":
     start = time.time()   # 시작 시간(초)
     nowTime = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
-    print(f'{nowTime} - 🕒 running 4_find_low_point.py...')
+    print(f'{nowTime} - 🕒 running 4-1_find_low_point_us.py...')
     print(' 10일 이상 5일선이 20일선 보다 아래에 있으면서 최근 -3%이 존재 + 오늘 4% 이상 상승')
 
-    tickers_dict = get_kor_ticker_dict_list()
-    tickers = list(tickers_dict.keys())
+    exchangeRate = get_usd_krw_rate()
+    if exchangeRate is None:
+        print('#######################   exchangeRate is None   #######################')
+    else:
+        print(f'#######################   exchangeRate is {exchangeRate}   #######################')
+
+    tickers = get_nasdaq_symbols()
+    # tickers = ['MNKD', 'ESPR']
 
     rows=[]
     plot_jobs = []
@@ -613,7 +606,7 @@ if __name__ == "__main__":
         while idx <= origin_idx:
             idx += 1
             for count, ticker in enumerate(tickers):
-                futures.append(executor.submit(process_one, idx, count, ticker, tickers_dict))
+                futures.append(executor.submit(process_one, idx, count, ticker, exchangeRate))
 
         # 완료된 것부터 하나씩 받아서 집계
         for f in as_completed(futures):
@@ -635,7 +628,7 @@ if __name__ == "__main__":
 
     # 🔥 여기서 한 번에, 깔끔하게 출력
     for count, row in enumerate(rows):
-        print(f"\nProcessing {count+1}/{len(rows)} : {row['stock_name']} [{row['ticker']}]")
+        print(f"\nProcessing {count+1}/{len(rows)} : [{row['ticker']}]")
         # print(f"  3개월 전 날짜           : {row['3_months_ago']}")
         # print(f"  직전 3일 평균 거래대금  : {row['mean_prev3'] / 100_000_000:.0f}억")
         # print(f"  오늘 거래대금           : {row['today_tr_val'] / 100_000_000:.0f}억")
