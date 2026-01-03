@@ -129,29 +129,36 @@ if __name__ == "__main__":
     print('─────────────────────────────────────────────────────────────')
     print(f'{nowTime} - 🕒 update_kor_stocks_periodically')
     print('─────────────────────────────────────────────────────────────')
+    isEmpty = False
+
     # 1) 페이로드 구성
     print('update KOSPI')
     payload = build_stock_payload(market="KOSPI")
+    if len(payload) == 0:
+        isEmpty = True
     # 2) 전송 (엔드포인트 주소 맞춰서 변경)
     API_URL = "https://chickchick.shop/func/stocks/update"
     post_stocks_update(API_URL, payload, batch_size=500)
 
     print('update KOSDAQ')
     payload = build_stock_payload(market="KOSDAQ")
+    if len(payload) == 0:
+        isEmpty = True
     # 2) 전송 (엔드포인트 주소 맞춰서 변경)
     API_URL = "https://chickchick.shop/func/stocks/update"
     post_stocks_update(API_URL, payload, batch_size=500)
 
     # 항상 post_stocks_update() 다음 /delisted-stock을 요청해야한다
-    print('delete delisted stock')
-    payload = {}
-    API_URL = "https://chickchick.shop/func/stocks/delisted-stock"
-    with requests.Session() as s:
-        headers = {"Content-Type": "application/json"}
-        try:
-            resp = s.post(API_URL, json={}, headers=headers, timeout=15.0)
-            resp.raise_for_status()
-        except requests.RequestException as e:
-            raise
+    if isEmpty == False:
+        print('delete delisted stock')
+        payload = {}
+        API_URL = "https://chickchick.shop/func/stocks/delisted-stock"
+        with requests.Session() as s:
+            headers = {"Content-Type": "application/json"}
+            try:
+                resp = s.post(API_URL, json={}, headers=headers, timeout=15.0)
+                resp.raise_for_status()
+            except requests.RequestException as e:
+                raise
 
 
