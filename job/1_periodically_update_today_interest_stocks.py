@@ -3,6 +3,9 @@
 '''
 
 import os, sys
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
@@ -31,7 +34,7 @@ from utils import fetch_stock_data, get_kor_interest_ticker_dick_list, add_techn
 
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
 root_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(=루트)
-pickle_dir = os.path.join(root_dir, 'pickle')
+pickle_dir = os.path.join(root_dir, '../pickle')
 
 # pickle 폴더가 없으면 자동 생성 (이미 있으면 무시)
 os.makedirs(pickle_dir, exist_ok=True)
@@ -143,7 +146,7 @@ for count, ticker in enumerate(tickers):
 
     try:
         res = requests.post(
-            'https://chickchick.shop/func/stocks/info',
+            'https://chickchick.shop/stocks/info',
             json={"stock_name": str(ticker)},
             timeout=10
         )
@@ -159,7 +162,7 @@ for count, ticker in enumerate(tickers):
         # 현재 종가 가져오기
         try:
             res = requests.post(
-                'https://chickchick.shop/func/stocks/amount',
+                'https://chickchick.shop/stocks/amount',
                 json={
                     "product_code": str(product_code)
                 },
@@ -174,7 +177,7 @@ for count, ticker in enumerate(tickers):
     if last_close is not None:
         try:
             requests.post(
-                'https://chickchick.shop/func/stocks/interest/insert',
+                'https://chickchick.shop/stocks/interest/insert',
                 json={
                     "nation": "kor",
                     "stock_code": str(ticker),

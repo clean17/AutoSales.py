@@ -6,6 +6,9 @@ signal_any_drop 를 통해서 5일선이 20일선보다 아래에 있으면서 �
 import matplotlib
 matplotlib.use("Agg")  # ✅ 비인터랙티브 백엔드 (창 안 띄움)
 import os, sys
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
@@ -33,7 +36,7 @@ from utils import _col, get_kor_ticker_dict_list, add_technical_features, plot_c
 
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
 root_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(=루트)
-pickle_dir = os.path.join(root_dir, 'pickle_us')
+pickle_dir = os.path.join(root_dir, '../pickle_us')
 output_dir = 'D:\\5below20_us'
 
 
@@ -428,7 +431,7 @@ def process_one(idx, count, ticker, exchangeRate):
     # ─────────────────────────────────────────────────────────────
     try:
         res = requests.post(
-            'https://chickchick.shop/func/stocks/info',
+            'https://chickchick.shop/stocks/info',
             json={"stock_name": str(ticker)},
             timeout=10
         )
@@ -447,7 +450,7 @@ def process_one(idx, count, ticker, exchangeRate):
 
     try:
         res2 = requests.post(
-            'https://chickchick.shop/func/stocks/overview',
+            'https://chickchick.shop/stocks/overview',
             json={"product_code": str(product_code)},
             timeout=10
         )
@@ -523,7 +526,7 @@ def process_one(idx, count, ticker, exchangeRate):
 
     try:
         res = requests.post(
-            'https://chickchick.shop/func/stocks/info',
+            'https://chickchick.shop/stocks/info',
             json={"stock_name": str(ticker)},
             timeout=10
         )
@@ -535,7 +538,7 @@ def process_one(idx, count, ticker, exchangeRate):
 
     try:
         res2 = requests.post(
-            'https://chickchick.shop/func/stocks/overview',
+            'https://chickchick.shop/stocks/overview',
             json={"product_code": str(product_code)},
             timeout=10
         )
@@ -548,7 +551,7 @@ def process_one(idx, count, ticker, exchangeRate):
 
     try:
         requests.post(
-            'https://chickchick.shop/func/stocks/interest/insert',
+            'https://chickchick.shop/stocks/interest/insert',
             json={
                 "nation": "kor",
                 "stock_code": str(ticker),

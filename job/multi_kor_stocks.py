@@ -1,21 +1,27 @@
-import matplotlib # tkinter 충돌 방지, Agg 백엔드를 사용하여 GUI를 사용하지 않도록 한다
-matplotlib.use('Agg')
+# Could not load dynamic library 'cudart64_110.dll'; dlerror: cudart64_110.dll not found / Skipping registering GPU devices... 안나오게
 import os
-import pytz
+# 1) GPU 완전 비활성화
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+# 2) C++ 백엔드 로그 레벨 낮추기 (0=INFO, 1=WARNING, 2=ERROR, 3=FATAL)
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+
+
+import matplotlib
+matplotlib.use('Agg')
+import os, sys
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
 import pandas as pd
-import numpy as np
 from datetime import datetime, timedelta
 from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
-from send2trash import send2trash
-from utils import create_lstm_model, create_multistep_dataset, fetch_stock_data_us, get_nasdaq_symbols, \
-    extract_stock_code_from_filenames, get_usd_krw_rate, add_technical_features, check_column_types, \
-    get_name_from_usa_ticker, plot_candles_daily, plot_candles_weekly, drop_trading_halt_rows, \
-    inverse_close_matrix_fast, get_next_business_days, make_naive_preds, smape, pass_filter_v2, regression_metrics , \
-    pass_filter, drop_sparse_columns
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-from sklearn.model_selection import train_test_split
+from utils import create_lstm_model, create_multistep_dataset, fetch_stock_data, add_technical_features, \
+    get_kor_ticker_dict_list, plot_candles_daily, plot_candles_weekly, drop_trading_halt_rows, regression_metrics, \
+    pass_filter, inverse_close_matrix_fast, get_next_business_days, make_naive_preds, smape, pass_filter_v2, \
+    drop_sparse_columns
 import requests
+import time
 
 # 시드 고정
 import numpy as np, tensorflow as tf, random
@@ -24,46 +30,32 @@ tf.random.set_seed(42)
 random.seed(42)
 
 
-output_dir = 'D:\\sp500'
+output_dir = 'D:\\kospi_stocks'
 os.makedirs(output_dir, exist_ok=True)
 
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
 root_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(=루트)
-pickle_dir = os.path.join(root_dir, 'pickle_us')
+pickle_dir = os.path.join(root_dir, '../pickle')
 os.makedirs(pickle_dir, exist_ok=True) # 없으면 생성
-
-
 
 N_FUTURE = 3
 LOOK_BACK = 15
 EXPECTED_GROWTH_RATE = 4
-DATA_COLLECTION_PERIOD = 700
-KR_AVERAGE_TRADING_VALUE = 7_000_000_000
+DATA_COLLECTION_PERIOD = 700 # 샘플 수 = 68(100일 기준) - 20 - 4 + 1 = 45
+AVERAGE_TRADING_VALUE = 2_000_000_000 # 평균거래대금 20억
 SPLIT      = 0.75
 
-exchangeRate = get_usd_krw_rate()
-if exchangeRate is None:
-    print('#######################   exchangeRate is None   #######################')
-else:
-    print(f'#######################   exchangeRate is {exchangeRate}   #######################')
-
-# 미국 동부 시간대 설정
-now_us = datetime.now(pytz.timezone('America/New_York'))
-# 현재 시간 출력
-print("미국 동부 시간 기준 현재 시각:", now_us.strftime('%Y-%m-%d %H:%M:%S'))
-# 데이터 수집 시작일 계산
-start_date_us = (now_us - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y-%m-%d')
-start_five_date_us = (now_us - timedelta(days=5)).strftime('%Y-%m-%d')
-print("미국 동부 시간 기준 데이터 수집 시작일:", start_date_us)
-
-end_date = datetime.today().strftime('%Y-%m-%d')
 today = datetime.today().strftime('%Y%m%d')
+today_us = datetime.today().strftime('%Y-%m-%d')
+start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y%m%d')
+start_five_date = (datetime.today() - timedelta(days=5)).strftime('%Y%m%d')
 
 
-# tickers = extract_stock_code_from_filenames(output_dir)
-tickers = get_nasdaq_symbols()
-# tickers = ['MNKD']
-
+# chickchick.com에서 종목 리스트 조회
+tickers_dict = get_kor_ticker_dict_list()
+tickers = list(tickers_dict.keys())
+# tickers = ['204620'] # 글로벌 텍스프리
+# tickers = tickers[1526:]
 
 def _col(df, ko: str, en: str):
     """한국/영문 칼럼 자동매핑: ko가 있으면 ko, 없으면 en을 반환"""
@@ -77,42 +69,51 @@ total_cnt = 0
 total_smape = 0
 is_first_flag = True
 
-for count, ticker in enumerate(tickers):
-    # stock_name = get_name_from_usa_ticker(ticker)
-    # print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
-    if count % 100 == 0:
-        print(f"Processing {count+1}/{len(tickers)} : {ticker}")
+"""
+SMAPE (%) → SMAPE는 0% ~ 200% 범위를 가지지만, 보통은 0~100% 사이에서 해석")
+  0 ~ 10% → 매우 우수, 10 ~ 20% → 양호 (실사용 가능한 수준), 20 ~ 50% → 보통, 50% 이상 → 부정확
+R² → 모델 설명력, 0~1 범위에서 클수록 좋음
+  0.6: 변동성의 약 60%를 설명
+"""
 
-    # 학습하기 직전에 요청을 보낸다
+# 데이터 가져오는것만 1시간 걸리네
+for count, ticker in enumerate(tickers):
+    time.sleep(0.2)  # 200ms 대기
+    stock_name = tickers_dict.get(ticker, 'Unknown Stock')
+    # stock_name = '파인엠텍' # 테스트용
+    if count % 100 == 0:
+        print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
+
+
+    # 학습하기전에 요청을 보낸다
     percent = f'{round((count+1)/len(tickers)*100, 1):.1f}'
     try:
         requests.post(
-            'https://chickchick.shop/func/stocks/progress-update/nasdaq',
+            'https://chickchick.shop/stocks/progress-update/kospi',
             json={
                 "percent": percent,
                 "count": count+1,
                 "total_count": len(tickers),
                 "ticker": ticker,
-                "stock_name": "",
+                "stock_name":stock_name,
                 "done": False,
             },
             timeout=10
         )
     except Exception as e:
         # logging.warning(f"progress-update 요청 실패: {e}")
-        print(f"progress-update 요청 실패:-nn {e}")
+        print(f"progress-update 요청 실패-k: {e}")
         pass  # 오류
-
 
 
     # 데이터가 없으면 1년 데이터 요청, 있으면 5일 데이터 요청
     filepath = os.path.join(pickle_dir, f'{ticker}.pkl')
     if os.path.exists(filepath):
         df = pd.read_pickle(filepath)
-        data = fetch_stock_data_us(ticker, start_five_date_us, end_date)
+        data = fetch_stock_data(ticker, start_five_date, today)
     else:
         df = pd.DataFrame()
-        data = fetch_stock_data_us(ticker, start_date_us, end_date)
+        data = fetch_stock_data(ticker, start_date, today)
 
     # 중복 제거 & 새로운 날짜만 추가 >> 덮어쓰는 방식으로 수정
     if not df.empty:
@@ -122,15 +123,15 @@ for count, ticker in enumerate(tickers):
     else:
         df = data.copy()
 
-    # 너무 먼 과거 데이터 버리기, 처음 272개
+    # 너무 먼 과거 데이터 버리기
     if len(df) > 700:
         df = df.iloc[-700:]
 
     # 파일 저장
     df.to_pickle(filepath)
-    # data = pd.read_pickle(filepath)
+    # continue # 데이터 저장용
+    # df = pd.read_pickle(filepath)    # 디버깅용
     data = df
-
 
     # 한국/영문 칼럼 자동 식별
     col_o = _col(df, '시가',   'Open')
@@ -139,104 +140,92 @@ for count, ticker in enumerate(tickers):
     col_c = _col(df, '종가',   'Close')
     col_v = _col(df, '거래량', 'Volume')
 
-    if data is None or col_c not in data.columns or data.empty:
-        # print(f"{ticker}: 데이터가 비었거나 'Close' 컬럼이 없습니다. pass.")
-        continue
-
-#     check_column_types(fetch_stock_data_us(ticker, start_date_us, end_date), ['Close', 'Open', 'High', 'Low', 'Volume', 'PBR']) # 타입과 shape 확인 > Series 가 나와야 한다
-#     continue
-
     ########################################################################
 
-    actual_prices = data[col_c].values # 최근 종가 배열
+    actual_prices = data[col_c].values # 종가 배열
     last_close = actual_prices[-1]
 
-    # 0) 우선 거래정지/이상치 행 제거
+    # 거래정지/이상치 행 제거
     data, removed_idx = drop_trading_halt_rows(data)
     if len(removed_idx) > 0:
         # print(f"                                                        거래정지/이상치로 제거된 날짜 수: {len(removed_idx)}")
         pass
 
+    # 데이터가 부족하면 패스
     if data.empty or len(data) < 70:
         # print(f"                                                        데이터 부족 → pass")
         continue
 
-    # 종가가 0.0이거나 500원 미만이면 건너뜀
+    # 500원 미만이면 패스
     last_row = data.iloc[-1]
-    if last_row[col_c] == 0.0 or last_row[col_c] * exchangeRate < 500:
-        # print("                                                        종가가 0이거나 500원 미만이므로 작업을 건너뜁니다.")
+    if last_row[col_c] < 500:
+        # print("                                                        종가가 0이거나 500원 미만 → pass")
         continue
 
-    # 한달 데이터
-    month_data = data.tail(20)
-    month_trading_value = month_data[col_v] * month_data[col_c]
-    # 하루라도 거래대금이 5억 미만이 있으면 제외
-    if (month_trading_value * exchangeRate < 500_000_000).any():
-        # print(f"                                                        최근 4주 중 거래대금 5억 미만 발생 → pass")
+    # # 최근 한달 거래대금 중 3억 미만이 있으면 패스
+    # month_data = data.tail(20)
+    # month_trading_value = month_data[col_v] * month_data[col_c]
+    # # 하루라도 거래대금이 3억 미만이 있으면 제외
+    # if (month_trading_value < 300_000_000).any():
+    #     # print(f"                                                        최근 4주 중 거래대금 3억 미만 발생 → pass")
+    #     continue
+    #
+    # # 최근 2주 거래대금이 기준치 이하면 패스
+    # recent_data = data.tail(10)
+    # recent_trading_value = recent_data[col_v] * recent_data[col_c]
+    # recent_average_trading_value = recent_trading_value.mean()
+    # if recent_average_trading_value <= AVERAGE_TRADING_VALUE:
+    #     formatted_recent_value = f"{recent_average_trading_value / 100_000_000:.0f}억"
+    #     # print(f"                                                        최근 2주 평균 거래대금({formatted_recent_value})이 부족 → pass")
+    #     continue
+
+    # 최근 3거래일 거래대금이 기준치 이하면 패스
+    recent_5data = data.tail(3)
+    recent_5trading_value = recent_5data[col_v] * recent_5data[col_c]
+    recent_average_trading_value = recent_5trading_value.mean()
+    if recent_average_trading_value <= AVERAGE_TRADING_VALUE:
+        formatted_recent_value = f"{recent_average_trading_value / 100_000_000:.0f}억"
+        # print(f"                                                        최근 3거래일 평균 거래대금({formatted_recent_value})이 부족 → pass")
         continue
 
-    # 최근 2주 평균 거래대금 60억 미만 패스
-    recent_data = data.tail(10)
-    recent_trading_value = recent_data[col_v] * recent_data[col_c]     # 최근 2주 거래대금 리스트
-    recent_average_trading_value = recent_trading_value.mean()
-    if recent_average_trading_value * exchangeRate <= KR_AVERAGE_TRADING_VALUE:
-        formatted_recent_value = f"{(recent_average_trading_value * exchangeRate)/ 100_000_000:.0f}억"
-        # print(f"                                                        최근 2주 평균 거래액({formatted_recent_value})이 부족하여 작업을 건너뜁니다.")
-        continue
+    # 최고가 대비 현재가가 50% 이상 하락한 경우 건너뜀
+    # max_close = np.max(actual_prices)
+    # drop_pct = ((max_close - last_close) / max_close) * 100
+    # if drop_pct >= 50:
+    #     # print(f"                                                        최고가 대비 현재가가 50% 이상 하락한 경우 → pass : {drop_pct:.2f}%")
+    #     # continue
+    #     pass
 
     # ----- 투경 조건 -----
     # 1. 당일의 종가가 3일 전날의 종가보다 100% 이상 상승
-    if len(actual_prices) >= 4:
-        close_3ago = actual_prices[-4]
-        ratio = (last_close - close_3ago) / close_3ago * 100
-        if last_close >= close_3ago * 2:  # 100% 이상 상승
-            # print(f"                                                        3일 전 대비 100% 이상 상승: {close_3ago} -> {last_close}  {ratio:.2f}% → pass")
-            continue
+    close_3ago = actual_prices[-4]
+    ratio = (last_close - close_3ago) / close_3ago * 100
+    if last_close >= close_3ago * 2:  # 100% 이상 상승
+        # print(f"                                                        3일 전 대비 100% 이상 상승: {close_3ago} -> {last_close}  {ratio:.2f}% → pass")
+        continue
 
-    # rolling window로 5일 전 대비 현재가 3배 이상 오른 지점 찾기
-    # rolling_min = data[col_c].rolling(window=5).min()    # 5일 중 최소가
-    # ratio = data[col_c] / rolling_min
-    #
-    # if np.any(ratio >= 2.5):
-    #     print(f"                                                        어느 5일 구간이든 2.5배 급등: 제외")
+    # 2. 당일의 종가가 5일 전날의 종가보다 60% 이상 상승
+    close_5ago = actual_prices[-6]
+    ratio = (last_close - close_5ago) / close_5ago * 100
+    if last_close >= close_5ago * 1.6:  # 60% 이상 상승
+        # print(f"                                                        5일 전 대비 60% 이상 상승: {close_5ago} -> {last_close}  {ratio:.2f}% → pass")
+        continue
+
+    # 3. 당일의 종가가 15일 전날의 종가보다 100% 이상 상승
+    # close_15ago = actual_prices[-16]
+    # ratio = (last_close - close_15ago) / close_15ago * 100
+    # if last_close >= close_15ago * 2:  # 100% 이상 상승
+    #     print(f"                                                        15일 전 대비 100% 이상 상승: {close_15ago} -> {last_close}  {ratio:.2f}% → pass")
     #     continue
+    # --------------------
 
-
-    # # 최고가 대비 현재가 하락률 계산
-    # max_close = np.max(actual_prices)
-    # drop_pct = ((max_close - last_close) / max_close) * 100
-    #
-    # # 40% 이상 하락한 경우 건너뜀
-    # if drop_pct >= 50:
-    #     continue
-
-    # # 모든 4일 연속 구간에서 첫날 대비 마지막날 xx% 이상 급등
-    # window_start = actual_prices[:-3]   # 0 ~ N-4
-    # window_end = actual_prices[3:]      # 3 ~ N-1
-    # ratio = window_end / window_start   # numpy, pandas Series/DataFrame만 벡터화 연산 지원, ratio는 결과 리스트
-    #
-    # if np.any(ratio >= 1.6):
-    #     print(f"                                                        어떤 4일 연속 구간에서 첫날 대비 60% 이상 상승: 제외")
-    #     continue
-    #
-    # last_close = data[col_c].iloc[-1]
-    # close_4days_ago = data[col_c].iloc[-5]
-    #
-    # rate = (last_close / close_4days_ago - 1) * 100
-    #
+    # 현재 종가가 4일 전에 비해서 크게 하락하면 패스
+    # close_4days_ago = actual_prices[-5]
+    # rate = (last_close / close_4days_ago - 1) * 100 # 오늘 종가와 4일 전 종가의 상승/하락률(%)
     # if rate <= -18:
-    #     print(f"                                                        4일 전 대비 {rate:.2f}% 하락 → 학습 제외")
+    #     print(f"                                                        4일 전 대비 {rate:.2f}% 하락 → pass")
     #     continue  # 또는 return
 
-
-    # # 최근 3일, 2달 평균 거래량 계산, 최근 3일 거래량이 최근 2달 거래량의 25% 안되면 패스
-    # recent_3_avg = data[col_v][-3:].mean()
-    # recent_2months_avg = data[col_v][-40:].mean()
-    # if recent_3_avg < recent_2months_avg * 0.15:
-    #     temp = (recent_3_avg/recent_2months_avg * 100)
-    #     # print(f"                                                        최근 3일의 평균거래량이 최근 2달 평균거래량의 25% 미만 → pass : {temp:.2f} %")
-    #     # continue
-    #     pass
 
     # 2차 생성 feature
     data = add_technical_features(data)
@@ -247,6 +236,7 @@ for count, ticker in enumerate(tickers):
         pass
 #         print("    Drop candidates:", cols_to_drop)
     data = cleaned
+
 
     if 'MA5' not in data.columns or 'MA20' not in data.columns:
         # print(f"                                                        이동평균선이 존재하지 않음 → pass")
@@ -266,7 +256,6 @@ for count, ticker in enumerate(tickers):
         continue
         # pass
 
-
     ########################################################################
 
     # 학습에 쓸 피처
@@ -277,10 +266,13 @@ for count, ticker in enumerate(tickers):
     cols = [c for c in feature_cols if c in data.columns]  # 순서 보존
     df = data.loc[:, cols].replace([np.inf, -np.inf], np.nan)
     X_df = df.dropna()  # X_df는 (정렬/결측처리된) 피처 데이터프레임, '종가' 컬럼 존재
-    close_price = X_df[col_c].to_numpy()
+
+    if col_c not in X_df.columns:
+        raise KeyError(f"'{col_c}' 컬럼이 없습니다.")
 
     # 종가 컬럼 이름/인덱스
     idx_close = cols.index(col_c)
+    close_price = X_df[col_c].to_numpy()
 
     # 2) 시계열 분리 후, train만 fit → val/전체 transform
     split = int(len(X_df) * SPLIT)
@@ -302,6 +294,7 @@ for count, ticker in enumerate(tickers):
 
     if is_first_flag:
         is_first_flag = False
+        print('len(df)', len(df))
         print("X_train", X_train.shape, "Y_train", Y_train.shape)
         print("X_val  ", X_val.shape,   " Y_val  ", Y_val.shape)
 
@@ -310,7 +303,6 @@ for count, ticker in enumerate(tickers):
 
     # 5) 최소 샘플 수 확인
     if X_train.shape[0] < 50:
-        print("                                                        샘플 부족 : ", X_train.shape[0])
         continue
 
     # ---- y 스케일링: Train으로만 fit ---- (타깃이 수익률이면 생략 가능)
@@ -351,12 +343,17 @@ for count, ticker in enumerate(tickers):
         callbacks=[early_stop, rlrop]
     )
 
+
+    # 모델 평가
+    # val_loss = model.evaluate(X_val, Y_val, verbose=1)
+    # print("Validation Loss :", val_loss)
+
     # 예측 (y-스케일)
     va_pred_s = model.predict(X_val_tune, verbose=0)
     # y-스케일 -> X-스케일
     va_pred_x = scaler_y.inverse_transform(va_pred_s)
     # X-스케일 -> 원 단위(종가만 역변환)
-    pred_price = inverse_close_matrix_fast(va_pred_x, scaler_X, idx_close)
+    pred_price = inverse_close_matrix_fast(va_pred_x, scaler_X, idx_close)  # (N_val, H)
 
     #######################################################################
 
@@ -380,7 +377,7 @@ for count, ticker in enumerate(tickers):
         scaler=scaler_X,
         n_features=X_df.shape[1],
         idx_close=idx_close,
-        y_insample_for_mase_restored=y_insample_price,
+        y_insample_for_mase_restored=y_insample_price,  # ★ 여기!
         m=1  # 예: 주기 5 영업일
     )
 
@@ -393,10 +390,14 @@ for count, ticker in enumerate(tickers):
         # print(f"    {k}: {v:.4f}")
 
     if "restored" in metrics:
+    #     print("\n=== RESTORED (원 단위) ===")
+    #     for k,v in metrics["restored"].items():
+    #         print(f"    {k}: {v:.4f}")
         m_rest = metrics["restored"]
         mase_price = m_rest.get("MASE", np.nan)
         smape_price = m_rest.get("SMAPE (%)", np.nan)
         total_smape += smape_price
+        # print("MASE(price)=", mase_price, "SMAPE(price)=", smape_price)
 
     # 가드: NaN/Inf는 탈락
     if not np.isfinite(mase_price):
@@ -428,11 +429,30 @@ for count, ticker in enumerate(tickers):
     # 가격으로 복원
     Y_val_tune_x  = scaler_y.inverse_transform(y_val_tune_scaled)     # (N,H)  y-스케일 -> X-스케일
     Y_val_tune_price = inverse_close_matrix_fast(Y_val_tune_x, scaler_X, idx_close)
+
     y_naive_price = inverse_close_matrix_fast(y_naive_x, scaler_X, idx_close)
+    # print('y_naive_price', y_naive_price)
 
     # 2) naive sMAPE
     smape_naive = smape(Y_val_tune_price, y_naive_price)
     smape_price = smape(Y_val_tune_price, pred_price)
+
+
+    # 같은 공간을 사용하는지 체크 - 모델이 진짜로 나이브와 다른 예측을 하고 있나?
+    # True면, 모델 예측이 나이브(내일=오늘) 와 사실상 같다는 뜻, 같은 공간이면 안됨
+    # print("allclose(pred, naive):", np.allclose(pred_price, y_naive_price))
+    # max |diff|가 0에 가깝다면 거의 동일 → 모델이 정보 추가를 못하고 있을 가능성
+    # print("max |diff| :", np.max(np.abs(pred_price - y_naive_price)))
+    # 첫 몇 개 샘플 비교
+    # for i in range(3):
+    #     print("win", i, "pred", pred_price[i], "naive", y_naive_price[i], "true", Y_val_tune_price[i])
+
+
+    # 첫 스텝(h=1)이 입력 마지막 값과 같은지 건전성 체크, 둘의 값이 비슷해야함
+    # last_obs = X_val_tune[:, -1, idx_close]
+    # print("corr(pred[:,0], last_obs):", np.corrcoef(pred_price[:,0], last_obs)[0,1])
+    # print("corr(true[:,0], last_obs):", np.corrcoef(Y_val_tune_price[:,0], last_obs)[0,1])
+
 
     # === 2) 윈도우별 sMAPE 배열 ===
     def smape_rows(y_true, y_pred, eps=1e-12):
@@ -449,6 +469,22 @@ for count, ticker in enumerate(tickers):
 
     # 개선비율: 윈도우별로 모델 sMAPE가 나이브보다 작은 비율
     improved_window_ratio = float(np.mean(smape_model_rows < smape_naive_rows))
+
+    # print(f"[ROW] median sMAPE model: {median_smape_model:.3f}  naive: {median_smape_naive:.3f}") # 낮아야 더 좋음
+
+    # === 3) 윈도우별 MASE 배열(옵션) ===
+    # MASE 분모: 인샘플(Train+Val_tune)에서 m-시즌 절대차 평균 (상수)
+    # m_season = 1
+    # den = np.mean(np.abs(y_insample_price[m_season:] - y_insample_price[:-m_season]))  # 인샘플 분모
+    # mae_rows_model  = np.mean(np.abs(pred_price      - Y_val_tune_price), axis=1)      # ✅ 모델
+    # mae_rows_naive  = np.mean(np.abs(y_naive_price   - Y_val_tune_price), axis=1)      # ✅ 나이브
+    # mase_rows_model = mae_rows_model / (den + 1e-12)
+    # mase_rows_naive = mae_rows_naive / (den + 1e-12)
+
+    # median_mase_model = np.nanmedian(mase_rows_model)
+    # median_mase_naive = np.nanmedian(mase_rows_naive)
+    # print(f"[ROW] median MASE(model, m={m_season}): {median_mase_model:.3f}")
+    # print(f"[ROW] median MASE(naive,  m={m_season}): {median_mase_naive:.3f}")
 
     # === 4) 컷오프 규칙에 반영 (예시) ===
     eps = 1e-9
@@ -519,6 +555,55 @@ for count, ticker in enumerate(tickers):
     # print("decision:", decision, "alpha*:", alpha_star, "sMAPE_blend:", smape_blend)
 
 
+
+    # # 3) hit-rate (옵션) — 모델 예측이 있을 때만
+    # try:
+    #     # 4) (옵션) hit-rate도 가격공간 기준이면 베이스도 가격으로
+    #     y_hist_end_price = inverse_close_from_Xscale_fast(y_hist_end_x, scaler_X, idx_close)
+    #     hitrate_val = hit_rate(
+    #         Y_val_tune_price, pred_price,
+    #         y_base=y_hist_end_price,
+    #         # use_horizon=1,   # h=1 기준; 전체 평균 쓰려면 "avg"
+    #         use_horizon="avg",   # h=1 기준; 전체 평균 쓰려면 "avg"
+    #         space="price"
+    #     )
+    # except NameError:
+    #     hitrate_val = None
+
+    # ctx = {
+    #     "smape_naive": smape_naive,
+    #     "n_val": int(Y_val.shape[0] if Y_val.ndim == 2 else len(Y_val)),
+    #     "hitrate": None,
+    # }
+
+    # # 가격으로 복원 (N,)
+    # y_base_price = y_hist_end_x * scaler_X.scale_[idx_close] + scaler_X.mean_[idx_close]
+    #
+    # # 1) 유효 시행 수(필요시 tiny-move 필터 포함) 계산
+    # N_eff, _ = effective_trials_for_hitrate(
+    #     Y_val_tune_price, pred_price, y_base=y_base_price,
+    #     space="price", use_horizon=1, thr=0.003
+    # )
+    #
+    # # 2) 유의수준(기본 5%)에 맞는 동적 임계치 계산
+    # cut = min_sig_hitrate(N_eff, alpha=0.05)  # 예: N_eff=200이면 cut≈0.569
+    #
+    # # 3) 필터에 적용
+    # # 고정 파라미터와 동적 컷을 함께 쓰고 싶다면 max()로 보수적으로:
+    # dynamic_hitrate_min = cut
+
+    # ok = pass_filter_v2(
+    #     metrics, use_restored=True,
+    #     r2_min=0.10, smape_max=10.0,
+    #     require_naive_improve=True,
+    #     naive_improve_min=0.05,
+    #     samples_min=30,
+    #     ctx=ctx
+    # )
+    # print("                                                        PASS 1st filter?" , ok)
+    # if not ok:
+    #     continue
+
     #######################################################################
 
     # 7) 마지막 윈도우 1개로 미래 H-step 예측
@@ -564,21 +649,17 @@ for count, ticker in enumerate(tickers):
     if avg_future_return < EXPECTED_GROWTH_RATE and avg_future_return < 20:
         # if avg_future_return > 0:
         #     print(f"  predicted rate of increase : {avg_future_return:.2f}%")
-        # pass
         continue
+        # pass
 
     # 결과 저장
-    # results.append((avg_future_return, ticker, stock_name))
-    results.append((avg_future_return, ticker))
+    results.append((avg_future_return, stock_name, ticker))
 
     # 기존 파일 삭제
     for file_name in os.listdir(output_dir):
-        file_path = os.path.join(output_dir, file_name)
-        if os.path.isdir(file_path):
-            continue
-        if file_name.startswith(f"{today}") and ticker in file_name:
-            print(f"Deleting existing file: {file_name}")
-            send2trash(os.path.join(output_dir, file_name))
+        if file_name.startswith(f"{today}") and stock_name in file_name and ticker in file_name:
+            # print(f"                                                        Deleting existing file: {file_name}")
+            os.remove(os.path.join(output_dir, file_name))
 
 
 
@@ -594,8 +675,7 @@ for count, ticker in enumerate(tickers):
     ax_w_price = fig.add_subplot(gs[2, 0])
     ax_w_vol   = fig.add_subplot(gs[3, 0], sharex=ax_w_price)
 
-    # daily_chart_title = f'{end_date}  {stock_name} [{ticker}] (예상 상승률: {avg_future_return:.2f}%)'
-    daily_chart_title = f'{end_date}  {ticker} (예상 상승률: {avg_future_return:.2f}%)'
+    daily_chart_title = f'{today_us}   {stock_name} [ {ticker} ] (예상 상승률: {avg_future_return:.2f}%)'
     plot_candles_daily(data, show_months=6  , title=daily_chart_title,
                        ax_price=ax_d_price, ax_volume=ax_d_vol,
                        future_dates=future_dates, predicted_prices=predicted_prices)
@@ -606,70 +686,31 @@ for count, ticker in enumerate(tickers):
     plt.tight_layout()
 
     # 파일 저장 (옵션)
-    # final_file_name = f'{today} [ {avg_future_return:.2f}% ] {stock_name} [{ticker}].webp'
-    final_file_name = f'{today} [ {avg_future_return:.2f}% ]  {ticker}.webp'
+    final_file_name = f'{today} [ {avg_future_return:.2f}% ] {stock_name} [{ticker}].webp'
     final_file_path = os.path.join(output_dir, final_file_name)
     plt.savefig(final_file_path, format="webp", dpi=100, bbox_inches="tight", pad_inches=0.1)
     plt.close()
 
-####################################
+#######################################################################
 
 # 정렬 및 출력
 results.sort(reverse=True, key=lambda x: x[0])
 
-# for avg_future_return, ticker, stock_name in results:
-for avg_future_return, ticker in results:
-    # print(f"==== [ {avg_future_return:.2f}% ] {stock_name} [{ticker}] ====")
-    print(f"==== [ {avg_future_return:.2f}% ]  {ticker} ====")
+for avg_future_return, stock_name, ticker in results:
+    print(f"==== [ {avg_future_return:.2f}% ] {stock_name} [{ticker}] ====")
 
 try:
     requests.post(
-        'https://chickchick.shop/func/stocks/progress-update/nasdaq',
+        'https://chickchick.shop/stocks/progress-update/kospi',
         json={"percent": 100, "done": True},
         timeout=10
     )
 except Exception as e:
     # logging.warning(f"progress-update 요청 실패: {e}")
-    print(f"progress-update 요청 실패-nn: {e}")
+    print(f"progress-update 요청 실패-k2: {e}")
     pass  # 오류
 
 if total_cnt > 0:
     print(f'R-squared_avg : {total_r2/total_cnt:.2f}')
     print(f'SMAPE : {total_smape/total_cnt:.2f}')
     print(f'total_cnt : {total_cnt}')
-
-
-'''
-Series
-1차원 데이터
-
-import pandas as pd
-s = pd.Series([10, 20, 30], index=['a', 'b', 'c'])
-print(s)
-# a    10
-# b    20
-# c    30
-# dtype: int64
-
-특징
-  1차원 벡터(배열) + 인덱스
-  넘파이 배열에 “이름(인덱스)”이 붙은 것
-
-
-
-DataFrame
-2차원 데이터 (엑셀 표와 유사)
-
-import pandas as pd
-df = pd.DataFrame({
-    'col1': [1, 2, 3],
-    'col2': [10, 20, 30]
-}, index=['a', 'b', 'c'])
-print(df)
-#    col1  col2
-# a     1    10
-# b     2    20
-# c     3    30
-
-각 열이 Series임 (즉, df['col1']은 Series)
-'''

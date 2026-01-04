@@ -1,3 +1,6 @@
+"""
+random-player 에서 스케줄러
+"""
 import requests
 import json
 

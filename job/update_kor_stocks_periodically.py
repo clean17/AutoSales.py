@@ -1,3 +1,7 @@
+import os, sys
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Iterable
 from pykrx import stock
@@ -5,8 +9,6 @@ import requests
 import itertools
 import time
 from dotenv import load_dotenv
-import os
-
 
 
 load_dotenv()  # .env 파일을 현재 환경변수로 로드
@@ -137,7 +139,7 @@ if __name__ == "__main__":
     if len(payload) == 0:
         isEmpty = True
     # 2) 전송 (엔드포인트 주소 맞춰서 변경)
-    API_URL = "https://chickchick.shop/func/stocks/update"
+    API_URL = "https://chickchick.shop/stocks/update"
     post_stocks_update(API_URL, payload, batch_size=500)
 
     print('update KOSDAQ')
@@ -145,14 +147,14 @@ if __name__ == "__main__":
     if len(payload) == 0:
         isEmpty = True
     # 2) 전송 (엔드포인트 주소 맞춰서 변경)
-    API_URL = "https://chickchick.shop/func/stocks/update"
+    API_URL = "https://chickchick.shop/stocks/update"
     post_stocks_update(API_URL, payload, batch_size=500)
 
     # 항상 post_stocks_update() 다음 /delisted-stock을 요청해야한다
     if isEmpty == False:
         print('delete delisted stock')
         payload = {}
-        API_URL = "https://chickchick.shop/func/stocks/delisted-stock"
+        API_URL = "https://chickchick.shop/stocks/delisted-stock"
         with requests.Session() as s:
             headers = {"Content-Type": "application/json"}
             try:

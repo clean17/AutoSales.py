@@ -2,6 +2,9 @@
 import matplotlib
 matplotlib.use("Agg")  # ✅ 비인터랙티브 백엔드 (창 안 띄움)
 import os, sys
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
 import pandas as pd
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -25,7 +28,7 @@ from utils import add_technical_features, plot_candles_weekly, plot_candles_dail
 
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
 root_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(=루트)
-pickle_dir = os.path.join(root_dir, 'pickle')
+pickle_dir = os.path.join(root_dir, '../pickle')
 output_dir = 'D:\\interest_stocks'
 
 
@@ -74,7 +77,7 @@ def process_one(idx, count, ticker, tickers_dict):
 
     try:
         requests.post(
-            'https://chickchick.shop/func/stocks/interest/graph',
+            'https://chickchick.shop/stocks/interest/graph',
             json={
                 "nation": "kor",
                 "stock_code": str(ticker),
