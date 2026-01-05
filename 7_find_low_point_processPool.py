@@ -27,8 +27,8 @@ else:
     raise FileNotFoundError("utils.py를 상위 디렉터리에서 찾지 못했습니다.")
 
 from utils import _col, get_kor_ticker_dict_list, add_technical_features, plot_candles_weekly, plot_candles_daily, \
-    drop_sparse_columns, drop_trading_halt_rows, signal_any_drop, low_weekly_check, extract_numbers_from_filenames
-
+    drop_sparse_columns, drop_trading_halt_rows, signal_any_drop, low_weekly_check, extract_numbers_from_filenames, \
+    sort_csv_by_today_desc
 
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
 root_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(=루트)
@@ -38,7 +38,7 @@ output_dir = 'D:\\5below20_test'
 
 # 목표 검증 수익률
 VALIDATION_TARGET_RETURN = 7
-render_graph = True
+render_graph = False
 
 
 def process_one(idx, count, ticker, tickers_dict):
@@ -524,7 +524,7 @@ def process_one(idx, count, ticker, tickers_dict):
 
     # try:
     #     res = requests.post(
-    #         'https://chickchick.shop/func/stocks/info',
+    #         'https://chickchick.shop/stocks/info',
     #         json={"stock_name": str(ticker)},
     #         timeout=10
     #     )
@@ -536,7 +536,7 @@ def process_one(idx, count, ticker, tickers_dict):
 
     # try:
     #     res2 = requests.post(
-    #         'https://chickchick.shop/func/stocks/overview',
+    #         'https://chickchick.shop/stocks/overview',
     #         json={"product_code": str(product_code)},
     #         timeout=10
     #     )
@@ -549,19 +549,19 @@ def process_one(idx, count, ticker, tickers_dict):
     #
     # try:
     #     res = requests.post(
-    #         'https://chickchick.shop/func/stocks/company',
+    #         'https://chickchick.shop/stocks/company',
     #         json={"company_code": str(company_code)},
     #         timeout=15
     #     )
     #     json_data = res.json()
     #     category = json_data["result"]["majorList"][0]["title"]
     # except Exception as e:
-    #     print(f"/func/stocks/company 요청 실패-4(3): {e}")
+    #     print(f"/stocks/company 요청 실패-4(3): {e}")
     #     pass  # 오류
     #
     # try:
     #     requests.post(
-    #         'https://chickchick.shop/func/stocks/interest/insert',
+    #         'https://chickchick.shop/stocks/interest/insert',
     #         json={
     #             "nation": "kor",
     #             "stock_code": str(ticker),
@@ -690,8 +690,13 @@ if __name__ == "__main__":
 
         # CSV 저장
         # pd.DataFrame(rows).to_csv('low_result.csv')
-        pd.DataFrame(rows).to_csv('low_result.csv', index=False) # 인덱스 칼럼 'Unnamed: 0' 생성하지 않음
-        df = pd.read_csv("low_result.csv")
+        # pd.DataFrame(rows).to_csv('low_result.csv', index=False) # 인덱스 칼럼 'Unnamed: 0' 생성하지 않음
+        # df = pd.read_csv("csv/low_result.csv")
+        # saved = sort_csv_by_today_desc(
+        #     in_path=r"csv/low_result.csv",
+        #     out_path=r"csv/low_result_desc.csv",
+        # )
+        # print("saved:", saved)
 
     print(f"저점 매수 스크립트 결과 : {total_up_rate:.2f}%")
 

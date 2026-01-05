@@ -340,14 +340,20 @@ def get_kor_ticker_list():
 
     url = "https://chickchick.shop/stocks/kor"
     res = requests.get(url)
-    data = res.json()
+    try:
+        data = res.json()
+    except ValueError:  # JSONDecodeError도 ValueError 하위
+        data = {}
     tickers = [item["stock_code"] for item in data if "stock_code" in item]
     return tickers
 
 def get_kor_ticker_dict_list():
     url = "https://chickchick.shop/stocks/kor"
     res = requests.get(url)
-    data = res.json()
+    try:
+        data = res.json()
+    except ValueError:  # JSONDecodeError도 ValueError 하위
+        data = {}
     return {
         item["stock_code"]: item["stock_name"]
         for item in data
@@ -357,13 +363,35 @@ def get_kor_ticker_dict_list():
 def get_kor_summary_ticker_dict_list():
     days_ago_14 = (datetime.today() - timedelta(days=14)).strftime('%Y%m%d')
     res = requests.post(
-        'https://chickchick.shop/stocks/interest/data/info',
+        'https://chickchick.shop/stocks/interest/data/fire',
         json={
             "date": str(days_ago_14)
         },
         timeout=5
     )
-    data = res.json() or {}
+    try:
+        data = res.json()
+    except ValueError:  # JSONDecodeError도 ValueError 하위
+        data = {}
+    return {
+        item["stock_code"]: item["stock_name"]
+        for item in data
+        if "stock_code" in item and "stock_name" in item
+    }
+
+def get_favorite_ticker_dict_list():
+    days_ago_14 = (datetime.today() - timedelta(days=14)).strftime('%Y%m%d')
+    res = requests.post(
+        'https://chickchick.shop/stocks/interest/data/favorite/schedule',
+        json={
+            "date": str(days_ago_14)
+        },
+        timeout=5
+    )
+    try:
+        data = res.json()
+    except ValueError:  # JSONDecodeError도 ValueError 하위
+        data = {}
     return {
         item["stock_code"]: item["stock_name"]
         for item in data
@@ -371,13 +399,16 @@ def get_kor_summary_ticker_dict_list():
     }
 
 def get_kor_interest_ticker_dick_list():
-    url = "https://chickchick.shop/stocks/interest/data"
+    url = "https://chickchick.shop/stocks/interest/data/today"
     payload = {
         "date": today,
     }
 
     res = requests.post(url, json=payload)
-    data = res.json()
+    try:
+        data = res.json()
+    except ValueError:  # JSONDecodeError도 ValueError 하위
+        data = {}
     return {
         item["stock_code"]: item["stock_name"]
         for item in data
