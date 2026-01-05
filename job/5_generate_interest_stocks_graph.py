@@ -105,7 +105,7 @@ if __name__ == "__main__":
 
     tickers_dict = get_kor_summary_ticker_dict_list()
     fav_tickers_dict = get_favorite_ticker_dict_list()
-    tickers = list(set(tickers_dict.keys()+fav_tickers_dict.keys()))
+    tickers = list(set(tickers_dict.keys()) | set(fav_tickers_dict.keys()))  # | 는 합집합 연산자
     # tickers = list(set(tickers_dict.keys()))
 
     plot_jobs = []
