@@ -61,7 +61,7 @@ for count, ticker in enumerate(tickers):
     time.sleep(0.1)  # x00ms 대기
     stock_name = tickers_dict.get(ticker, 'Unknown Stock')
     # if count % 100 == 0:
-        # print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
+    #     print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
 
 
     # 데이터가 없으면 1년 데이터 요청, 있으면 5일 데이터 요청
@@ -73,7 +73,12 @@ for count, ticker in enumerate(tickers):
         if len(data) == 0:
             continue
 
-        date_str = data.index[0].strftime("%Y%m%d")
+        data = data.sort_index(ascending=True)   # 오름차순
+        date_str = data.index[-1].strftime("%Y%m%d")  # 인덱스를 왜 맨날 바꾸는거야..?
+        # if count % 100 == 0:
+        #     print(data)
+        #     print('date_str', date_str)
+        #     print('today', today)
 
         if date_str != today:
             continue
@@ -88,6 +93,8 @@ for count, ticker in enumerate(tickers):
     df.to_pickle(filepath)
     data = df
     # print(data)
+    # if count % 100 == 0:
+    #     print(f"len(data) {len(data)}")
 
     ########################################################################
 
