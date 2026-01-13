@@ -180,7 +180,7 @@ for count, ticker in enumerate(tickers):
     today_price_change_pct = round(today_price_change_pct, 2)
 
     # 오늘 상승률이 X% 가 안되면 제외
-    if today_price_change_pct < 5:
+    if today_price_change_pct < 4.5:
         condition_passed = False
         condition_passed2 = False
         # continue  # 오늘 10% 미만 상승이면 제외
@@ -245,7 +245,7 @@ for count, ticker in enumerate(tickers):
     # print('today', today_val)
 
     # 거래대금 x배 보다 크면 과열 > 제외
-    TARGET_VALUE = 6
+    TARGET_VALUE = 7
     # 0 나눗셈 방지 및 조건 체크
     if avg5 > 0 and np.isfinite(avg5) and today_val >= TARGET_VALUE * avg5:
         condition_passed2 = False
