@@ -165,7 +165,7 @@ def process_one(idx, count, ticker, tickers_dict):
     m_current = m_closes[-1]
 
     if remaining_data is not None:
-        r_data = remaining_data[:10]
+        r_data = remaining_data[:7]   # 10 > 7거래일로 수정
         r_closes = r_data['종가']
         r_max = r_closes.max()
         validation_chg_rate = (r_max-m_current)/m_current*100    # 검증 등락률
@@ -204,6 +204,7 @@ def process_one(idx, count, ticker, tickers_dict):
     pct_vs_lastweek = round(result['pct_vs_lastweek'], 2)
     pct_vs_last2week = round(result['pct_vs_last2week'], 2)
     pct_vs_last3week = round(result['pct_vs_last3week'], 2)
+    pct_vs_last4week = round(result['pct_vs_last4week'], 2)
     today_pct = round(data.iloc[-1]['등락률'], 1)
     validation_chg_rate = round(validation_chg_rate, 1)
     predict_str = '상승'
@@ -247,166 +248,12 @@ def process_one(idx, count, ticker, tickers_dict):
 
 
 
-    # 30일 변동성(vol30)이 매우 낮고,
-    # 최근 2주 수익률이 12.36% 이상인 구간
-    if vol30 <= 2.64 and pct_vs_last2week >= 12.36:
-        cond01 = True
 
 
-    # 최근 2주 수익률은 9.27% 이상으로 좋지만,
-    # 3주 전 기준 수익률은 -1.69% 이하로 여전히 안 좋은 구간
-    # -> 바닥권에서 돌아서는 턴어라운드 패턴
-    if pct_vs_last2week >= 9.27 and pct_vs_last3week <= -1.69:
-        cond02 = True
 
 
-    # 3주 전 기준으로는 -4.06% 이하로 많이 눌려 있었고,
-    # 최근 2주는 9.268% 이상 강한 기술적 반등
-    if pct_vs_last2week >= 9.268 and pct_vs_last3week <= -4.06:
-        cond03 = True
 
 
-    # 20일 변동성이 낮고(vol20 <= 2.70),
-    # 3주 전 대비 수익률이 8.89% 이상인
-    # '저변동 + 최근 3주 우상향' 구간
-    if vol20 <= 2.70 and pct_vs_last3week >= 8.89:
-        cond04 = True
-
-
-    # vol20 <= 2.70 이면서, 3주 전 대비 수익률(pct_vs_last3week)이 8.888% 이상
-    # -> '더 타이트한 저변동 + 최근 3주 우상향' 패턴
-    if vol20 <= 2.70 and pct_vs_last3week >= 8.888:
-        cond05 = True
-
-
-    # vol30 <= 2.36 이면서, 3주 전 대비 수익률이 5.634% 이상
-    #  -> '초저변동 + 완만하지만 꾸준한 3주 우상향'
-    if vol30 <= 2.36 and pct_vs_last3week >= 5.634:
-        cond06 = True
-
-
-    # vol30 <= 3.886 이면서, 첫 주 수익률이 68.298% 이상인 구간
-    #  -> '30일 변동성은 적당히 낮고, 첫 주에 거의 급발진한 초강세 구간'
-    if vol30 <= 3.886 and pct_vs_firstweek >= 68.298:
-        cond07 = True
-
-
-    # pct_vs_firstweek < 27.98 이면서 mean_ret20 < -1.07 이면서 mean_ret30 > -0.26
-    if pct_vs_firstweek < 27.98 and mean_ret20 < -1.07 and mean_ret30 > -0.26:
-        cond08 = True
-
-
-    # pct_vs_firstweek < 49.8 이면서 mean_ret20 < -1.07 이면서 mean_ret30 > -0.26
-    if pct_vs_firstweek < 49.8 and mean_ret20 < -1.07 and mean_ret30 > -0.26:
-        cond09 = True
-
-
-    # mean_ret30 > -0.26 이면서 pct_vs_lastweek < 4.51 이면서 mean_ret20 < -1.07
-    if mean_ret30 > -0.26 and pct_vs_lastweek < 4.51 and mean_ret20 < -1.07:
-        cond10 = True
-
-
-    # mean_ret30 > -0.15 이면서 pct_vs_lastweek < 5.48 이면서 mean_ret20 < -1.07
-    if mean_ret30 > -0.15 and pct_vs_lastweek < 5.48 and mean_ret20 < -1.07:
-        cond11 = True
-
-
-    # 최근 30일 동안 상승한 날 비율은 낮지만,
-    # 30일 평균 수익률은 양수인 종목
-    # → 많이 오르진 않았지만, 오를 때는 강하게 오르는 눌림 반등형
-    if pos30_ratio < 36.67 and mean_ret30 > 0.26:
-        cond12 = True
-
-
-    # 최근 30일 상승일 비율이 높고,
-    # 최근 3주 수익률이 크지만,
-    # 30일 평균 수익률은 아직 과하지 않은 종목
-    # → 최근에 추세가 막 살아난 초중반 상승 구간
-    if pos30_ratio > 46.67 and pct_vs_last3week > 13.535 and mean_ret30 < 0.52:
-        cond13 = True
-
-
-    # 30일 기준 변동성이 있고,
-    # 최근 20일 중 상승일 비율이 높으며,
-    # 거래대금 변화가 큰 종목
-    # → 단순 기술적 반등이 아닌 실제 수급이 붙은 종목
-    if vol30 > 3.32 and pos20_ratio > 45.0 and chg_tr_val > 719.8:
-        cond14 = True
-
-
-    # 최근 20일 평균 수익률은 나빴지만,
-    # 30일 평균은 크게 무너지지 않았고,
-    # 최근 5일 급등 상태는 아닌 종목
-    # → 바닥권에서 서서히 회복 중인 눌림 구간
-    if mean_ret20 < -1.07 and mean_ret30 > -0.15 and ma5_chg_rate < 2.82:
-        cond15 = True
-
-
-    # 오늘 급락은 아니고,
-    # 최근 5일 상승 탄력은 강하지만,
-    # 첫 주에 과도하게 오르지 않은 종목
-    # → 단기 모멘텀이 막 붙기 시작한 초기 상승 단계
-    if today_chg_rate > -18.71 and ma5_chg_rate > 4.015 and pct_vs_firstweek < 8.91:
-        cond16 = True
-
-
-    # 최근 20일 동안 상승한 날은 많지 않지만,
-    # 최근 2주 수익률은 매우 강하고,
-    # 20일 이동1평균이 상승 중인 종목
-    # → 조용하다가 한 번에 터지는 변동성 돌파형
-    if pos20_ratio < 40.0 and pct_vs_last2week > 18.89 and ma20_chg_rate > 0.31:
-        cond17 = True
-
-
-    # 고거래대금 + 30일 평균수익률이 이미 높고,
-    # 당일 상승률은 과열(급등) 수준까진 아니면서,
-    # 거래대금 변화율/30일 변동성이 함께 커진 종목
-    # → "강한 추세가 이어지는 중, 과열 없이 수급이 붙는 지속형"
-    if (today_tr_val > 4151089792 and mean_ret30 > 0.265 and today_pct <= 7.05 and
-            chg_tr_val > 30.9 and vol30 > 6.675):
-        cont18 = True
-
-
-    # 고거래대금이면서,
-    # 30일 평균수익률은 상대적으로 낮지만(=아직 덜 올라온 편),
-    # 3개월 누적 상승률이 44~52% 구간에 있고,
-    # 당일 상승률이 강하게 터지는 종목
-    # → "중기 추세는 이미 형성, 단기 모멘텀으로 재가속하는 돌파형"
-    if (today_tr_val > 4151089792 and mean_ret30 <= 0.265 and three_m_chg_rate <= 51.9 and
-            today_pct > 7.15 and three_m_chg_rate > 43.92):
-        cond19 = True
-
-
-    # 20일 변동성은 낮은 편(=조용함)인데,
-    # 최근 3일 평균 거래대금이 크고,
-    # 최근 3주 대비 수익률이 강한 종목
-    # → "조용한 구간에서 수급이 들어오며 추세가 붙는 잠복-확장형"
-    if vol20 <= 3.30 and mean_prev3 > 2.21162e9 and pct_vs_last3week > 8.78:
-        cond20 = True
-
-
-    # 30일 평균수익률은 플러스(=기본 추세는 있음)이고,
-    # 최근 3일 평균 거래대금이 크지만,
-    # 최근 3주 대비 수익률은 오히려 음수(=단기 조정 구간)
-    # → "추세는 살아있고 조정 중 수급이 유지되는 눌림목 재시동형"
-    if mean_ret30 > 0.10 and mean_prev3 > 3.22394e9 and pct_vs_last3week <= -4.458:
-        cond21 = True
-
-
-    # 5일 변화율이 강하게 플러스(=단기 모멘텀)이고,
-    # 30일 변동성은 낮거나 제한적이며,
-    # 최근 3일 평균 거래대금이 큰 종목
-    # → "단기 모멘텀 + 과열 아닌 변동성 + 수급 동반의 안정 돌파형"
-    if ma5_chg_rate > 2.10 and vol30 <= 3.06 and mean_prev3 > 2.21162e9:
-        cond22 = True
-
-
-    # 거래대금 변화율은 과도하지 않은 범위인데,
-    # 당일 변화율은 크게 음수(=급락/쇼크성 하락)이고,
-    # 당일 등락률은 오히려 높은 편(=위아래로 크게 흔들리는 날)
-    # → "급격한 흔들림 이후 반등/변동성 이벤트가 나오는 급변동 이벤트형"
-    if chg_tr_val <= 211.44 and today_chg_rate <= -34.016 and today_pct > 9.70:
-        cond23 = True
 
     # --------------------------------
     # 모든 조건을 한 번에 모아서 체크
@@ -445,13 +292,14 @@ def process_one(idx, count, ticker, tickers_dict):
         ("cond30", "", cond30),
     ]
 
-    # True가 하나도 없으면 pass
     true_conds = [(name, desc) for name, desc, ok in conditions if ok]
+
+    # True가 하나도 없으면 pass
     if not true_conds:
         return
 
     # 원하는 출력 형태 1) "cond17, cond30" 처럼 이름만
-    print(f'{stock_name} ({validation_chg_rate}): {", ".join(name for name, _ in true_conds)}')
+    # print(f'{stock_name} ({validation_chg_rate}): {", ".join(name for name, _ in true_conds)}')
 
 
 
@@ -480,9 +328,10 @@ def process_one(idx, count, ticker, tickers_dict):
         "pct_vs_lastweek": pct_vs_lastweek,              # 저번주 대비 이번주 등락률
         "pct_vs_last2week": pct_vs_last2week,            # 2주 전 대비 이번주 등락률
         "pct_vs_last3week": pct_vs_last3week,            # 3주 전 대비 이번주 등락률
+        "pct_vs_last4week": pct_vs_last4week,            # 4주 전 대비 이번주 등락률
         "today_pct": today_pct,                          # 오늘등락률
         "validation_chg_rate": validation_chg_rate,      # 검증 등락률
-        "cond": {", ".join(name for name, _ in true_conds)}
+        "cond": ", ".join(name for name, _ in true_conds)
     }
 
 
@@ -513,78 +362,6 @@ def process_one(idx, count, ticker, tickers_dict):
         "save_path": final_file_path,
     }
 
-    today_close = closes[-1]
-    yesterday_close = closes[-2]
-    change_pct_today = (today_close - yesterday_close) / yesterday_close * 100
-    change_pct_today = round(change_pct_today, 2)
-    avg5 = trading_value.iloc[-6:-1].mean()
-    today_val = trading_value.iloc[-1]
-    ratio = today_val / avg5 * 100
-    ratio = round(ratio, 2)
-
-    # try:
-    #     res = requests.post(
-    #         'https://chickchick.shop/stocks/info',
-    #         json={"stock_name": str(ticker)},
-    #         timeout=10
-    #     )
-    #     json_data = res.json()
-    #     product_code = json_data["result"][0]["data"]["items"][0]["productCode"]
-    # except Exception as e:
-    #     print(f"info 요청 실패-4: {e}")
-    #     pass  # 오류
-
-    # try:
-    #     res2 = requests.post(
-    #         'https://chickchick.shop/stocks/overview',
-    #         json={"product_code": str(product_code)},
-    #         timeout=10
-    #     )
-    #     data2 = res2.json()
-    #     market_value = data2["result"]["marketValueKrw"]
-    #     company_code = data2["result"]["company"]["code"]
-    # except Exception as e:
-    #     print(f"overview 요청 실패-4(2): {e}")
-    #     pass  # 오류
-    #
-    # try:
-    #     res = requests.post(
-    #         'https://chickchick.shop/stocks/company',
-    #         json={"company_code": str(company_code)},
-    #         timeout=15
-    #     )
-    #     json_data = res.json()
-    #     category = json_data["result"]["majorList"][0]["title"]
-    # except Exception as e:
-    #     print(f"/stocks/company 요청 실패-4(3): {e}")
-    #     pass  # 오류
-    #
-    # try:
-    #     requests.post(
-    #         'https://chickchick.shop/stocks/interest/insert',
-    #         json={
-    #             "nation": "kor",
-    #             "stock_code": str(ticker),
-    #             "stock_name": str(stock_name),
-    #             "pred_price_change_3d_pct": "",
-    #             "yesterday_close": str(yesterday_close),
-    #             "current_price": str(today_close),
-    #             "today_price_change_pct": str(change_pct_today),
-    #             "avg5d_trading_value": str(avg5),
-    #             "current_trading_value": str(today_val),
-    #             "trading_value_change_pct": str(ratio),
-    #             "graph_file": str(final_file_name),
-    #             "market_value": str(market_value),
-    #             "category": str(category),
-    #             "target": "low",
-    #         },
-    #         timeout=10
-    #     )
-    # except Exception as e:
-    #     # logging.warning(f"progress-update 요청 실패: {e}")
-    #     print(f"progress-update 요청 실패-4-1: {e}")
-    #     pass  # 오류
-
 
     return {
         "row": row,
@@ -609,12 +386,12 @@ if __name__ == "__main__":
     plot_jobs = []
 
     # 10이면, 10거래일의 하루전부터, -1이면 어제
-    origin_idx = idx = -1
-    # origin_idx = idx = 5
+    # origin_idx = idx = -1
+    origin_idx = idx = 1
     workers = os.cpu_count()
     BATCH_SIZE = 20
 
-    # end_idx = origin_idx + 170 # 마지막 idx (05/13부터 데이터 만드는 용)
+    # end_idx = origin_idx + 180 # 마지막 idx (05/13부터 데이터 만드는 용)
     # end_idx = origin_idx + 15 # 마지막 idx
     end_idx = origin_idx + 1 # 그날 하루만
 
@@ -661,6 +438,27 @@ if __name__ == "__main__":
                 up_cnt += 1
 
 
+
+    print('shortfall_cnt', shortfall_cnt)
+    print('up_cnt', up_cnt)
+    if shortfall_cnt+up_cnt==0:
+        total_up_rate=0
+    else:
+        total_up_rate = up_cnt/(shortfall_cnt+up_cnt)*100
+
+        # CSV 저장
+        # pd.DataFrame(rows).to_csv('csv/low_result.csv')
+        # pd.DataFrame(rows).to_csv('csv/low_result.csv', index=False) # 인덱스 칼럼 'Unnamed: 0' 생성하지 않음
+        # df = pd.read_csv("csv/low_result.csv")
+        # saved = sort_csv_by_today_desc(
+        #     in_path=r"csv/low_result.csv",
+        #     out_path=r"csv/low_result_desc.csv",
+        # )
+        # print("saved:", saved)
+
+    print(f"저점 매수 스크립트 결과 : {total_up_rate:.2f}%")
+
+
     # 🔥 여기서 한 번에, 깔끔하게 출력
     for row in rows:
         print(f"\n {row['today']}   {row['stock_name']} [{row['ticker']}] {row['predict_str']}")
@@ -678,28 +476,9 @@ if __name__ == "__main__":
         print(f"  지난주 대비 등락률: {row['pct_vs_lastweek']}%")
         print(f"  오늘 등락률       : {row['today_pct']}%")
         print(f"  검증 등락률       : {row['validation_chg_rate']}%")
-        print(f"  조건             : {row['cond']}")
-
-
-    print('shortfall_cnt', shortfall_cnt)
-    print('up_cnt', up_cnt)
-    if shortfall_cnt+up_cnt==0:
-        total_up_rate=0
-    else:
-        total_up_rate = up_cnt/(shortfall_cnt+up_cnt)*100
-
-        # CSV 저장
-        # pd.DataFrame(rows).to_csv('low_result.csv')
-        # pd.DataFrame(rows).to_csv('low_result.csv', index=False) # 인덱스 칼럼 'Unnamed: 0' 생성하지 않음
-        # df = pd.read_csv("csv/low_result.csv")
-        # saved = sort_csv_by_today_desc(
-        #     in_path=r"csv/low_result.csv",
-        #     out_path=r"csv/low_result_desc.csv",
-        # )
-        # print("saved:", saved)
-
-    print(f"저점 매수 스크립트 결과 : {total_up_rate:.2f}%")
-
+        cond = row.get('cond')
+        if cond is not None:
+            print(f"  조건             : {row['cond']}")
 
 
 
