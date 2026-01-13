@@ -1751,6 +1751,7 @@ def low_weekly_check(data: pd.DataFrame):
     prev_close = weekly.iloc[-2][col_c]
     two_w_close = weekly.iloc[-3][col_c]
     three_w_close = weekly.iloc[-4][col_c]
+    four_w_close = weekly.iloc[-5][col_c]
     this_close = weekly.iloc[-1][col_c]   # 마지막 주 종가
     first      = weekly.iloc[0][col_c]    # 첫번째 주 종가
 
@@ -1759,11 +1760,12 @@ def low_weekly_check(data: pd.DataFrame):
     this_close = 105
     one_w_ago_pct = (105 / 100) - 1   # 1.05 - 1 = 0.05    >> one_w_ago_pct = 0.05 (5% 상승)
     '''
-    pct_from_first = this_close / first - 1.0  # 이번 주 종가(this_close)가 첫 번째 주 종가(first) 대비 몇 % 변했는지
-    one_w_ago_pct = (this_close / prev_close) - 1  # 저번주 대비 이번주 증감률
-    two_w_ago_pct = (this_close / two_w_close) - 1  # 저번주 대비 이번주 증감률
-    three_w_ago_pct = (this_close / three_w_close) - 1  # 저번주 대비 이번주 증감률
-    is_drop_over_1 = one_w_ago_pct < -0.01   # -1% 보다 더 하락했는가 // -0.005   # -0.5%
+    pct_from_first  = (this_close / first) - 1           # 이번 주 종가(this_close)가 첫 번째 주 종가(first) 대비 몇 % 변했는지
+    one_w_ago_pct   = (this_close / prev_close) - 1      # 저번주 대비 이번주 증감률
+    two_w_ago_pct   = (this_close / two_w_close) - 1     # 2주 대비 이번주 증감률
+    three_w_ago_pct = (this_close / three_w_close) - 1   # 3주 대비 이번주 증감률
+    four_w_ago_pct  = (this_close / four_w_close) - 1    # 4주 대비 이번주 증감률
+    is_drop_over_1  = one_w_ago_pct < -0.01              # -1% 보다 더 하락했는가 // -0.005   # -0.5%
 
     return {
         "ok": True,
@@ -1772,6 +1774,7 @@ def low_weekly_check(data: pd.DataFrame):
         "pct_vs_lastweek": float(one_w_ago_pct*100),                    # 저번주 대비 이번주 증감률, 예: -0.0312 == -3.12%
         "pct_vs_last2week": float(two_w_ago_pct*100),                   # 2주 전 대비 이번주 증감률
         "pct_vs_last3week": float(three_w_ago_pct*100),                 # 3주 전 대비 이번주 증감률
+        "pct_vs_last4week": float(four_w_ago_pct*100),                  # 4주 전 대비 이번주 증감률
         "is_drop_more_than_minus1pct": bool(is_drop_over_1),            # 주봉 증감률이 기준보다 하락했는지
         "pct_vs_firstweek": float(pct_from_first*100),                  # -0.22 -> -22% 하락
     }
