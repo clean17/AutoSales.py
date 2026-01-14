@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 import requests
 import time
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
-
+from lowscan_rules import build_conditions, RULE_NAMES
 
 # 자동 탐색 (utils.py를 찾을 때까지 위로 올라가 탐색)
 here = Path(__file__).resolve()
@@ -211,88 +211,48 @@ def process_one(idx, count, ticker, tickers_dict):
     if validation_chg_rate < VALIDATION_TARGET_RETURN:
         predict_str = '미달'
 
-    # ----------------------------
-    # 조건 플래그 초기화
-    # ----------------------------
-    cond01 = False
-    cond02 = False
-    cond03 = False
-    cond04 = False
-    cond05 = False
-    cond06 = False
-    cond07 = False
-    cond08 = False
-    cond09 = False
-    cond10 = False
-    cond11 = False
-    cond12 = False
-    cond13 = False
-    cond14 = False
-    cond15 = False
-    cond16 = False
-    cond17 = False
-    cond18 = False
-    cond19 = False
-    cond20 = False
-    cond21 = False
-    cond22 = False
-    cond23 = False
-    cond24 = False
-    cond25 = False
-    cond26 = False
-    cond27 = False
-    cond28 = False
-    cond29 = False
-    cond30 = False
+
+    # --- build_conditions()가 참조하는 컬럼들을 data에 주입 (스칼라 → 컬럼 브로드캐스트) ---
+    rule_features = {
+        "ma5_chg_rate": ma5_chg_rate,
+        "ma20_chg_rate": ma20_chg_rate,
+        "vol20": vol20,
+        "vol30": vol30,
+        "mean_ret20": mean_ret20,
+        "mean_ret30": mean_ret30,
+        "pos20_ratio": pos20_ratio,
+        "pos30_ratio": pos30_ratio,
+        "mean_prev3": mean_prev3,
+        "today_tr_val": today_tr_val,
+        "chg_tr_val": chg_tr_val,
+        "three_m_chg_rate": three_m_chg_rate,
+        "today_chg_rate": today_chg_rate,
+        "pct_vs_firstweek": pct_vs_firstweek,
+        "pct_vs_lastweek": pct_vs_lastweek,
+        "pct_vs_last2week": pct_vs_last2week,
+        "pct_vs_last3week": pct_vs_last3week,
+        "pct_vs_last4week": pct_vs_last4week,
+        "today_pct": today_pct,
+    }
+
+    # data에 컬럼이 없거나 NaN이면 넣기 (기존 컬럼 있으면 덮어쓸지 말지는 옵션)
+    data = data.copy()
+    for k, v in rule_features.items():
+        data[k] = v
 
 
+    # 룰 마스크 생성 (각 룰마다 Series[bool] 반환)
+    try:
+        rule_masks = build_conditions(data)
+    except KeyError as e:
+        print(f"[{ticker}] rule build_conditions KeyError: {e} (missing column in data)")
+        return
 
-
-
-
-
-
-
-
-
-    # --------------------------------
-    # 모든 조건을 한 번에 모아서 체크
-    # --------------------------------
-    # ✅ 마지막에 "True인 조건 이름/설명"만 뽑기
-    conditions = [
-        ("cond01",  "", cond01),
-        ("cond02",  "", cond02),
-        ("cond03",  "", cond03),
-        ("cond04",  "", cond04),
-        ("cond05",  "", cond05),
-        ("cond06",  "", cond06),
-        ("cond07",  "", cond07),
-        ("cond08",  "", cond08),
-        ("cond09",  "", cond09),
-        ("cond10", "", cond10),
-        ("cond11", "", cond11),
-        ("cond12", "", cond12),
-        ("cond13", "", cond13),
-        ("cond14", "", cond14),
-        ("cond15", "", cond15),
-        ("cond16", "", cond16),
-        ("cond17", "", cond17),
-        ("cond18", "", cond18),
-        ("cond19", "", cond19),
-        ("cond20", "", cond20),
-        ("cond21", "", cond21),
-        ("cond22", "", cond22),
-        ("cond23", "", cond23),
-        ("cond24", "", cond24),
-        ("cond25", "", cond25),
-        ("cond26", "", cond26),
-        ("cond27", "", cond27),
-        ("cond28", "", cond28),
-        ("cond29", "", cond29),
-        ("cond30", "", cond30),
+    # 오늘(마지막 행)에서 True인 룰 이름만 추출
+    true_conds = [
+        name for name in RULE_NAMES
+        if name in rule_masks and bool(rule_masks[name].iloc[-1])
     ]
-
-    true_conds = [(name, desc) for name, desc, ok in conditions if ok]
 
     # True가 하나도 없으면 pass
     if not true_conds:
@@ -331,7 +291,8 @@ def process_one(idx, count, ticker, tickers_dict):
         "pct_vs_last4week": pct_vs_last4week,            # 4주 전 대비 이번주 등락률
         "today_pct": today_pct,                          # 오늘등락률
         "validation_chg_rate": validation_chg_rate,      # 검증 등락률
-        "cond": ", ".join(name for name, _ in true_conds)
+        # "cond": ", ".join(name for name, _ in true_conds),
+        # "cond": ", ".join(true_conds),
     }
 
 
@@ -392,8 +353,8 @@ if __name__ == "__main__":
     BATCH_SIZE = 20
 
     # end_idx = origin_idx + 180 # 마지막 idx (05/13부터 데이터 만드는 용)
-    # end_idx = origin_idx + 15 # 마지막 idx
-    end_idx = origin_idx + 1 # 그날 하루만
+    end_idx = origin_idx + 50 # 마지막 idx
+    # end_idx = origin_idx + 1 # 그날 하루만
 
     with ProcessPoolExecutor(max_workers=workers - 2) as executor:
         futures = []
@@ -476,9 +437,9 @@ if __name__ == "__main__":
         print(f"  지난주 대비 등락률: {row['pct_vs_lastweek']}%")
         print(f"  오늘 등락률       : {row['today_pct']}%")
         print(f"  검증 등락률       : {row['validation_chg_rate']}%")
-        cond = row.get('cond')
-        if cond is not None:
-            print(f"  조건             : {row['cond']}")
+        # cond = row.get('cond')
+        # if cond is not None:
+        #     print(f"  조건             : {row['cond']}")
 
 
 
