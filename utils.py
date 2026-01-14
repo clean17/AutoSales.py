@@ -1807,3 +1807,23 @@ def sort_csv_by_today_desc(
 
     df.to_csv(out_path, index=False, encoding=encoding)
     return out_path
+
+
+# 프로세스 경쟁 방지
+def safe_read_pickle(path):
+    # 0바이트 또는 너무 작은 파일은 바로 제외
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        return None
+
+    if size < 16:   # 임계치는 상황에 맞게 (피클 헤더 고려)
+        return None
+
+    try:
+        return pd.read_pickle(path)
+    except EOFError:
+        return None
+    except Exception:
+        # 필요하면 로깅
+        return None
