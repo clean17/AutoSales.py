@@ -428,4 +428,4 @@ hours, remainder = divmod(int(elapsed), 3600)
 minutes, seconds = divmod(remainder, 60)
 
 if elapsed > 20:
-    print(f"총 소요 시간: {hours}시간 {minutes}분 {seconds}초")
+    print(f"2_finding_stocks_with_increased_volume.py - 총 소요 시간: {hours}시간 {minutes}분 {seconds}초")

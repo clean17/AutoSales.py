@@ -6,7 +6,7 @@ df = pd.read_csv("csv/low_result_250513_desc.csv")
 # df = pd.read_csv("csv/low_result_us_desc.csv")
 
 TARGET_COL = "validation_chg_rate"
-MIN_RATE = 0.8   # 미장 0.9
+MIN_RATE = 0.82   # 미장 0.9
 target = (df[TARGET_COL].to_numpy() >= 7)
 out_path = Path("lowscan_rules.py")
 # out_path = Path("lowscan_rules_us.py")
@@ -134,11 +134,16 @@ def make_name(conds):
     return "_and_".join(parts)
 
 # ✅ 여기서 "최대한 많이" 얻고 싶으면 top_n 크게
-# min_ratio=0.75면 expand_ratio = 0.55 정도가 많이 씀
-# rules = mine_rules(min_ratio=MIN_RATE, min_count=50, max_depth=8, beam=1000, expand_ratio=0.4)  # 1728 > 71
-# rules = mine_rules(min_ratio=MIN_RATE, min_count=50, max_depth=8, beam=800, expand_ratio=0.4)   # 1728 > 71
-# rules = mine_rules(min_ratio=MIN_RATE, min_count=50, max_depth=7, beam=500, expand_ratio=0.4)   # 217 > 71
-rules = mine_rules(min_ratio=MIN_RATE, min_count=30, max_depth=7, beam=500, expand_ratio=0.45)   # 210 > 80% 굿 (ratio=0.75) ##### // 0.7 > 9819 > 66.. 별로 // 0.8
+rules = mine_rules(min_ratio=MIN_RATE, min_count=38, max_depth=7, beam=500, expand_ratio=0.45)
+# 0.8, 38, 7, 500, 0.45 > 1000/1000 > 80.77%
+# 0.8, 40, 7, 500, 0.45 > 992/1000 > 80.77%
+# 0.8, 42, 7, 500, 0.45 > 168/182 > 82.61%
+# 0.8, 44, 7, 500, 0.45 > 85/89 > 83.33%
+
+# 0.82, 38, 7, 500, 0.45 > 1000/1000 > 89.47%
+# 0.82, 39, 7, 500, 0.45 > 1000/1000 > 86%
+# 0.82, 40, 7, 500, 0.45 > 8/8 > 86%
+
 
 # 미장
 # rules = mine_rules(min_ratio=MIN_RATE, min_count=50, max_depth=7, beam=500, expand_ratio=0.45)   # 0.85 > 82% // 0.9 > 87%

@@ -19,6 +19,7 @@ import requests
 import time
 import pytz
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
+from lowscan_rules_us import build_conditions, RULE_NAMES
 
 
 # 자동 탐색 (utils.py를 찾을 때까지 위로 올라가 탐색)
@@ -32,7 +33,7 @@ else:
 
 from utils import _col, get_kor_ticker_dict_list, add_technical_features, plot_candles_weekly, plot_candles_daily, \
     drop_sparse_columns, drop_trading_halt_rows, signal_any_drop, low_weekly_check, extract_numbers_from_filenames, \
-    get_usd_krw_rate, get_nasdaq_symbols, add_today_change_rate
+    get_usd_krw_rate, get_nasdaq_symbols, add_today_change_rate, safe_read_pickle
 
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
 root_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(=루트)
@@ -48,7 +49,8 @@ def process_one(idx, count, ticker, exchangeRate):
         print(f"[idx={idx}] {ticker} 파일 없음")
         return
 
-    df = pd.read_pickle(filepath)
+    # df = pd.read_pickle(filepath)
+    df = safe_read_pickle(filepath)
     if df.empty:
         return
 
@@ -190,239 +192,54 @@ def process_one(idx, count, ticker, exchangeRate):
     pct_vs_lastweek = round(result['pct_vs_lastweek'], 2)
     pct_vs_last2week = round(result['pct_vs_last2week'], 2)
     pct_vs_last3week = round(result['pct_vs_last3week'], 2)
+    pct_vs_last4week = round(result['pct_vs_last4week'], 2)
     today_pct = round(data.iloc[-1]['today_chg_rate'], 1)
 
-    # ----------------------------
-    # 조건 플래그 초기화
-    # ----------------------------
-    cond01 = False
-    cond02 = False
-    cond03 = False
-    cond04 = False
-    cond05 = False
-    cond06 = False
-    cond07 = False
-    cond08 = False
-    cond09 = False
-    cond10 = False
-    cond11 = False
-    cond12 = False
-    cond13 = False
-    cond14 = False
-    cond15 = False
-    cond16 = False
-    cond17 = False
-    cond18 = False
-    cond19 = False
-    cond20 = False
-    cond21 = False
-    cond22 = False
-    cond23 = False
-    cond24 = False
-    cond25 = False
-    cond26 = False
-    cond27 = False
-    cond28 = False
-    cond29 = False
-    cond30 = False
+    # --- build_conditions()가 참조하는 컬럼들을 data에 주입 (스칼라 → 컬럼 브로드캐스트) ---
+    rule_features = {
+        "ma5_chg_rate": ma5_chg_rate,
+        "ma20_chg_rate": ma20_chg_rate,
+        "vol20": vol20,
+        "vol30": vol30,
+        "mean_ret20": mean_ret20,
+        "mean_ret30": mean_ret30,
+        "pos20_ratio": pos20_ratio,
+        "pos30_ratio": pos30_ratio,
+        "mean_prev3": mean_prev3,
+        "today_tr_val": today_tr_val,
+        "chg_tr_val": chg_tr_val,
+        "three_m_chg_rate": three_m_chg_rate,
+        "today_chg_rate": today_chg_rate,
+        "pct_vs_firstweek": pct_vs_firstweek,
+        "pct_vs_lastweek": pct_vs_lastweek,
+        "pct_vs_last2week": pct_vs_last2week,
+        "pct_vs_last3week": pct_vs_last3week,
+        "pct_vs_last4week": pct_vs_last4week,
+        "today_pct": today_pct,
+    }
+
+    # data에 컬럼이 없거나 NaN이면 넣기 (기존 컬럼 있으면 덮어쓸지 말지는 옵션)
+    data = data.copy()
+    for k, v in rule_features.items():
+        data[k] = v
 
 
-
-
-    # (1) hi80_rule_us_A_ratio_0_844_n32
-    if pct_vs_last2week < -39.0846 and today_tr_val < 9.20874e+08:
-        cond101 = True
-
-    # (2) hi80_rule_us_B_ratio_0_806_n36
-    if pct_vs_last2week < -39.0846 and today_tr_val < 1.02635e+09:
-        cond102 = True
-
-    # (3) hi80_rule_us_C_ratio_0_870_n23
-    if pct_vs_last2week < -39.0846 and today_tr_val < 6.41818e+08:
-        cond103 = True
-
-    # (4) hi80_us_941_n17_last2w_lt_-39_0846_and_tr_lt_447_1m
-    if pct_vs_last2week < -39.0846 and today_tr_val < 447130958.5:
-        cond104 = True
-
-    # (5) hi80_us_870_n23_last2w_lt_-39_0846_and_tr_lt_641_8m
-    if pct_vs_last2week < -39.0846 and today_tr_val < 641818383.82:
-        cond105 = True
-
-    # (6) hi80_us_850_n20_last2w_lt_-39_0846_and_tr_lt_523_0m
-    if pct_vs_last2week < -39.0846 and today_tr_val < 522960472.58:
-        cond106 = True
-
-    # (7) hi80_us_828_n29_last2w_lt_-39_0846_and_tr_lt_869_0m
-    if pct_vs_last2week < -39.0846 and today_tr_val < 869029586.805:
-        cond107 = True
-
-    # (8) hi80_us_826_n23_last2w_lt_-33_2714_and_tr_lt_447_1m
-    if pct_vs_last2week < -33.2714 and today_tr_val < 447130958.5:
-        cond108 = True
-
-    # (9) hi80_us_806_n31_last2w_lt_-29_2584_and_tr_lt_447_1m
-    if pct_vs_last2week < -29.2584 and today_tr_val < 447130958.5:
-        cond109 = True
-
-    # (10) hi80_us_810_n21_todaychg_lt_-96_2615_and_ma5_gt_2_18
-    if today_chg_rate < -96.2615 and ma5_chg_rate > 2.18:
-        cond110 = True
-
-    # (11) hi80_us_833_n18_tr_lt_148_2m_and_ma20_lt_-1_38
-    if today_tr_val < 148169623.835 and ma20_chg_rate < -1.38:
-        cond111 = True
-
-    # (12) hi80_us_824_n17_tr_lt_148_2m_and_todaychg_lt_-46_107
-    if today_tr_val < 148169623.835 and today_chg_rate < -46.107:
-        cond112 = True
-
-    # (13) hi80_us_800_n20_tr_lt_148_2m_and_todaychg_lt_-42_391
-    if today_tr_val < 148169623.835 and today_chg_rate < -42.391:
-        cond113 = True
-
-    # (14) hi80_us_rule_1_r1.000_n31
-    if (chg_tr_val <= 31.35 and
-            ma5_chg_rate > -11.895 and
-            mean_ret30 <= -0.945 and
-            pct_vs_firstweek > -64.24 and
-            pct_vs_last2week <= -38.495 and
-            vol20 <= 19.4 and
-            vol30 > 3.795):
-        cond114 = True
-
-    # (15) hi80_us_rule_2_r1.000_n26
-    if (ma5_chg_rate > -11.895 and
-            mean_ret30 <= -0.945 and
-            pct_vs_firstweek > -64.24 and
-            pct_vs_last2week <= -38.495 and
-            vol20 <= 19.4 and
-            vol30 > 8.415):
-        cond115 = True
-
-    # (16) hi80_us_rule_3_r1.000_n26
-    if (ma5_chg_rate > -11.895 and
-            mean_ret30 <= -0.945 and
-            pct_vs_firstweek > -64.24 and
-            pct_vs_last2week <= -38.495 and
-            vol20 > 9.315 and
-            vol20 <= 19.4 and
-            vol30 > 3.795):
-        cond116 = True
-
-    # (17) hi80_us_rule_4_r1.000_n21
-    if (ma5_chg_rate > -11.895 and
-            mean_prev3 > 2665270784 and
-            mean_ret30 <= -0.945 and
-            pct_vs_firstweek > -64.24 and
-            pct_vs_last2week <= -38.495 and
-            vol20 <= 19.4 and
-            vol30 > 3.795):
-        cond117 = True
-
-    # (18) hi80_us_rule_5_r1.000_n21
-    if (ma5_chg_rate > -11.895 and
-            mean_ret30 <= -0.945 and
-            pct_vs_firstweek > -64.24 and
-            pct_vs_last2week <= -38.495 and
-            vol20 <= 19.4 and
-            vol30 > 8.93):
-        cond118 = True
-
-    # (19) hi80_us_rule_6_r0.927_n41
-    if (ma5_chg_rate > -11.895 and
-            mean_ret30 <= -0.945 and
-            pct_vs_firstweek > -64.24 and
-            pct_vs_last2week <= -38.495 and
-            vol20 <= 19.4 and
-            vol30 > 3.795):
-        cond119 = True
-
-    # (20) hi80_us_rule_7_r0.864_n22
-    if (mean_ret30 > -0.945 and
-            pct_vs_firstweek <= -36.175 and
-            pct_vs_last2week <= -10.995 and
-            pct_vs_last3week <= -16.79 and
-            pct_vs_lastweek > 4.07 and
-            three_m_chg_rate > 84.15 and
-            today_pct <= 41.45 and
-            vol30 > 3.795):
-        cond120 = True
-
-    # (21) hi80_us_rule_10_r0.857_n21
-    if (chg_tr_val > 48.05 and
-            mean_ret20 <= -0.655 and
-            mean_ret30 > 0.135 and
-            three_m_chg_rate <= 84.15 and
-            today_pct <= 41.45 and
-            vol30 > 3.795):
-        cond121 = True
-
-    # (22) hi80_us_rule_11_r0.850_n20
-    if (ma5_chg_rate > -11.895 and
-            mean_ret30 <= -0.945 and
-            pct_vs_firstweek <= -75.465 and
-            pct_vs_last2week <= -38.495 and
-            vol20 <= 19.4 and
-            vol30 > 3.795):
-        cond122 = True
-
-    # (23) hi80_us_rule_12_r0.850_n20
-    if (ma5_chg_rate > -11.895 and
-            mean_prev3 <= 2665270784 and
-            mean_ret30 <= -0.945 and
-            pct_vs_firstweek > -64.24 and
-            pct_vs_last2week <= -38.495 and
-            vol20 <= 19.4 and
-            vol30 > 3.795):
-        cond123 = True
-
-    # --------------------------------
-    # 모든 조건을 한 번에 모아서 체크
-    # --------------------------------
-    # ✅ 마지막에 "True인 조건 이름/설명"만 뽑기
-    conditions = [
-        ("cond01",  "", cond01),
-        ("cond02",  "", cond02),
-        ("cond03",  "", cond03),
-        ("cond04",  "", cond04),
-        ("cond05",  "", cond05),
-        ("cond06",  "", cond06),
-        ("cond07",  "", cond07),
-        ("cond08",  "", cond08),
-        ("cond09",  "", cond09),
-        ("cond10", "", cond10),
-        ("cond11", "", cond11),
-        ("cond12", "", cond12),
-        ("cond13", "", cond13),
-        ("cond14", "", cond14),
-        ("cond15", "", cond15),
-        ("cond16", "", cond16),
-        ("cond17", "", cond17),
-        ("cond18", "", cond18),
-        ("cond19", "", cond19),
-        ("cond20", "", cond20),
-        ("cond21", "", cond21),
-        ("cond22", "", cond22),
-        ("cond23", "", cond23),
-        ("cond24", "", cond24),
-        ("cond25", "", cond25),
-        ("cond26", "", cond26),
-        ("cond27", "", cond27),
-        ("cond28", "", cond28),
-        ("cond29", "", cond29),
-        ("cond30", "", cond30),
-    ]
-
-
-    # True가 하나도 없으면 pass
-    true_conds = [(name, desc) for name, desc, ok in conditions if ok]
-    if not true_conds:
+    # 룰 마스크 생성 (각 룰마다 Series[bool] 반환)
+    try:
+        rule_masks = build_conditions(data)
+    except KeyError as e:
+        print(f"[{ticker}] rule build_conditions KeyError: {e} (missing column in data)")
         return
 
-    # 원하는 출력 형태 1) "cond17, cond30" 처럼 이름만
-    # print(", ".join(name for name, _ in true_conds))
-    print(f'{ticker}: {", ".join(name for name, _ in true_conds)}')
+    # 오늘(마지막 행)에서 True인 룰 이름만 추출
+    true_conds = [
+        name for name in RULE_NAMES
+        if name in rule_masks and bool(rule_masks[name].iloc[-1])
+    ]
+
+    # True가 하나도 없으면 pass
+    if not true_conds:
+        return
 
 
 
@@ -496,6 +313,7 @@ def process_one(idx, count, ticker, exchangeRate):
         "pct_vs_lastweek": pct_vs_lastweek,              # 저번주 대비 이번주 등락률
         "pct_vs_last2week": pct_vs_last2week,            # 2주 전 대비 이번주 등락률
         "pct_vs_last3week": pct_vs_last3week,            # 3주 전 대비 이번주 등락률
+        "pct_vs_last4week": pct_vs_last4week,            # 4주 전 대비 이번주 등락률
         "today_pct": today_pct,                          # 오늘등락률
     }
 
@@ -585,7 +403,7 @@ if __name__ == "__main__":
     start = time.time()   # 시작 시간(초)
     nowTime = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
     print(f'{nowTime} - 🕒 running 4-1_find_low_point_us.py...')
-    print(' 10일 이상 5일선이 20일선 보다 아래에 있으면서 최근 -3%이 존재 + 오늘 4% 이상 상승')
+    # print(' 10일 이상 5일선이 20일선 보다 아래에 있으면서 최근 -3%이 존재 + 오늘 4% 이상 상승')
 
     exchangeRate = get_usd_krw_rate()
     if exchangeRate is None:

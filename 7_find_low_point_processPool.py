@@ -424,17 +424,17 @@ if __name__ == "__main__":
     for row in rows:
         print(f"\n {row['today']}   {row['stock_name']} [{row['ticker']}] {row['predict_str']}")
         # print(f"  3개월 전 날짜           : {row['3_months_ago']}")
-        print(f"  직전 3일 평균 거래대금  : {row['mean_prev3'] / 100_000_000:.0f}억")
-        print(f"  오늘 거래대금           : {row['today_tr_val'] / 100_000_000:.0f}억")
-        print(f"  거래대금 변동률         : {row['chg_tr_val']}%")
-        # print(f"  20일선 기울기                      ( > -1.7): {row['ma20_chg_rate']}")
-        print(f"  최근 20일 변동성                   ( > 1.5%): {row['vol20']}%")
-        print(f"  최근 20일 평균 등락률              ( >= -3%): {row['mean_ret20']}%")      # -3% 보다 커야함
-        print(f"  최근 30일 중 양봉 비율              ( > 30%): {row['pos30_ratio']}%")
-        print(f"  3개월 종가 최저 대비 최고 등락률 (30% ~ 80%): {row['three_m_chg_rate']}%" )    # 30 ~ 65 선호, 28-30이하 애매, 70이상 과열
-        print(f"  3개월 종가 최고 대비 오늘 등락률   ( > -40%): {row['today_chg_rate']}%")     # -10(15) ~ -25(30) 선호, -10(15)이상은 아직 고점, -25(30) 아래는 미달일 경우가 있음
-        print(f"  3개월 주봉 첫주 대비 이번주 등락률 ( > -20%): {row['pct_vs_firstweek']}%")   # -15 ~ 20 선호, -20이하는 장기 하락 추세, 30이상은 급등 끝물
-        print(f"  지난주 대비 등락률: {row['pct_vs_lastweek']}%")
+        # print(f"  직전 3일 평균 거래대금  : {row['mean_prev3'] / 100_000_000:.0f}억")
+        # print(f"  오늘 거래대금           : {row['today_tr_val'] / 100_000_000:.0f}억")
+        # print(f"  거래대금 변동률         : {row['chg_tr_val']}%")
+        # # print(f"  20일선 기울기                      ( > -1.7): {row['ma20_chg_rate']}")
+        # print(f"  최근 20일 변동성                   ( > 1.5%): {row['vol20']}%")
+        # print(f"  최근 20일 평균 등락률              ( >= -3%): {row['mean_ret20']}%")      # -3% 보다 커야함
+        # print(f"  최근 30일 중 양봉 비율              ( > 30%): {row['pos30_ratio']}%")
+        # print(f"  3개월 종가 최저 대비 최고 등락률 (30% ~ 80%): {row['three_m_chg_rate']}%" )    # 30 ~ 65 선호, 28-30이하 애매, 70이상 과열
+        # print(f"  3개월 종가 최고 대비 오늘 등락률   ( > -40%): {row['today_chg_rate']}%")     # -10(15) ~ -25(30) 선호, -10(15)이상은 아직 고점, -25(30) 아래는 미달일 경우가 있음
+        # print(f"  3개월 주봉 첫주 대비 이번주 등락률 ( > -20%): {row['pct_vs_firstweek']}%")   # -15 ~ 20 선호, -20이하는 장기 하락 추세, 30이상은 급등 끝물
+        # print(f"  지난주 대비 등락률: {row['pct_vs_lastweek']}%")
         print(f"  오늘 등락률       : {row['today_pct']}%")
         print(f"  검증 등락률       : {row['validation_chg_rate']}%")
         # cond = row.get('cond')
