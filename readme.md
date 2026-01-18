@@ -90,7 +90,28 @@ Required-by:
 ```
 `tensorflow-intel` 같은 경우 CPU를 기반으로 한 텐서플로우 이므로 다시 설치해야 한다.
 
+### tensorflow.keras 설치
+`ModuleNotFoundError: No module named 'tensorflow.keras'`
+- 지금 실행 중인 파이썬에 “정확히” 설치
+```bash
+$ python -c "import sys; print(sys.executable); print(sys.version)"
+3.8.7 (tags/v3.8.7:6503f05, Dec 21 2020, 17:59:51) [MSC v.1928 64 bit (AMD64)]
 
+$ python -m pip -V
+pip 24.1 from C:\Users\piw94\AppData\Local\Programs\Python\Python38\lib\site-packages\pip (python 3.8)
+```
+- 설치
+```bash
+python -m pip install --upgrade pip setuptools wheel
+python -m pip install "tensorflow==2.10.*"
+```
+- 이미 다른 버전이 설치되어 있으면
+```bash
+python -m pip uninstall -y tensorflow tensorflow-intel keras tensorboard tensorflow-estimator protobuf
+python -m pip install --upgrade pip
+python -m pip install "tensorflow-intel==2.13.0" "keras>=2.13.1,<2.14" "protobuf>=3.20.3,<5" "tensorboard>=2.13,<2.14" "tensorflow-estimator>=2.13,<2.14"
+
+```
 
 ## 실행 결과
 
