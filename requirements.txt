@@ -20,7 +20,7 @@ cycler==0.12.1
 DateTime==5.5
 Deprecated==1.2.14
 exchange-calendars==4.2.8
-finance-datareader==0.9.93
+finance-datareader==0.9.94
 flatbuffers==25.9.23
 fonttools==4.53.0
 frozendict==2.4.4
