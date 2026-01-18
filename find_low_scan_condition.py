@@ -2,7 +2,8 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 
-df = pd.read_csv("csv/low_result_250513_desc.csv")
+# df = pd.read_csv("csv/low_result_250513_desc.csv")
+df = pd.read_csv("csv/low_result_250507_desc.csv")
 # df = pd.read_csv("csv/low_result_us_desc.csv")
 
 TARGET_COL = "validation_chg_rate"
@@ -12,7 +13,15 @@ out_path = Path("lowscan_rules.py")
 # out_path = Path("lowscan_rules_us.py")
 
 # 숫자 피처들(원하면 더/덜 제외 가능)
-exclude = {"ticker", "stock_name", "predict_str", "today", TARGET_COL}
+exclude = {"ticker", "stock_name", "predict_str", "today", TARGET_COL,
+           "validation_chg_rate1",
+           "validation_chg_rate2",
+           "validation_chg_rate3",
+           "validation_chg_rate4",
+           "validation_chg_rate5",
+           "validation_chg_rate6",
+           "validation_chg_rate7",
+           }
 features = [c for c in df.columns if c not in exclude]
 
 N = len(df)
@@ -134,7 +143,7 @@ def make_name(conds):
     return "_and_".join(parts)
 
 # ✅ 여기서 "최대한 많이" 얻고 싶으면 top_n 크게
-rules = mine_rules(min_ratio=MIN_RATE, min_count=38, max_depth=7, beam=500, expand_ratio=0.45)
+rules = mine_rules(min_ratio=MIN_RATE, min_count=42, max_depth=7, beam=500, expand_ratio=0.45)
 # 0.8, 38, 7, 500, 0.45 > 1000/1000 > 80.77%
 # 0.8, 40, 7, 500, 0.45 > 992/1000 > 80.77%
 # 0.8, 42, 7, 500, 0.45 > 168/182 > 82.61%
@@ -143,6 +152,23 @@ rules = mine_rules(min_ratio=MIN_RATE, min_count=38, max_depth=7, beam=500, expa
 # 0.82, 38, 7, 500, 0.45 > 1000/1000 > 89.47%
 # 0.82, 39, 7, 500, 0.45 > 1000/1000 > 86%
 # 0.82, 40, 7, 500, 0.45 > 8/8 > 86%
+
+## 0.85, 30, 7, 500, 0.45 > 966/1000 > 83.8% 5/26
+## 0.83, 40, 7, 500, 0.45 > 96/108   > 87.8% 4/29
+
+## 0.82, 46, 7, 500, 0.45 > 96/96    > 90.32% 3/28
+## 0.82, 44, 7, 500, 0.45 > 96/96    > 제로
+## 0.82, 42, 7, 500, 0.45 > 159/163  > 88.4% 3/23
+## 0.82, 40, 7, 500, 0.45 > 996/1000 > 88.9% 3/24
+## 0.81, 46, 7, 500, 0.45 > 112/112  > 90.9% 2/20
+## 0.81, 40, 7, 500, 0.45 > 942/1000 > 82.7% 5/24
+## 0.81, 38, 7, 500, 0.45 > 998/1000 > 84.6% 6/33
+## 0.81, 36, 7, 500, 0.45 > 997/1000 > 80%  5/20
+## 0.81, 30, 7, 500, 0.45 > 962/1000 > 69.7% 13/30
+## 0.8,  50, 7, 500, 0.45 > 890/897  > 87.18% 5/34
+## 0.8,  40, 7, 500, 0.45 > 934/1000 > 82% 6/29
+## 0.8,  30, 7, 500, 0.45 > 911/1000 > 70% 17/40
+
 
 
 # 미장
