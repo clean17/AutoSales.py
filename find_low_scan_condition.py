@@ -208,14 +208,14 @@ def rule_to_code(name, conds, thr_round=3):
 
 
 # ✅ 여기서 "최대한 많이" 얻고 싶으면 top_n 크게
-rules = mine_rules(min_ratio=MIN_RATE, min_count=30, max_depth=7, beam=5000, expand_ratio=0.45)
+rules = mine_rules(min_ratio=MIN_RATE, min_count=30, max_depth=7, beam=20000, expand_ratio=0.4)
 
 
 
 # 미장
 # rules = mine_rules(min_ratio=MIN_RATE, min_count=50, max_depth=7, beam=500, expand_ratio=0.45)   # 0.85 > 82% // 0.9 > 87%
 
-top_n = min(5000, len(rules))   # 필요하면 1000도 가능(조건 엄청 많아짐)
+top_n = min(20000, len(rules))   # 필요하면 1000도 가능(조건 엄청 많아짐)
 conditions = {}
 
 selected = []  # (name, conds)만 저장해두고 파일로 씀
@@ -292,11 +292,8 @@ with out_path.open("w", encoding="utf-8") as f:
 
 print(f"saved to: {out_path.resolve()}")
 
-print("top_n:", top_n)
-print("selected:", len(selected))
-print("first 3 selected:", [n for n, _ in selected[:3]])
-
 import re
+txt = out_path.read_text(encoding="utf-8")
 
 m = re.search(r'RULE_NAMES\s*=\s*\[(.*?)\]\s*\n', txt, flags=re.S)
 block = m.group(1) if m else ""
