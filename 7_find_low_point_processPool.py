@@ -17,6 +17,14 @@ import time
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
 from lowscan_rules import build_conditions, RULE_NAMES
 
+
+# log_file = open("csv/output.log", "w", encoding="utf-8")
+# sys.stdout = log_file
+# sys.stderr = log_file
+# print("이건 파일로 감")
+# raise Exception("에러도 파일로 감")
+
+
 # 자동 탐색 (utils.py를 찾을 때까지 위로 올라가 탐색)
 here = Path(__file__).resolve()
 for parent in [here.parent, *here.parents]:
@@ -123,7 +131,7 @@ def process_one(idx, count, ticker, tickers_dict):
     # signal = signal_any_drop(data, 10, 4.0 ,-2.2) # 49/83
     # signal = signal_any_drop(data, 10, 4.0 ,-2.6) # 48/83
     # signal = signal_any_drop(data, 10, 4.0 ,-2.8) # 46/78
-    signal = signal_any_drop(data, 10, 4.0 ,-3.0) # 45/71 ---
+    signal = signal_any_drop(data, 8, 3.0 ,-2.5) # 45/71 ---
     # signal = signal_any_drop(data, 10, 4.0 ,-3.2) # 44/68
     # signal = signal_any_drop(data, 10, 4.0 ,-3.4) # 42/64
     # signal = signal_any_drop(data, 10, 4.0 ,-3.6) # 39/57
@@ -166,9 +174,30 @@ def process_one(idx, count, ticker, tickers_dict):
 
     if remaining_data is not None:
         r_data = remaining_data[:7]   # 10 > 7거래일로 수정
-        r_closes = r_data['종가']
-        r_max = r_closes.max()
-        validation_chg_rate = (r_max-m_current)/m_current*100    # 검증 등락률
+        # r_closes = r_data['종가']
+        r_closes = remaining_data['종가'].iloc[:7].reset_index(drop=True)
+        r_closes = r_closes.reindex(range(7))  # 0~6 없으면 NaN으로 채움
+
+        # r_max = r_closes.max()
+        r_max = r_closes.max(skipna=True)
+
+        r1, r2, r3, r4, r5, r6, r7 = (r_closes.iloc[i] for i in range(7))
+
+        def safe_rate(x, base):
+            if pd.isna(x) or base == 0 or not np.isfinite(base):
+                return np.nan
+            return (x - base) / base * 100
+
+        # validation_chg_rate = (r_max-m_current)/m_current*100    # 검증 등락률
+        validation_chg_rate  = safe_rate(r_max, m_current)
+        validation_chg_rate1 = safe_rate(r1, m_current)
+        validation_chg_rate2 = safe_rate(r2, m_current)
+        validation_chg_rate3 = safe_rate(r3, m_current)
+        validation_chg_rate4 = safe_rate(r4, m_current)
+        validation_chg_rate5 = safe_rate(r5, m_current)
+        validation_chg_rate6 = safe_rate(r6, m_current)
+        validation_chg_rate7 = safe_rate(r7, m_current)
+
     else:
         validation_chg_rate = 0
 
@@ -207,6 +236,13 @@ def process_one(idx, count, ticker, tickers_dict):
     pct_vs_last4week = round(result['pct_vs_last4week'], 2)
     today_pct = round(data.iloc[-1]['등락률'], 1)
     validation_chg_rate = round(validation_chg_rate, 1)
+    validation_chg_rate1 = round(validation_chg_rate1, 1)
+    validation_chg_rate2 = round(validation_chg_rate2, 1)
+    validation_chg_rate3 = round(validation_chg_rate3, 1)
+    validation_chg_rate4 = round(validation_chg_rate4, 1)
+    validation_chg_rate5 = round(validation_chg_rate5, 1)
+    validation_chg_rate6 = round(validation_chg_rate6, 1)
+    validation_chg_rate7 = round(validation_chg_rate7, 1)
     predict_str = '상승'
     if validation_chg_rate < VALIDATION_TARGET_RETURN:
         predict_str = '미달'
@@ -258,10 +294,6 @@ def process_one(idx, count, ticker, tickers_dict):
     if not true_conds:
         return
 
-    # 원하는 출력 형태 1) "cond17, cond30" 처럼 이름만
-    # print(f'{stock_name} ({validation_chg_rate}): {", ".join(name for name, _ in true_conds)}')
-
-
 
     ########################################################################
 
@@ -291,6 +323,13 @@ def process_one(idx, count, ticker, tickers_dict):
         "pct_vs_last4week": pct_vs_last4week,            # 4주 전 대비 이번주 등락률
         "today_pct": today_pct,                          # 오늘등락률
         "validation_chg_rate": validation_chg_rate,      # 검증 등락률
+        "validation_chg_rate1": validation_chg_rate1,      # 검증 등락률
+        "validation_chg_rate2": validation_chg_rate2,      # 검증 등락률
+        "validation_chg_rate3": validation_chg_rate3,      # 검증 등락률
+        "validation_chg_rate4": validation_chg_rate4,      # 검증 등락률
+        "validation_chg_rate5": validation_chg_rate5,      # 검증 등락률
+        "validation_chg_rate6": validation_chg_rate6,      # 검증 등락률
+        "validation_chg_rate7": validation_chg_rate7,      # 검증 등락률
         # "cond": ", ".join(name for name, _ in true_conds),
         # "cond": ", ".join(true_conds),
     }
@@ -352,8 +391,8 @@ if __name__ == "__main__":
     workers = os.cpu_count()
     BATCH_SIZE = 20
 
-    # end_idx = origin_idx + 180 # 마지막 idx (05/13부터 데이터 만드는 용)
-    end_idx = origin_idx + 50 # 마지막 idx
+    # end_idx = origin_idx + 170 # 마지막 idx (05/13부터 데이터 만드는 용)
+    end_idx = origin_idx + 90 # 마지막 idx
     # end_idx = origin_idx + 1 # 그날 하루만
 
     with ProcessPoolExecutor(max_workers=workers - 2) as executor:
@@ -399,29 +438,10 @@ if __name__ == "__main__":
                 up_cnt += 1
 
 
-
-    print('shortfall_cnt', shortfall_cnt)
-    print('up_cnt', up_cnt)
-    if shortfall_cnt+up_cnt==0:
-        total_up_rate=0
-    else:
-        total_up_rate = up_cnt/(shortfall_cnt+up_cnt)*100
-
-        # CSV 저장
-        # pd.DataFrame(rows).to_csv('csv/low_result.csv')
-        # pd.DataFrame(rows).to_csv('csv/low_result.csv', index=False) # 인덱스 칼럼 'Unnamed: 0' 생성하지 않음
-        # df = pd.read_csv("csv/low_result.csv")
-        # saved = sort_csv_by_today_desc(
-        #     in_path=r"csv/low_result.csv",
-        #     out_path=r"csv/low_result_desc.csv",
-        # )
-        # print("saved:", saved)
-
-    print(f"저점 매수 스크립트 결과 : {total_up_rate:.2f}%")
-
+    rows_sorted = sorted(rows, key=lambda row: row['today'])
 
     # 🔥 여기서 한 번에, 깔끔하게 출력
-    for row in rows:
+    for row in rows_sorted:
         print(f"\n {row['today']}   {row['stock_name']} [{row['ticker']}] {row['predict_str']}")
         # print(f"  3개월 전 날짜           : {row['3_months_ago']}")
         # print(f"  직전 3일 평균 거래대금  : {row['mean_prev3'] / 100_000_000:.0f}억")
@@ -436,12 +456,37 @@ if __name__ == "__main__":
         # print(f"  3개월 주봉 첫주 대비 이번주 등락률 ( > -20%): {row['pct_vs_firstweek']}%")   # -15 ~ 20 선호, -20이하는 장기 하락 추세, 30이상은 급등 끝물
         # print(f"  지난주 대비 등락률: {row['pct_vs_lastweek']}%")
         print(f"  오늘 등락률       : {row['today_pct']}%")
-        print(f"  검증 등락률       : {row['validation_chg_rate']}%")
+        print(f"  검증 등락률(max)   : {row['validation_chg_rate']}%")
+        # print(f"  검증 등락률1       : {row['validation_chg_rate1']}%")
+        # print(f"  검증 등락률2       : {row['validation_chg_rate2']}%")
+        # print(f"  검증 등락률3       : {row['validation_chg_rate3']}%")
+        # print(f"  검증 등락률4       : {row['validation_chg_rate4']}%")
+        # print(f"  검증 등락률5       : {row['validation_chg_rate5']}%")
+        # print(f"  검증 등락률6       : {row['validation_chg_rate6']}%")
+        # print(f"  검증 등락률7       : {row['validation_chg_rate7']}%")
         # cond = row.get('cond')
         # if cond is not None:
         #     print(f"  조건             : {row['cond']}")
 
 
+    print('shortfall_cnt', shortfall_cnt)
+    print('up_cnt', up_cnt)
+    if shortfall_cnt+up_cnt==0:
+        total_up_rate=0
+    else:
+        total_up_rate = up_cnt/(shortfall_cnt+up_cnt)*100
+
+        # # CSV 저장
+        # pd.DataFrame(rows).to_csv('csv/low_result.csv')
+        # pd.DataFrame(rows).to_csv('csv/low_result.csv', index=False) # 인덱스 칼럼 'Unnamed: 0' 생성하지 않음
+        # df = pd.read_csv("csv/low_result.csv")
+        # saved = sort_csv_by_today_desc(
+        #     in_path=r"csv/low_result.csv",
+        #     out_path=r"csv/low_result_desc.csv",
+        # )
+        # print("saved:", saved)
+
+    print(f"저점 매수 스크립트 결과 : {total_up_rate:.2f}%")
 
 
 
@@ -477,4 +522,6 @@ if __name__ == "__main__":
     minutes, seconds = divmod(remainder, 60)
 
     print(f"총 소요 시간: {hours}시간 {minutes}분 {seconds}초")
+    # log_file.close()
+    # print(f"총 소요 시간: {hours}시간 {minutes}분 {seconds}초")
 
