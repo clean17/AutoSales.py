@@ -1,13 +1,15 @@
 import pandas as pd
 import numpy as np
 from pathlib import Path
+import heapq
 
 # df = pd.read_csv("csv/low_result_250513_desc.csv")
-df = pd.read_csv("csv/low_result_250507_desc.csv")
+# df = pd.read_csv("csv/low_result_250507_desc.csv")
+df = pd.read_csv("csv/low_result_6_desc.csv")
 # df = pd.read_csv("csv/low_result_us_desc.csv")
 
 TARGET_COL = "validation_chg_rate"
-MIN_RATE = 0.82   # 미장 0.9
+MIN_RATE = 0.85   # 미장 0.9
 target = (df[TARGET_COL].to_numpy() >= 7)
 out_path = Path("lowscan_rules.py")
 # out_path = Path("lowscan_rules_us.py")
@@ -93,15 +95,25 @@ def mine_rules(
         min_ratio=0.7,
         min_count=20,
         max_depth=4,
-        beam=400,            # 탐색을 어디까지/어떤 후보를 계속 확장할지, 단계별 상위 수량만 다음 뎁스로 가져간다
-        expand_ratio=0.45,   # 중간 단계 확장용(너무 높이면 길이 막힘), 각 후보의 성능이 이 값보다 커야 다음 뎁스로 진행
+        beam=400,            # 탐색을 어디까지/어떤 후보를 계속 확장할지, 단계별 상위 수량만 다음 뎁스로 가져간다, // 안정성 목표(결과 흔들림 줄이기) 최소 5000 가능하면 10000~30000 쪽이 훨씬 안정적
+        expand_ratio=0.45,   # 중간 단계 확장용(너무 높이면 길이 막힘), 각 후보의 성능이 이 값보다 커야 다음 뎁스로 진행, “이 정도 성능(ratio)이 안 나오면 더 깊게 안 파겠다”는 확장 게이트
 ):
-    """(count, ratio, up_cnt, conds) 리스트 반환"""
+    """
+    (count, ratio, up_cnt, conds) 리스트 반환 > ratio, count 정렬 순서 변경
+    권장
+    expand_ratio = 0.45 → beam 5k~10k도 그럭저럭
+    expand_ratio = 0.40 → beam 10k~30k 권장
+    expand_ratio = 0.35 → beam 30k~ 아니면 빔 컷이 너무 심해질 가능성 큼
+    """
     beams = [(np.ones(N, dtype=bool), [])]
     good = {}
+    print('beam', beam)
 
     for _ in range(max_depth):
+        print('----------------------------------')
+        print("depth", _)
         new = []
+        heap = []  # min-heap, 가장 나쁜 후보가 맨 위
         for base_mask, conds in beams:
             used = {c[0] for c in conds}  # feature 중복 방지
             for (lit, lmask) in zip(literals, literal_masks):
@@ -123,15 +135,31 @@ def mine_rules(
                     if (prev is None) or (cnt > prev[0]) or (cnt == prev[0] and ratio > prev[1]):
                         good[key] = (cnt, ratio, up, conds + [lit])
 
-                if ratio >= expand_ratio:
-                    new.append((ratio, cnt, m, conds + [lit]))
+                if ratio >= expand_ratio:   # new에 들어가야 다음 뎁스로
+                    # new.append((ratio, cnt, m, conds + [lit]))   # 너무 크면 정렬 시 터진다
 
-        new.sort(key=lambda x: (-x[0], -x[1]))  # ratio 우선, 그 다음 count
+                    item = (ratio, cnt, m, conds + [lit])
+                    if len(heap) < beam:
+                        heapq.heappush(heap, item)
+                    else:
+                        # 현재 heap의 최악보다 좋으면 교체
+                        if (ratio > heap[0][0]) or (ratio == heap[0][0] and cnt > heap[0][1]):
+                            heapq.heapreplace(heap, item)
+
+        # new.sort(key=lambda x: (-x[0], -x[1]))  # ratio 우선, 그 다음 count   # 너무 크면 정렬 시 터진다
+        new = sorted(heap, key=lambda x: (-x[0], -x[1]))
+        print('new', len(new))
         new = new[:beam]
         beams = [(m, conds) for _, _, m, conds in new]
 
-    # count 큰 순 정렬
-    out = sorted(good.values(), key=lambda x: (-x[0], -x[1], len(x[3])))
+        tail_idx = min(len(new), beam) - 1
+        # print("best", new[:3])
+        print("tail", new[tail_idx])
+
+
+    # out = sorted(good.values(), key=lambda x: (-x[0], -x[1], len(x[3])))
+    # 1: ratio 우선, 그 다음 count
+    out = sorted(good.values(), key=lambda x: (-x[1], -x[0], len(x[3])))
     return out
 
 def make_name(conds):
@@ -143,7 +171,12 @@ def make_name(conds):
     return "_and_".join(parts)
 
 # ✅ 여기서 "최대한 많이" 얻고 싶으면 top_n 크게
-rules = mine_rules(min_ratio=MIN_RATE, min_count=42, max_depth=7, beam=500, expand_ratio=0.45)
+rules = mine_rules(min_ratio=MIN_RATE, min_count=30, max_depth=7, beam=10000, expand_ratio=0.44)
+# 9
+# 0.80 30 > 559 > 79.1% 5/19
+# 0.82 30 7 5000 >
+
+
 # 0.8, 38, 7, 500, 0.45 > 1000/1000 > 80.77%
 # 0.8, 40, 7, 500, 0.45 > 992/1000 > 80.77%
 # 0.8, 42, 7, 500, 0.45 > 168/182 > 82.61%
@@ -174,7 +207,7 @@ rules = mine_rules(min_ratio=MIN_RATE, min_count=42, max_depth=7, beam=500, expa
 # 미장
 # rules = mine_rules(min_ratio=MIN_RATE, min_count=50, max_depth=7, beam=500, expand_ratio=0.45)   # 0.85 > 82% // 0.9 > 87%
 
-top_n = min(1000, len(rules))   # 필요하면 1000도 가능(조건 엄청 많아짐)
+top_n = min(5000, len(rules))   # 필요하면 1000도 가능(조건 엄청 많아짐)
 conditions = {}
 
 selected = []  # (name, conds)만 저장해두고 파일로 씀
