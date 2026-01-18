@@ -48,31 +48,37 @@ for f in features:
         literal_masks.append(col > thr)
 
 
+"""
+expand_ratio = 0.45 → beam 5k~10k도 그럭저럭
+expand_ratio = 0.40 → beam 10k~30k 권장
+expand_ratio = 0.35 → beam 30k~ 아니면 빔 컷이 너무 심해질 가능성 큼
+
+beam : 단계별 상위 수량만 다음 뎁스로 가져간다, 안정성 목표(결과 흔들림 줄이기) 최소 5000 가능하면 10000~30000 쪽이 훨씬 안정적
+expand_ratio : 각 후보의 성능이 이 값보다 커야 다음 뎁스로 진행
+"""
+import numpy as np
+import heapq
+from itertools import count
+
 def mine_rules(
         min_ratio=0.7,
         min_count=20,
         max_depth=4,
-        beam=400,            # 탐색을 어디까지/어떤 후보를 계속 확장할지, 단계별 상위 수량만 다음 뎁스로 가져간다, // 안정성 목표(결과 흔들림 줄이기) 최소 5000 가능하면 10000~30000 쪽이 훨씬 안정적
-        expand_ratio=0.45,   # 중간 단계 확장용(너무 높이면 길이 막힘), 각 후보의 성능이 이 값보다 커야 다음 뎁스로 진행, “이 정도 성능(ratio)이 안 나오면 더 깊게 안 파겠다”는 확장 게이트
+        beam=400,
+        expand_ratio=0.45,
+        cnt_priority_ratio=0.85,   # <-- 여기부터 cnt를 더 중요하게 볼 임계치
+        top_n=None,                # 원하면 최종 결과 상위 N개만 리턴
 ):
     """
     (count, ratio, up_cnt, conds) 리스트 반환
-    - out 정렬: ratio 우선, 그 다음 count, 그 다음 길이
-    - beam 확장 후보는 heap(Top-K)으로 유지하여 메모리 폭발 방지
-    - B) early-skip: heap이 가득 찼을 때 최악보다 나쁜 후보는 heap 연산 자체를 생략
 
-    정책(beam 선별):
-    - r2 = round(ratio, 2) 를 1순위로 (예: 0.842 -> 0.84, 0.858 -> 0.86)
-    - r2 동률이면 cnt 큰 후보 우대
-    - (추가 동률은 uid로 안정적으로 처리)
+    beam(확장 후보) 선별 정책(유지):
+    - ratio 우선
+    - ratio 동률이면 cnt 큰 후보 우대
 
-    주의:
-    - good 저장(최종 룰 채택)은 '실제 ratio' 기준(min_ratio) 그대로 유지
-    - beam 확장 경로는 r2 기준으로 바뀌므로 결과(탐색 경로)는 달라질 수 있음
-
-    expand_ratio = 0.45 → beam 5k~10k도 그럭저럭
-    expand_ratio = 0.40 → beam 10k~30k 권장
-    expand_ratio = 0.35 → beam 30k~ 아니면 빔 컷이 너무 심해질 가능성 큼
+    최종 out 정렬 정책(변경):
+    - ratio >= cnt_priority_ratio 이면 cnt 우선(그 다음 ratio)
+    - ratio <  cnt_priority_ratio 이면 ratio 우선(그 다음 cnt)
     """
 
     beams = [(np.ones(N, dtype=bool), [])]
@@ -80,20 +86,17 @@ def mine_rules(
 
     print('beam', beam)
     print("expand_ratio", expand_ratio, "min_ratio", min_ratio, "min_count", min_count)
+    print("cnt_priority_ratio", cnt_priority_ratio)
 
     for depth in range(max_depth):
         print('----------------------------------')
         print("depth", depth)
 
-        # heap item: (r2, cnt, uid, ratio, mask, conds)
-        # min-heap이라 "가장 나쁜 후보"가 맨 앞:
-        #  - r2 낮을수록 나쁨
-        #  - r2 같으면 cnt 작을수록 나쁨
         heap = []
         uid = count()
 
         for base_mask, conds in beams:
-            used = {c[0] for c in conds}  # feature 중복 방지
+            used = {c[0] for c in conds}
 
             for (lit, lmask) in zip(literals, literal_masks):
                 if lit[0] in used:
@@ -107,51 +110,54 @@ def mine_rules(
                 up = int((m & target).sum())
                 ratio = up / cnt
 
-                # good 저장 (최종 룰), 순위는 실제 ratio로
+                # good 저장
                 if ratio >= min_ratio:
                     key = tuple(sorted((c[0], c[1], round(float(c[2]), 6)) for c in (conds + [lit])))
                     prev = good.get(key)
                     if (prev is None) or (cnt > prev[0]) or (cnt == prev[0] and ratio > prev[1]):
                         good[key] = (cnt, ratio, up, conds + [lit])
 
-                # 다음 depth로 확장 후보
+                # 다음 depth 확장 후보
                 if ratio >= expand_ratio:
-                    r2 = round(float(ratio), 2)
-
-                    # early-skip: heap이 꽉 찼으면 최악보다 나쁘면 패스
                     if len(heap) == beam:
-                        worst_r2, worst_cnt = heap[0][0], heap[0][1]
-                        if (r2 < worst_r2) or (r2 == worst_r2 and cnt <= worst_cnt):
+                        worst_ratio, worst_cnt = heap[0][0], heap[0][1]
+                        if (ratio < worst_ratio) or (ratio == worst_ratio and cnt <= worst_cnt):
                             continue
 
-                    item = (r2, cnt, next(uid), ratio, m, conds + [lit])
+                    item = (ratio, cnt, next(uid), m, conds + [lit])
 
                     if len(heap) < beam:
                         heapq.heappush(heap, item)
                     else:
                         heapq.heapreplace(heap, item)
 
-
-        # 다음 depth로 넘길 후보들: r2 내림차순, cnt 내림차순 (동률이면 실제 ratio도 내림차순으로 살짝 정리)
-        new = sorted(heap, key=lambda x: (-x[0], -x[1], -x[3]))
+        new = sorted(heap, key=lambda x: (-x[0], -x[1]))
         print("new", len(new))
 
         if not new:
             print("no expandable candidates; stopping.")
-            beams = []
             break
 
         tail = new[-1]
-        print("tail r2,cnt,ratio:", tail[0], tail[1], tail[3], "conds:", tail[5])
+        print("tail ratio,cnt:", tail[0], tail[1], "conds:", tail[4])
 
-        # 다음 depth beams 갱신
-        beams = [(m, conds) for _, _, _, _, m, conds in new]
+        beams = [(m, conds) for _, _, _, m, conds in new]
 
-    # 최종 out 정렬도 원하면 r2 기반으로 바꿀 수 있지만,
-    # 보통은 실제 ratio를 쓰는 게 더 합리적이라 그대로 둠:
-    out = sorted(good.values(), key=lambda x: (-x[1], -x[0], len(x[3])))
-    # 최종 out도 “r2 동률이면 cnt 우대”로 정렬하고 싶다면
-    # out = sorted(good.values(), key=lambda x: (-round(float(x[1]), 1), -x[0], -x[1], len(x[3])))
+    # ---- 최종 out 정렬(핵심 변경) ----
+    def out_key(x):
+        cnt, ratio, up, conds = x
+        if ratio >= cnt_priority_ratio:
+            # ratio가 충분히 높으면 cnt가 더 중요
+            return (0, -cnt, -ratio, len(conds))
+        else:
+            # ratio가 아직 낮으면 ratio를 더 중요
+            return (1, -ratio, -cnt, len(conds))
+
+    out = sorted(good.values(), key=out_key)
+
+    if top_n is not None:
+        out = out[:top_n]
+
     return out
 
 
