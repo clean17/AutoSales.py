@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 import heapq
+from itertools import count
 
 # df = pd.read_csv("csv/low_result_250513_desc.csv")
 # df = pd.read_csv("csv/low_result_250507_desc.csv")
@@ -97,28 +98,59 @@ def mine_rules(
         max_depth=4,
         beam=400,            # 탐색을 어디까지/어떤 후보를 계속 확장할지, 단계별 상위 수량만 다음 뎁스로 가져간다, // 안정성 목표(결과 흔들림 줄이기) 최소 5000 가능하면 10000~30000 쪽이 훨씬 안정적
         expand_ratio=0.45,   # 중간 단계 확장용(너무 높이면 길이 막힘), 각 후보의 성능이 이 값보다 커야 다음 뎁스로 진행, “이 정도 성능(ratio)이 안 나오면 더 깊게 안 파겠다”는 확장 게이트
+        max_eval_per_depth=None,   # A) depth당 후보 평가 상한 (None이면 무제한), pc가 멈추면 제한을 넣어야 한다
 ):
     """
-    (count, ratio, up_cnt, conds) 리스트 반환 > ratio, count 정렬 순서 변경
-    권장
+    (count, ratio, up_cnt, conds) 리스트 반환
+    - out 정렬: ratio 우선, 그 다음 count, 그 다음 길이
+    - beam 확장 후보는 heap(Top-K)으로 유지하여 메모리 폭발 방지
+    - A) max_eval_per_depth: depth별 평가 후보 상한으로 런타임 폭발 방지
+    - B) early-skip: heap이 가득 찼을 때 최악보다 나쁜 후보는 heap 연산 자체를 생략
+
+    정책(beam 선별):
+    - r2 = round(ratio, 2) 를 1순위로 (예: 0.842 -> 0.84, 0.858 -> 0.86)
+    - r2 동률이면 cnt 큰 후보 우대
+    - (추가 동률은 uid로 안정적으로 처리)
+
+    주의:
+    - good 저장(최종 룰 채택)은 '실제 ratio' 기준(min_ratio) 그대로 유지
+    - beam 확장 경로는 r2 기준으로 바뀌므로 결과(탐색 경로)는 달라질 수 있음
+
     expand_ratio = 0.45 → beam 5k~10k도 그럭저럭
     expand_ratio = 0.40 → beam 10k~30k 권장
     expand_ratio = 0.35 → beam 30k~ 아니면 빔 컷이 너무 심해질 가능성 큼
     """
+
     beams = [(np.ones(N, dtype=bool), [])]
     good = {}
-    print('beam', beam)
 
-    for _ in range(max_depth):
+    print('beam', beam)
+    print("expand_ratio", expand_ratio, "min_ratio", min_ratio, "min_count", min_count)
+
+    for depth in range(max_depth):
         print('----------------------------------')
-        print("depth", _)
-        new = []
-        heap = []  # min-heap, 가장 나쁜 후보가 맨 위
+        print("depth", depth)
+
+        # heap item: (r2, cnt, uid, ratio, mask, conds)
+        # min-heap이라 "가장 나쁜 후보"가 맨 앞:
+        #  - r2 낮을수록 나쁨
+        #  - r2 같으면 cnt 작을수록 나쁨
+        heap = []
+        uid = count()
+        eval_cnt = 0               # A) 이번 depth에서 평가한 후보 수
+
         for base_mask, conds in beams:
             used = {c[0] for c in conds}  # feature 중복 방지
+
             for (lit, lmask) in zip(literals, literal_masks):
                 if lit[0] in used:
                     continue
+
+                # A) depth별 평가 상한
+                eval_cnt += 1
+                if max_eval_per_depth is not None and eval_cnt > max_eval_per_depth:
+                    # 너무 오래 걸리면 이 depth는 여기서 종료
+                    break
 
                 m = base_mask & lmask
                 cnt = int(m.sum())
@@ -128,38 +160,54 @@ def mine_rules(
                 up = int((m & target).sum())
                 ratio = up / cnt
 
+                # good 저장 (최종 룰), 순위는 실제 ratio로
                 if ratio >= min_ratio:
                     key = tuple(sorted((c[0], c[1], round(float(c[2]), 6)) for c in (conds + [lit])))
-                    # 같은 key면 더 큰 count/ratio 우선
                     prev = good.get(key)
                     if (prev is None) or (cnt > prev[0]) or (cnt == prev[0] and ratio > prev[1]):
                         good[key] = (cnt, ratio, up, conds + [lit])
 
-                if ratio >= expand_ratio:   # new에 들어가야 다음 뎁스로
-                    # new.append((ratio, cnt, m, conds + [lit]))   # 너무 크면 정렬 시 터진다
+                # 다음 depth로 확장 후보
+                if ratio >= expand_ratio:
+                    r2 = round(float(ratio), 2)
 
-                    item = (ratio, cnt, m, conds + [lit])
+                    # early-skip: heap이 꽉 찼으면 최악보다 나쁘면 패스
+                    if len(heap) == beam:
+                        worst_r2, worst_cnt = heap[0][0], heap[0][1]
+                        if (r2 < worst_r2) or (r2 == worst_r2 and cnt <= worst_cnt):
+                            continue
+
+                    item = (r2, cnt, next(uid), ratio, m, conds + [lit])
+
                     if len(heap) < beam:
                         heapq.heappush(heap, item)
                     else:
-                        # 현재 heap의 최악보다 좋으면 교체
-                        if (ratio > heap[0][0]) or (ratio == heap[0][0] and cnt > heap[0][1]):
-                            heapq.heapreplace(heap, item)
+                        heapq.heapreplace(heap, item)
 
-        # new.sort(key=lambda x: (-x[0], -x[1]))  # ratio 우선, 그 다음 count   # 너무 크면 정렬 시 터진다
-        new = sorted(heap, key=lambda x: (-x[0], -x[1]))
-        print('new', len(new))
-        new = new[:beam]
-        beams = [(m, conds) for _, _, m, conds in new]
+            # A) break가 걸렸다면 base_mask 루프도 멈춤
+            if max_eval_per_depth is not None and eval_cnt > max_eval_per_depth:
+                break
 
-        tail_idx = min(len(new), beam) - 1
-        # print("best", new[:3])
-        print("tail", new[tail_idx])
+        # 다음 depth로 넘길 후보들: r2 내림차순, cnt 내림차순 (동률이면 실제 ratio도 내림차순으로 살짝 정리)
+        new = sorted(heap, key=lambda x: (-x[0], -x[1], -x[3]))
+        print("eval_cnt", eval_cnt, "new", len(new))
 
+        if not new:
+            print("no expandable candidates; stopping.")
+            beams = []
+            break
 
-    # out = sorted(good.values(), key=lambda x: (-x[0], -x[1], len(x[3])))
-    # 1: ratio 우선, 그 다음 count
+        tail = new[-1]
+        print("tail r2,cnt,ratio:", tail[0], tail[1], tail[3], "conds:", tail[5])
+
+        # 다음 depth beams 갱신
+        beams = [(m, conds) for _, _, _, _, m, conds in new]
+
+    # 최종 out 정렬도 원하면 r2 기반으로 바꿀 수 있지만,
+    # 보통은 실제 ratio를 쓰는 게 더 합리적이라 그대로 둠:
     out = sorted(good.values(), key=lambda x: (-x[1], -x[0], len(x[3])))
+    # 최종 out도 “r2 동률이면 cnt 우대”로 정렬하고 싶다면
+    # out = sorted(good.values(), key=lambda x: (-round(float(x[1]), 1), -x[0], -x[1], len(x[3])))
     return out
 
 def make_name(conds):
@@ -171,36 +219,7 @@ def make_name(conds):
     return "_and_".join(parts)
 
 # ✅ 여기서 "최대한 많이" 얻고 싶으면 top_n 크게
-rules = mine_rules(min_ratio=MIN_RATE, min_count=30, max_depth=7, beam=10000, expand_ratio=0.44)
-# 9
-# 0.80 30 > 559 > 79.1% 5/19
-# 0.82 30 7 5000 >
-
-
-# 0.8, 38, 7, 500, 0.45 > 1000/1000 > 80.77%
-# 0.8, 40, 7, 500, 0.45 > 992/1000 > 80.77%
-# 0.8, 42, 7, 500, 0.45 > 168/182 > 82.61%
-# 0.8, 44, 7, 500, 0.45 > 85/89 > 83.33%
-
-# 0.82, 38, 7, 500, 0.45 > 1000/1000 > 89.47%
-# 0.82, 39, 7, 500, 0.45 > 1000/1000 > 86%
-# 0.82, 40, 7, 500, 0.45 > 8/8 > 86%
-
-## 0.85, 30, 7, 500, 0.45 > 966/1000 > 83.8% 5/26
-## 0.83, 40, 7, 500, 0.45 > 96/108   > 87.8% 4/29
-
-## 0.82, 46, 7, 500, 0.45 > 96/96    > 90.32% 3/28
-## 0.82, 44, 7, 500, 0.45 > 96/96    > 제로
-## 0.82, 42, 7, 500, 0.45 > 159/163  > 88.4% 3/23
-## 0.82, 40, 7, 500, 0.45 > 996/1000 > 88.9% 3/24
-## 0.81, 46, 7, 500, 0.45 > 112/112  > 90.9% 2/20
-## 0.81, 40, 7, 500, 0.45 > 942/1000 > 82.7% 5/24
-## 0.81, 38, 7, 500, 0.45 > 998/1000 > 84.6% 6/33
-## 0.81, 36, 7, 500, 0.45 > 997/1000 > 80%  5/20
-## 0.81, 30, 7, 500, 0.45 > 962/1000 > 69.7% 13/30
-## 0.8,  50, 7, 500, 0.45 > 890/897  > 87.18% 5/34
-## 0.8,  40, 7, 500, 0.45 > 934/1000 > 82% 6/29
-## 0.8,  30, 7, 500, 0.45 > 911/1000 > 70% 17/40
+rules = mine_rules(min_ratio=MIN_RATE, min_count=40, max_depth=7, beam=20000, expand_ratio=0.42)
 
 
 
