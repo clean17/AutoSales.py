@@ -6,14 +6,15 @@ from itertools import count
 
 # df = pd.read_csv("csv/low_result_250513_desc.csv")
 # df = pd.read_csv("csv/low_result_250507_desc.csv")
-df = pd.read_csv("csv/low_result_6_desc.csv")
-# df = pd.read_csv("csv/low_result_us_desc.csv")
+
+# df = pd.read_csv("csv/low_result_6_desc.csv")
+df = pd.read_csv("csv/low_result_us_6_desc.csv")   # 미장
 
 TARGET_COL = "validation_chg_rate"
-MIN_RATE = 0.85   # 미장 0.9
+MIN_RATE = 0.85
 target = (df[TARGET_COL].to_numpy() >= 7)
-out_path = Path("lowscan_rules.py")
-# out_path = Path("lowscan_rules_us.py")
+# out_path = Path("lowscan_rules.py")
+out_path = Path("lowscan_rules_us.py")   # 미장
 
 # 숫자 피처들(원하면 더/덜 제외 가능)
 exclude = {"ticker", "stock_name", "predict_str", "today", TARGET_COL,
@@ -208,12 +209,10 @@ def rule_to_code(name, conds, thr_round=3):
 
 
 # ✅ 여기서 "최대한 많이" 얻고 싶으면 top_n 크게
-rules = mine_rules(min_ratio=MIN_RATE, min_count=30, max_depth=7, beam=20000, expand_ratio=0.4)
-
-
+# rules = mine_rules(min_ratio=MIN_RATE, min_count=30, max_depth=7, beam=20000, expand_ratio=0.4)
 
 # 미장
-# rules = mine_rules(min_ratio=MIN_RATE, min_count=50, max_depth=7, beam=500, expand_ratio=0.45)   # 0.85 > 82% // 0.9 > 87%
+rules = mine_rules(min_ratio=MIN_RATE, min_count=50, max_depth=7, beam=20000, expand_ratio=0.45)
 
 top_n = min(20000, len(rules))   # 필요하면 1000도 가능(조건 엄청 많아짐)
 conditions = {}
