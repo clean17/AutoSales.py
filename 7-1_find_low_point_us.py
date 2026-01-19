@@ -91,7 +91,7 @@ def process_one(idx, count, ticker, exchangeRate):
         chg_tr_val = (today_tr_val-mean_prev3)/mean_prev3*100
 
     # ★★★★★ 3거래일 평균 거래대금 5억보다 작으면 패스 ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-    if round(mean_prev3, 1) * exchangeRate / 100_000_000 < 5:
+    if round(mean_prev3, 1) * exchangeRate / 100_000_000 < 3:
         return
 
 
@@ -128,7 +128,7 @@ def process_one(idx, count, ticker, exchangeRate):
     # signal = signal_any_drop(data, 10, 4.0 ,-2.2) # 49/83
     # signal = signal_any_drop(data, 10, 4.0 ,-2.6) # 48/83
     # signal = signal_any_drop(data, 10, 4.0 ,-2.8) # 46/78
-    signal = signal_any_drop(data, 10, 4.0 ,-3.0, 'today_chg_rate') # 45/71 ---
+    signal = signal_any_drop(data, 6, 3.0 ,-2.5, 'today_chg_rate') # 45/71 ---
     # signal = signal_any_drop(data, 10, 4.0 ,-3.2) # 44/68
     # signal = signal_any_drop(data, 10, 4.0 ,-3.4) # 42/64
     # signal = signal_any_drop(data, 10, 4.0 ,-3.6) # 39/57
@@ -171,9 +171,30 @@ def process_one(idx, count, ticker, exchangeRate):
 
     if remaining_data is not None:
         r_data = remaining_data[:7]   # 10 > 7거래일로 수정
-        r_closes = r_data['Close']
-        r_max = r_closes.max()
-        validation_chg_rate = (r_max-m_current)/m_current*100    # 검증 등락률
+        # r_closes = r_data['Close']
+        r_closes = remaining_data['Close'].iloc[:7].reset_index(drop=True)
+        r_closes = r_closes.reindex(range(7))  # 0~6 없으면 NaN으로 채움
+
+        # r_max = r_closes.max()
+        r_max = r_closes.max(skipna=True)
+
+        r1, r2, r3, r4, r5, r6, r7 = (r_closes.iloc[i] for i in range(7))
+
+        def safe_rate(x, base):
+            if pd.isna(x) or base == 0 or not np.isfinite(base):
+                return np.nan
+            return (x - base) / base * 100
+
+
+        # validation_chg_rate = (r_max-m_current)/m_current*100    # 검증 등락률
+        validation_chg_rate  = safe_rate(r_max, m_current)
+        validation_chg_rate1 = safe_rate(r1, m_current)
+        validation_chg_rate2 = safe_rate(r2, m_current)
+        validation_chg_rate3 = safe_rate(r3, m_current)
+        validation_chg_rate4 = safe_rate(r4, m_current)
+        validation_chg_rate5 = safe_rate(r5, m_current)
+        validation_chg_rate6 = safe_rate(r6, m_current)
+        validation_chg_rate7 = safe_rate(r7, m_current)
     else:
         validation_chg_rate = 0
 
@@ -212,56 +233,63 @@ def process_one(idx, count, ticker, exchangeRate):
     pct_vs_last4week = round(result['pct_vs_last4week'], 2)
     today_pct = round(data.iloc[-1]['today_chg_rate'], 1)
     validation_chg_rate = round(validation_chg_rate, 1)
+    validation_chg_rate1 = round(validation_chg_rate1, 1)
+    validation_chg_rate2 = round(validation_chg_rate2, 1)
+    validation_chg_rate3 = round(validation_chg_rate3, 1)
+    validation_chg_rate4 = round(validation_chg_rate4, 1)
+    validation_chg_rate5 = round(validation_chg_rate5, 1)
+    validation_chg_rate6 = round(validation_chg_rate6, 1)
+    validation_chg_rate7 = round(validation_chg_rate7, 1)
     predict_str = '상승'
     if validation_chg_rate < VALIDATION_TARGET_RETURN:
         predict_str = '미달'
 
 
-    # --- build_conditions()가 참조하는 컬럼들을 data에 주입 (스칼라 → 컬럼 브로드캐스트) ---
-    rule_features = {
-        "ma5_chg_rate": ma5_chg_rate,
-        "ma20_chg_rate": ma20_chg_rate,
-        "vol20": vol20,
-        "vol30": vol30,
-        "mean_ret20": mean_ret20,
-        "mean_ret30": mean_ret30,
-        "pos20_ratio": pos20_ratio,
-        "pos30_ratio": pos30_ratio,
-        "mean_prev3": mean_prev3,
-        "today_tr_val": today_tr_val,
-        "chg_tr_val": chg_tr_val,
-        "three_m_chg_rate": three_m_chg_rate,
-        "today_chg_rate": today_chg_rate,
-        "pct_vs_firstweek": pct_vs_firstweek,
-        "pct_vs_lastweek": pct_vs_lastweek,
-        "pct_vs_last2week": pct_vs_last2week,
-        "pct_vs_last3week": pct_vs_last3week,
-        "pct_vs_last4week": pct_vs_last4week,
-        "today_pct": today_pct,
-    }
-
-    # data에 컬럼이 없거나 NaN이면 넣기 (기존 컬럼 있으면 덮어쓸지 말지는 옵션)
-    data = data.copy()
-    for k, v in rule_features.items():
-        data[k] = v
-
-
-    # 룰 마스크 생성 (각 룰마다 Series[bool] 반환)
-    try:
-        rule_masks = build_conditions(data)
-    except KeyError as e:
-        print(f"[{ticker}] rule build_conditions KeyError: {e} (missing column in data)")
-        return
-
-    # 오늘(마지막 행)에서 True인 룰 이름만 추출
-    true_conds = [
-        name for name in RULE_NAMES
-        if name in rule_masks and bool(rule_masks[name].iloc[-1])
-    ]
-
-    # True가 하나도 없으면 pass
-    if not true_conds:
-        return
+    # # --- build_conditions()가 참조하는 컬럼들을 data에 주입 (스칼라 → 컬럼 브로드캐스트) ---
+    # rule_features = {
+    #     "ma5_chg_rate": ma5_chg_rate,
+    #     "ma20_chg_rate": ma20_chg_rate,
+    #     "vol20": vol20,
+    #     "vol30": vol30,
+    #     "mean_ret20": mean_ret20,
+    #     "mean_ret30": mean_ret30,
+    #     "pos20_ratio": pos20_ratio,
+    #     "pos30_ratio": pos30_ratio,
+    #     "mean_prev3": mean_prev3,
+    #     "today_tr_val": today_tr_val,
+    #     "chg_tr_val": chg_tr_val,
+    #     "three_m_chg_rate": three_m_chg_rate,
+    #     "today_chg_rate": today_chg_rate,
+    #     "pct_vs_firstweek": pct_vs_firstweek,
+    #     "pct_vs_lastweek": pct_vs_lastweek,
+    #     "pct_vs_last2week": pct_vs_last2week,
+    #     "pct_vs_last3week": pct_vs_last3week,
+    #     "pct_vs_last4week": pct_vs_last4week,
+    #     "today_pct": today_pct,
+    # }
+    #
+    # # data에 컬럼이 없거나 NaN이면 넣기 (기존 컬럼 있으면 덮어쓸지 말지는 옵션)
+    # data = data.copy()
+    # for k, v in rule_features.items():
+    #     data[k] = v
+    #
+    #
+    # # 룰 마스크 생성 (각 룰마다 Series[bool] 반환)
+    # try:
+    #     rule_masks = build_conditions(data)
+    # except KeyError as e:
+    #     print(f"[{ticker}] rule build_conditions KeyError: {e} (missing column in data)")
+    #     return
+    #
+    # # 오늘(마지막 행)에서 True인 룰 이름만 추출
+    # true_conds = [
+    #     name for name in RULE_NAMES
+    #     if name in rule_masks and bool(rule_masks[name].iloc[-1])
+    # ]
+    #
+    # # True가 하나도 없으면 pass
+    # if not true_conds:
+    #     return
 
 
     ########################################################################
@@ -291,6 +319,13 @@ def process_one(idx, count, ticker, exchangeRate):
         "pct_vs_last4week": pct_vs_last4week,            # 4주 전 대비 이번주 등락률
         "today_pct": today_pct,                          # 오늘등락률
         "validation_chg_rate": validation_chg_rate,      # 검증 등락률
+        "validation_chg_rate1": validation_chg_rate1,      # 검증 등락률
+        "validation_chg_rate2": validation_chg_rate2,      # 검증 등락률
+        "validation_chg_rate3": validation_chg_rate3,      # 검증 등락률
+        "validation_chg_rate4": validation_chg_rate4,      # 검증 등락률
+        "validation_chg_rate5": validation_chg_rate5,      # 검증 등락률
+        "validation_chg_rate6": validation_chg_rate6,      # 검증 등락률
+        "validation_chg_rate7": validation_chg_rate7,      # 검증 등락률
         # "cond": {", ".join(name for name, _ in true_conds)}
     }
 
@@ -355,8 +390,8 @@ if __name__ == "__main__":
     workers = os.cpu_count()
     BATCH_SIZE = 20
 
-    # end_idx = origin_idx + 160 # 마지막 idx (04/15부터 데이터 만드는 용)
-    end_idx = origin_idx + 30 # 마지막 idx
+    end_idx = origin_idx + 170 # 마지막 idx (04/15부터 데이터 만드는 용)
+    # end_idx = origin_idx + 60 # 마지막 idx
     # end_idx = origin_idx + 1 # 그날 하루만
 
     with ProcessPoolExecutor(max_workers=workers - 2) as executor:
@@ -401,25 +436,6 @@ if __name__ == "__main__":
             else:
                 up_cnt += 1
 
-    print('shortfall_cnt', shortfall_cnt)
-    print('up_cnt', up_cnt)
-    if shortfall_cnt+up_cnt==0:
-        total_up_rate=0
-    else:
-        total_up_rate = up_cnt/(shortfall_cnt+up_cnt)*100
-
-        # CSV 저장
-        # pd.DataFrame(rows).to_csv('csv/low_result_us.csv')
-        # pd.DataFrame(rows).to_csv('csv/low_result_us.csv', index=False) # 인덱스 칼럼 'Unnamed: 0' 생성하지 않음
-        # df = pd.read_csv("csv/low_result_us.csv")
-        # saved = sort_csv_by_today_desc(
-        #     in_path=r"csv/low_result_us.csv",
-        #     out_path=r"csv/low_result_us_desc.csv",
-        # )
-        # print("saved:", saved)
-
-    print(f"저점 매수 스크립트 결과 : {total_up_rate:.2f}%")
-
 
     # 🔥 여기서 한 번에, 깔끔하게 출력
     for row in rows:
@@ -436,12 +452,36 @@ if __name__ == "__main__":
         # print(f"  3개월 종가 최고 대비 오늘 등락률   ( > -40%): {row['today_chg_rate']}%")     # -10(15) ~ -25(30) 선호, -10(15)이상은 아직 고점, -25(30) 아래는 미달일 경우가 있음
         # print(f"  3개월 주봉 첫주 대비 이번주 등락률 ( > -20%): {row['pct_vs_firstweek']}%")   # -15 ~ 20 선호, -20이하는 장기 하락 추세, 30이상은 급등 끝물
         # print(f"  지난주 대비 등락률: {row['pct_vs_lastweek']}%")
-        print(f"  오늘 등락률       : {row['today_pct']}%")
-        print(f"  검증 등락률       : {row['validation_chg_rate']}%")
+        print(f"  오늘 등락률        : {row['today_pct']}%")
+        print(f"  검증 등락률(max)   : {row['validation_chg_rate']}%")
+        # print(f"  검증 등락률1       : {row['validation_chg_rate1']}%")
+        # print(f"  검증 등락률2       : {row['validation_chg_rate2']}%")
+        # print(f"  검증 등락률3       : {row['validation_chg_rate3']}%")
+        # print(f"  검증 등락률4       : {row['validation_chg_rate4']}%")
+        # print(f"  검증 등락률5       : {row['validation_chg_rate5']}%")
+        # print(f"  검증 등락률6       : {row['validation_chg_rate6']}%")
+        # print(f"  검증 등락률7       : {row['validation_chg_rate7']}%")
     #     print(f"  조건             : {row['cond']}")
 
 
+    print('shortfall_cnt', shortfall_cnt)
+    print('up_cnt', up_cnt)
+    if shortfall_cnt+up_cnt==0:
+        total_up_rate=0
+    else:
+        total_up_rate = up_cnt/(shortfall_cnt+up_cnt)*100
 
+        # CSV 저장
+        # pd.DataFrame(rows).to_csv('csv/low_result_us.csv')
+        pd.DataFrame(rows).to_csv('csv/low_result_us_6.csv', index=False) # 인덱스 칼럼 'Unnamed: 0' 생성하지 않음
+        df = pd.read_csv("csv/low_result_us_6.csv")
+        saved = sort_csv_by_today_desc(
+            in_path=r"csv/low_result_us_6.csv",
+            out_path=r"csv/low_result_us_6_desc.csv",
+        )
+        print("saved:", saved)
+
+    print(f"저점 매수 스크립트 결과 : {total_up_rate:.2f}%")
 
 
     # 싱글 스레드로 그래프 처리

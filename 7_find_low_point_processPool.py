@@ -96,7 +96,7 @@ def process_one(idx, count, ticker, tickers_dict):
         chg_tr_val = (today_tr_val-mean_prev3)/mean_prev3*100
 
     # ★★★★★ 3거래일 평균 거래대금 5억보다 작으면 패스 ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-    if round(mean_prev3, 1) / 100_000_000 < 5:
+    if round(mean_prev3, 1) / 100_000_000 < 3:
         return
 
 
@@ -131,7 +131,7 @@ def process_one(idx, count, ticker, tickers_dict):
     # signal = signal_any_drop(data, 10, 4.0 ,-2.2) # 49/83
     # signal = signal_any_drop(data, 10, 4.0 ,-2.6) # 48/83
     # signal = signal_any_drop(data, 10, 4.0 ,-2.8) # 46/78
-    signal = signal_any_drop(data, 8, 3.0 ,-2.5) # 45/71 ---
+    signal = signal_any_drop(data, 6, 3.0, -2.5) # 45/71 ---
     # signal = signal_any_drop(data, 10, 4.0 ,-3.2) # 44/68
     # signal = signal_any_drop(data, 10, 4.0 ,-3.4) # 42/64
     # signal = signal_any_drop(data, 10, 4.0 ,-3.6) # 39/57
@@ -374,7 +374,7 @@ if __name__ == "__main__":
     start = time.time()   # 시작 시간(초)
     nowTime = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
     print(f'{nowTime} - 🕒 running 7_find_low_point.py...')
-    print(' 10일 이상 5일선이 20일선 보다 아래에 있으면서 최근 -3%이 존재 + 오늘 4% 이상 상승')
+    print(' x일 이상 5일선이 20일선 보다 아래에 있으면서 최근 -x%이 존재 + 오늘 x% 이상 상승')
 
     tickers_dict = get_kor_ticker_dict_list()
     tickers = list(tickers_dict.keys())
@@ -455,15 +455,15 @@ if __name__ == "__main__":
         # print(f"  3개월 종가 최고 대비 오늘 등락률   ( > -40%): {row['today_chg_rate']}%")     # -10(15) ~ -25(30) 선호, -10(15)이상은 아직 고점, -25(30) 아래는 미달일 경우가 있음
         # print(f"  3개월 주봉 첫주 대비 이번주 등락률 ( > -20%): {row['pct_vs_firstweek']}%")   # -15 ~ 20 선호, -20이하는 장기 하락 추세, 30이상은 급등 끝물
         # print(f"  지난주 대비 등락률: {row['pct_vs_lastweek']}%")
-        print(f"  오늘 등락률       : {row['today_pct']}%")
+        print(f"  오늘 등락률        : {row['today_pct']}%")
         print(f"  검증 등락률(max)   : {row['validation_chg_rate']}%")
-        # print(f"  검증 등락률1       : {row['validation_chg_rate1']}%")
-        # print(f"  검증 등락률2       : {row['validation_chg_rate2']}%")
-        # print(f"  검증 등락률3       : {row['validation_chg_rate3']}%")
-        # print(f"  검증 등락률4       : {row['validation_chg_rate4']}%")
-        # print(f"  검증 등락률5       : {row['validation_chg_rate5']}%")
-        # print(f"  검증 등락률6       : {row['validation_chg_rate6']}%")
-        # print(f"  검증 등락률7       : {row['validation_chg_rate7']}%")
+        print(f"  검증 등락률1       : {row['validation_chg_rate1']}%")
+        print(f"  검증 등락률2       : {row['validation_chg_rate2']}%")
+        print(f"  검증 등락률3       : {row['validation_chg_rate3']}%")
+        print(f"  검증 등락률4       : {row['validation_chg_rate4']}%")
+        print(f"  검증 등락률5       : {row['validation_chg_rate5']}%")
+        print(f"  검증 등락률6       : {row['validation_chg_rate6']}%")
+        print(f"  검증 등락률7       : {row['validation_chg_rate7']}%")
         # cond = row.get('cond')
         # if cond is not None:
         #     print(f"  조건             : {row['cond']}")
@@ -476,13 +476,12 @@ if __name__ == "__main__":
     else:
         total_up_rate = up_cnt/(shortfall_cnt+up_cnt)*100
 
-        # # CSV 저장
+        # CSV 저장
         # pd.DataFrame(rows).to_csv('csv/low_result.csv')
-        # pd.DataFrame(rows).to_csv('csv/low_result.csv', index=False) # 인덱스 칼럼 'Unnamed: 0' 생성하지 않음
-        # df = pd.read_csv("csv/low_result.csv")
+        # pd.DataFrame(rows).to_csv('csv/low_result_9.csv', index=False) # 인덱스 칼럼 'Unnamed: 0' 생성하지 않음
         # saved = sort_csv_by_today_desc(
-        #     in_path=r"csv/low_result.csv",
-        #     out_path=r"csv/low_result_desc.csv",
+        #     in_path=r"csv/low_result_9.csv",
+        #     out_path=r"csv/low_result_9_desc.csv",
         # )
         # print("saved:", saved)
 
