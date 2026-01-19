@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 import requests
 import time
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
-from lowscan_rules_bk import build_conditions, RULE_NAMES
+from lowscan_rules import build_conditions, RULE_NAMES
 
 
 # 자동 탐색 (utils.py를 찾을 때까지 위로 올라가 탐색)
@@ -97,7 +97,7 @@ def process_one(idx, count, ticker, tickers_dict):
         chg_tr_val = (today_tr_val-mean_prev3)/mean_prev3*100
 
     # ★★★★★ 3거래일 평균 거래대금 5억보다 작으면 패스 ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-    if round(mean_prev3, 1) / 100_000_000 < 5:
+    if round(mean_prev3, 1) / 100_000_000 < 3:
         return
 
 
@@ -128,7 +128,7 @@ def process_one(idx, count, ticker, tickers_dict):
 
     # 최근 10일 5일선이 20일선보다 낮은데 3% 하락이 있으면서 오늘 3% 상승 ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
     # 변경점...  10일 +- 3일로 설정해봐야 할지도
-    signal = signal_any_drop(data, 10, 4.0 ,-3.0) # 45/71 ---
+    signal = signal_any_drop(data, 6, 3.0 ,-2.5) # 45/71 ---
     if not signal:
         return
 
@@ -493,5 +493,5 @@ if __name__ == "__main__":
     minutes, seconds = divmod(remainder, 60)
 
     if elapsed > 20:
-        print(f"총 소요 시간: {hours}시간 {minutes}분 {seconds}초")
+        print(f"4_find_low_point.py 총 소요 시간: {hours}시간 {minutes}분 {seconds}초")
 
