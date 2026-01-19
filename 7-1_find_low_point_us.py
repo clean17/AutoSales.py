@@ -11,10 +11,8 @@ import os, sys
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
-import unicodedata
 from pathlib import Path
 import matplotlib.pyplot as plt
-import requests
 import time
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
 from lowscan_rules_us import build_conditions, RULE_NAMES
@@ -213,33 +211,33 @@ def process_one(idx, count, ticker, exchangeRate):
 
     ########################################################################
 
-    ma5_chg_rate = round(ma5_chg_rate, 2)
-    ma20_chg_rate = round(ma20_chg_rate, 2)
-    vol20 = round(vol20, 2)
-    vol30 = round(vol30, 2)
-    mean_ret20 = round(mean_ret20, 2)
-    mean_ret30 = round(mean_ret30, 2)
-    pos20_ratio = round(pos20_ratio*100, 2)
-    pos30_ratio = round(pos30_ratio*100, 2)
-    mean_prev3 = round(mean_prev3, 1)
-    today_tr_val = round(today_tr_val, 1)
-    chg_tr_val = round(chg_tr_val, 1)
-    three_m_chg_rate = round(three_m_chg_rate, 2)
-    today_chg_rate = round(today_chg_rate, 2)
-    pct_vs_firstweek = round(result['pct_vs_firstweek'], 2)
-    pct_vs_lastweek = round(result['pct_vs_lastweek'], 2)
-    pct_vs_last2week = round(result['pct_vs_last2week'], 2)
-    pct_vs_last3week = round(result['pct_vs_last3week'], 2)
-    pct_vs_last4week = round(result['pct_vs_last4week'], 2)
-    today_pct = round(data.iloc[-1]['today_chg_rate'], 1)
-    validation_chg_rate = round(validation_chg_rate, 1)
-    validation_chg_rate1 = round(validation_chg_rate1, 1)
-    validation_chg_rate2 = round(validation_chg_rate2, 1)
-    validation_chg_rate3 = round(validation_chg_rate3, 1)
-    validation_chg_rate4 = round(validation_chg_rate4, 1)
-    validation_chg_rate5 = round(validation_chg_rate5, 1)
-    validation_chg_rate6 = round(validation_chg_rate6, 1)
-    validation_chg_rate7 = round(validation_chg_rate7, 1)
+    ma5_chg_rate = round(ma5_chg_rate, 4)
+    ma20_chg_rate = round(ma20_chg_rate, 4)
+    vol20 = round(vol20, 4)
+    vol30 = round(vol30, 4)
+    mean_ret20 = round(mean_ret20, 4)
+    mean_ret30 = round(mean_ret30, 4)
+    pos20_ratio = round(pos20_ratio*100, 4)
+    pos30_ratio = round(pos30_ratio*100, 4)
+    mean_prev3 = round(mean_prev3, 4)
+    today_tr_val = round(today_tr_val, 4)
+    chg_tr_val = round(chg_tr_val, 4)
+    three_m_chg_rate = round(three_m_chg_rate, 4)
+    today_chg_rate = round(today_chg_rate, 4)
+    pct_vs_firstweek = round(result['pct_vs_firstweek'], 4)
+    pct_vs_lastweek = round(result['pct_vs_lastweek'], 4)
+    pct_vs_last2week = round(result['pct_vs_last2week'], 4)
+    pct_vs_last3week = round(result['pct_vs_last3week'], 4)
+    pct_vs_last4week = round(result['pct_vs_last4week'], 4)
+    today_pct = round(data.iloc[-1]['today_chg_rate'], 4)
+    validation_chg_rate = round(validation_chg_rate, 4)
+    validation_chg_rate1 = round(validation_chg_rate1, 4)
+    validation_chg_rate2 = round(validation_chg_rate2, 4)
+    validation_chg_rate3 = round(validation_chg_rate3, 4)
+    validation_chg_rate4 = round(validation_chg_rate4, 4)
+    validation_chg_rate5 = round(validation_chg_rate5, 4)
+    validation_chg_rate6 = round(validation_chg_rate6, 4)
+    validation_chg_rate7 = round(validation_chg_rate7, 4)
     predict_str = '상승'
     if validation_chg_rate < VALIDATION_TARGET_RETURN:
         predict_str = '미달'
