@@ -89,10 +89,22 @@ def mine_rules(
     print("expand_ratio", expand_ratio, "min_ratio", min_ratio, "min_count", min_count)
     print("cnt_priority_ratio", cnt_priority_ratio)
 
+    # beam(확장 후보)용 비교키
+    # "좋은 후보"가 더 큰 key를 갖도록 설계 (나중에 key 비교로 worst 교체)
+    def beam_key(ratio, cnt):
+        if ratio >= cnt_priority_ratio:
+            # 0그룹: cnt 우선, ratio 보조
+            return (1, cnt, ratio)
+        else:
+            # 1그룹: ratio 우선, cnt 보조
+            return (0, ratio, cnt)
+
     for depth in range(max_depth):
         print('----------------------------------')
         print("depth", depth)
 
+        # heap item: (key, uid, mask, conds, ratio, cnt)
+        # heap[0] = 가장 "나쁜" 후보 (key가 가장 작음)
         heap = []
         uid = count()
 
@@ -113,26 +125,27 @@ def mine_rules(
 
                 # good 저장
                 if ratio >= min_ratio:
-                    key = tuple(sorted((c[0], c[1], round(float(c[2]), 6)) for c in (conds + [lit])))
-                    prev = good.get(key)
+                    key2 = tuple(sorted((c[0], c[1], round(float(c[2]), 6)) for c in (conds + [lit])))
+                    prev = good.get(key2)
                     if (prev is None) or (cnt > prev[0]) or (cnt == prev[0] and ratio > prev[1]):
-                        good[key] = (cnt, ratio, up, conds + [lit])
+                        good[key2] = (cnt, ratio, up, conds + [lit])
 
-                # 다음 depth 확장 후보
+                # 확장 후보
                 if ratio >= expand_ratio:
-                    if len(heap) == beam:
-                        worst_ratio, worst_cnt = heap[0][0], heap[0][1]
-                        if (ratio < worst_ratio) or (ratio == worst_ratio and cnt <= worst_cnt):
-                            continue
-
-                    item = (ratio, cnt, next(uid), m, conds + [lit])
+                    k = beam_key(ratio, cnt)
+                    item = (k, next(uid), m, conds + [lit], ratio, cnt)
 
                     if len(heap) < beam:
                         heapq.heappush(heap, item)
                     else:
+                        # early-skip: worst(=heap[0])보다 좋아야 교체
+                        if k <= heap[0][0]:
+                            continue
                         heapq.heapreplace(heap, item)
 
-        new = sorted(heap, key=lambda x: (-x[0], -x[1]))
+        # 다음 depth로 넘길 후보들(좋은 순): key 내림차순
+        # key는 (group, primary, secondary)인데 primary/secondary는 큰 게 좋게 만들어 둠
+        new = sorted(heap, key=lambda x: x[0], reverse=True)
         print("new", len(new))
 
         if not new:
@@ -140,26 +153,27 @@ def mine_rules(
             break
 
         tail = new[-1]
-        print("tail ratio,cnt:", tail[0], tail[1], "conds:", tail[4])
+        print("tail ratio,cnt:", tail[4], tail[5], "conds:", tail[3])
 
-        beams = [(m, conds) for _, _, _, m, conds in new]
+        beams = [(m, conds) for _, _, m, conds, _, _ in new]
 
-    # ---- 최종 out 정렬(핵심 변경) ----
+    # ---- 최종 out 정렬 ----
     def out_key(x):
         cnt, ratio, up, conds = x
         if ratio >= cnt_priority_ratio:
-            # ratio가 충분히 높으면 cnt가 더 중요
             return (0, -cnt, -ratio, len(conds))
         else:
-            # ratio가 아직 낮으면 ratio를 더 중요
             return (1, -ratio, -cnt, len(conds))
 
     out = sorted(good.values(), key=out_key)
-
     if top_n is not None:
         out = out[:top_n]
 
+    for cnt, ratio, up, conds in out[:20]:
+        print(cnt, ratio, len(conds))
+
     return out
+
 
 
 def test_condition(name, cond, df, verbose=False):
@@ -208,13 +222,13 @@ def rule_to_code(name, conds, thr_round=3):
     return "\n".join(lines)
 
 
-# ✅ 여기서 "최대한 많이" 얻고 싶으면 top_n 크게
-# rules = mine_rules(min_ratio=MIN_RATE, min_count=30, max_depth=7, beam=20000, expand_ratio=0.4)
+# 국장
+# rules = mine_rules(min_ratio=MIN_RATE, min_count=30, max_depth=6, beam=30000, expand_ratio=0.4, top_n=10000)
 
 # 미장
-rules = mine_rules(min_ratio=MIN_RATE, min_count=50, max_depth=7, beam=20000, expand_ratio=0.45)
+rules = mine_rules(min_ratio=MIN_RATE, min_count=50, max_depth=6, beam=30000, expand_ratio=0.45, top_n=10000)
 
-top_n = min(20000, len(rules))   # 필요하면 1000도 가능(조건 엄청 많아짐)
+top_n = min(10000, len(rules))
 conditions = {}
 
 selected = []  # (name, conds)만 저장해두고 파일로 씀
@@ -291,13 +305,13 @@ with out_path.open("w", encoding="utf-8") as f:
 
 print(f"saved to: {out_path.resolve()}")
 
-import re
-txt = out_path.read_text(encoding="utf-8")
-
-m = re.search(r'RULE_NAMES\s*=\s*\[(.*?)\]\s*\n', txt, flags=re.S)
-block = m.group(1) if m else ""
-print("RULE_NAMES entries (exact):", len(re.findall(r'"rule_\d+__n', block)))
-
-m = re.search(r'conditions\s*=\s*\{(.*?)\n\s*\}\s*\n\s*return conditions', txt, flags=re.S)
-block = m.group(1) if m else ""
-print("conditions entries (exact):", len(re.findall(r'^\s*"rule_\d+__n.*":', block, flags=re.M)))
+# import re
+# txt = out_path.read_text(encoding="utf-8")
+#
+# m = re.search(r'RULE_NAMES\s*=\s*\[(.*?)\]\s*\n', txt, flags=re.S)
+# block = m.group(1) if m else ""
+# print("RULE_NAMES entries (exact):", len(re.findall(r'"rule_\d+__n', block)))
+#
+# m = re.search(r'conditions\s*=\s*\{(.*?)\n\s*\}\s*\n\s*return conditions', txt, flags=re.S)
+# block = m.group(1) if m else ""
+# print("conditions entries (exact):", len(re.findall(r'^\s*"rule_\d+__n.*":', block, flags=re.M)))
