@@ -7,14 +7,14 @@ from itertools import count
 # df = pd.read_csv("csv/low_result_250513_desc.csv")
 # df = pd.read_csv("csv/low_result_250507_desc.csv")
 
-# df = pd.read_csv("csv/low_result_6_desc.csv")
-df = pd.read_csv("csv/low_result_us_6_desc.csv")   # 미장
+df = pd.read_csv("csv/low_result_6_desc.csv")
+# df = pd.read_csv("csv/low_result_us_6_desc.csv")   # 미장
 
 TARGET_COL = "validation_chg_rate"
-MIN_RATE = 0.85
+MIN_RATE = 0.82
 target = (df[TARGET_COL].to_numpy() >= 7)
-# out_path = Path("lowscan_rules.py")
-out_path = Path("lowscan_rules_us.py")   # 미장
+out_path = Path("lowscan_rules.py")
+# out_path = Path("lowscan_rules_us.py")   # 미장
 
 # 숫자 피처들(원하면 더/덜 제외 가능)
 exclude = {"ticker", "stock_name", "predict_str", "today", TARGET_COL,
@@ -221,12 +221,14 @@ def rule_to_code(name, conds, thr_round=3):
     lines.append(f"        {joined},")
     return "\n".join(lines)
 
+# 뎁스가 진행되어도 cnt가 급격히 줄면 안된다
+# 뎁스 증가에 따른 ratio 상승이 완만해야 한다
 
 # 국장
-# rules = mine_rules(min_ratio=MIN_RATE, min_count=30, max_depth=6, beam=30000, expand_ratio=0.4, top_n=10000)
+rules = mine_rules(min_ratio=MIN_RATE, min_count=40, max_depth=5, beam=30000, expand_ratio=0.4, cnt_priority_ratio=MIN_RATE, top_n=10000)
 
 # 미장
-rules = mine_rules(min_ratio=MIN_RATE, min_count=50, max_depth=6, beam=30000, expand_ratio=0.45, top_n=10000)
+# rules = mine_rules(min_ratio=MIN_RATE, min_count=50, max_depth=6, beam=30000, expand_ratio=0.45, top_n=10000)
 
 top_n = min(10000, len(rules))
 conditions = {}

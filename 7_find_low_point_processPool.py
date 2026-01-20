@@ -129,7 +129,7 @@ def process_one(idx, count, ticker, tickers_dict):
     # signal = signal_any_drop(data, 10, 4.0 ,-2.2) # 49/83
     # signal = signal_any_drop(data, 10, 4.0 ,-2.6) # 48/83
     # signal = signal_any_drop(data, 10, 4.0 ,-2.8) # 46/78
-    signal = signal_any_drop(data, 6, 3.0, -2.5) # 45/71 ---
+    signal = signal_any_drop(data, 7, 3.0, -2.5) # 45/71 ---
     # signal = signal_any_drop(data, 10, 4.0 ,-3.2) # 44/68
     # signal = signal_any_drop(data, 10, 4.0 ,-3.4) # 42/64
     # signal = signal_any_drop(data, 10, 4.0 ,-3.6) # 39/57
@@ -300,27 +300,35 @@ def process_one(idx, count, ticker, tickers_dict):
         "ticker": ticker,
         "stock_name": stock_name,
         "today" : str(data.index[-1].date()),
-        # "3_months_ago": str(m_data.index[0].date()),
+        # "3_months_ago": str(m_data.index[0].date()),   # 3달전 날짜
         "predict_str": predict_str,                      # 상승/미달
-        "ma5_chg_rate": ma5_chg_rate,                    # 5일선 기울기
-        "ma20_chg_rate": ma20_chg_rate,                  # 20일선 기울기
+
+        "ma5_chg_rate": ma5_chg_rate,                    # 5일선 기울기 👍
+        # "ma20_chg_rate": ma20_chg_rate,                  # 20일선 기울기 (7일 전환엔 보조, 실제로 거의 조건에 안쓰임)
+
         "vol20": vol20,                                  # 20일 평균 변동성
-        "vol30": vol30,                                  # 30일 평균 변동성
-        "mean_ret20": mean_ret20,                        # 20일 평균 등락률
+        "vol30": vol30,                                  # 30일 평균 변동성 (vol20과 중복, 7일 내 수익 목표라면 20을 사용해)
+
+        # "mean_ret20": mean_ret20,                        # 20일 평균 등락률 (실제로 거의 조건에 안쓰임)
         "mean_ret30": mean_ret30,                        # 30일 평균 등락률
-        "pos20_ratio": pos20_ratio,                      # 20일 평균 양봉비율
-        "pos30_ratio": pos30_ratio,                      # 30일 평균 양봉비율
-        "mean_prev3": mean_prev3,                        # 직전 3일 평균 거래대금
-        "today_tr_val": today_tr_val,                    # 오늘 거래대금
-        "chg_tr_val": chg_tr_val,                        # 거래대금 변동률
-        "three_m_chg_rate": three_m_chg_rate,            # 3개월 종가 최저 대비 최고 등락률
-        "today_chg_rate": today_chg_rate,                # 3개월 종가 최고 대비 오늘 등락률
+
+        "pos20_ratio": pos20_ratio,                      # 20일 평균 양봉비율 (전환 직전 눌림/반등 준비를 더 잘 반영할 가능성)
+        "pos30_ratio": pos30_ratio,                      # 30일 평균 양봉비율 (한 달 분위기(추세가 이미 시작됐는지) → 보조)
+
+        # "mean_prev3": mean_prev3,                        # 직전 3일 평균 거래대금 (today_tr_val/chg_tr_val과 중복)
+        "today_tr_val": today_tr_val,                    # 오늘 거래대금 👍
+        "chg_tr_val": chg_tr_val,                        # 거래대금 변동률 (chg_tr_val이 이미 mean_prev3 대비 변화율을 담고있다)
+
+        "three_m_chg_rate": three_m_chg_rate,            # 3개월 종가 최저 대비 최고 등락률 👍
+        "today_chg_rate": today_chg_rate,                # 3개월 종가 최고 대비 오늘 등락률 👍
         "pct_vs_firstweek": pct_vs_firstweek,            # 3개월 주봉 첫주 대비 이번주 등락률
         "pct_vs_lastweek": pct_vs_lastweek,              # 저번주 대비 이번주 등락률
-        "pct_vs_last2week": pct_vs_last2week,            # 2주 전 대비 이번주 등락률
-        "pct_vs_last3week": pct_vs_last3week,            # 3주 전 대비 이번주 등락률
+        # "pct_vs_last2week": pct_vs_last2week,            # 2주 전 대비 이번주 등락률 (실제로 거의 조건에 안쓰임 ??)
+        # "pct_vs_last3week": pct_vs_last3week,            # 3주 전 대비 이번주 등락률 (실제로 거의 조건에 안쓰임 ??)
         "pct_vs_last4week": pct_vs_last4week,            # 4주 전 대비 이번주 등락률
-        "today_pct": today_pct,                          # 오늘등락률
+
+        "today_pct": today_pct,                          # 오늘등락률 👍
+
         "validation_chg_rate": validation_chg_rate,      # 검증 등락률
         "validation_chg_rate1": validation_chg_rate1,      # 검증 등락률
         "validation_chg_rate2": validation_chg_rate2,      # 검증 등락률
