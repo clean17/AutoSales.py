@@ -157,6 +157,12 @@ def process_one(idx, count, ticker, exchangeRate):
     pos20_ratio = (last20_ret > 0).mean()           # True 비율 => 양봉 비율
     pos30_ratio = (last30_ret > 0).mean()           # True 비율 => 양봉 비율
 
+    # 추가 독립 피쳐
+    lower_wick_ratio = data['lower_wick_ratio']     # 아래꼬리 비율
+    close_pos = data['close_pos']                   # 당일 range 내 종가 위치(0~1)
+    bb_recover = data['bb_recover']                 # 하단밴드 복귀 이벤트
+    z20 = data['z20']                               # z-score
+    macd_hist_chg = data['macd_hist_chg']           # MACD hist 가속
 
     ########################################################################
 
@@ -238,6 +244,7 @@ def process_one(idx, count, ticker, exchangeRate):
     validation_chg_rate5 = round(validation_chg_rate5, 4)
     validation_chg_rate6 = round(validation_chg_rate6, 4)
     validation_chg_rate7 = round(validation_chg_rate7, 4)
+
     predict_str = '상승'
     if validation_chg_rate < VALIDATION_TARGET_RETURN:
         predict_str = '미달'
@@ -295,36 +302,39 @@ def process_one(idx, count, ticker, exchangeRate):
     row = {
         "ticker": ticker,
         "today" : str(data.index[-1].date()),
-        # "3_months_ago": str(m_data.index[0].date()),
+        # "3_months_ago": str(m_data.index[0].date()),   # 3달전 날짜
         "predict_str": predict_str,                      # 상승/미달
-        "ma5_chg_rate": ma5_chg_rate,                    # 5일선 기울기
-        "ma20_chg_rate": ma20_chg_rate,                  # 20일선 기울기
+
+        "ma5_chg_rate": ma5_chg_rate,                    # 5일선 기울기 👍
         "vol20": vol20,                                  # 20일 평균 변동성
-        "vol30": vol30,                                  # 30일 평균 변동성
-        "mean_ret20": mean_ret20,                        # 20일 평균 등락률
-        "mean_ret30": mean_ret30,                        # 30일 평균 등락률
-        "pos20_ratio": pos20_ratio,                      # 20일 평균 양봉비율
-        "pos30_ratio": pos30_ratio,                      # 30일 평균 양봉비율
-        "mean_prev3": mean_prev3*exchangeRate,           # 직전 3일 평균 거래대금
-        "today_tr_val": today_tr_val*exchangeRate,       # 오늘 거래대금
-        "chg_tr_val": chg_tr_val,                        # 거래대금 변동률
-        "three_m_chg_rate": three_m_chg_rate,            # 3개월 종가 최저 대비 최고 등락률
-        "today_chg_rate": today_chg_rate,                # 3개월 종가 최고 대비 오늘 등락률
-        "pct_vs_firstweek": pct_vs_firstweek,            # 3개월 주봉 첫주 대비 이번주 등락률
+        "pos20_ratio": pos20_ratio,                      # 20일 평균 양봉비율 (전환 직전 눌림/반등 준비를 더 잘 반영할 가능성)
+        "today_tr_val": today_tr_val,                    # 오늘 거래대금 👍
+        "chg_tr_val": chg_tr_val,                        # 거래대금 변동률 (chg_tr_val이 이미 mean_prev3 대비 변화율을 담고있다)
+
+        "three_m_chg_rate": three_m_chg_rate,            # 3개월 종가 최저 대비 최고 등락률 👍
+        "today_chg_rate": today_chg_rate,                # 3개월 종가 최고 대비 오늘 등락률 👍
         "pct_vs_lastweek": pct_vs_lastweek,              # 저번주 대비 이번주 등락률
-        "pct_vs_last2week": pct_vs_last2week,            # 2주 전 대비 이번주 등락률
-        "pct_vs_last3week": pct_vs_last3week,            # 3주 전 대비 이번주 등락률
         "pct_vs_last4week": pct_vs_last4week,            # 4주 전 대비 이번주 등락률
-        "today_pct": today_pct,                          # 오늘등락률
+        "today_pct": today_pct,                          # 오늘등락률 👍
+
+        "lower_wick_ratio": lower_wick_ratio,            # 아래꼬리 비율
+        "close_pos": close_pos,                          # 당일 range 내 종가 위치(0~1)
+        "bb_recover": bb_recover,                        # 하단밴드 복귀 이벤트
+        "z20": z20,                                      # z-score
+        "macd_hist_chg": macd_hist_chg,                  # MACD hist 가속
+
         "validation_chg_rate": validation_chg_rate,      # 검증 등락률
-        "validation_chg_rate1": validation_chg_rate1,      # 검증 등락률
-        "validation_chg_rate2": validation_chg_rate2,      # 검증 등락률
-        "validation_chg_rate3": validation_chg_rate3,      # 검증 등락률
-        "validation_chg_rate4": validation_chg_rate4,      # 검증 등락률
-        "validation_chg_rate5": validation_chg_rate5,      # 검증 등락률
-        "validation_chg_rate6": validation_chg_rate6,      # 검증 등락률
-        "validation_chg_rate7": validation_chg_rate7,      # 검증 등락률
-        # "cond": {", ".join(name for name, _ in true_conds)}
+        "validation_chg_rate1": validation_chg_rate1,    # 검증 등락률
+        "validation_chg_rate2": validation_chg_rate2,    # 검증 등락률
+        "validation_chg_rate3": validation_chg_rate3,    # 검증 등락률
+        "validation_chg_rate4": validation_chg_rate4,    # 검증 등락률
+        "validation_chg_rate5": validation_chg_rate5,    # 검증 등락률
+        "validation_chg_rate6": validation_chg_rate6,    # 검증 등락률
+        "validation_chg_rate7": validation_chg_rate7,    # 검증 등락률
+        # "vol30": vol30,                                  # 30일 평균 변동성 (vol20과 중복, 7일 내 수익 목표라면 20을 사용해)
+        # "pos30_ratio": pos30_ratio,                      # 30일 평균 양봉비율 (한 달 분위기(추세가 이미 시작됐는지) → 보조)
+        # "mean_ret30": mean_ret30,                        # 30일 평균 등락률 (한 달 반 분위기라서 컨텍스트(보조) 성격이 강함)
+        # "pct_vs_firstweek": pct_vs_firstweek,            # 3개월 주봉 첫주 대비 이번주 등락률
     }
 
 
@@ -470,12 +480,11 @@ if __name__ == "__main__":
         total_up_rate = up_cnt/(shortfall_cnt+up_cnt)*100
 
         # CSV 저장
-        # pd.DataFrame(rows).to_csv('csv/low_result_us.csv')
-        pd.DataFrame(rows).to_csv('csv/low_result_us_6.csv', index=False) # 인덱스 칼럼 'Unnamed: 0' 생성하지 않음
-        df = pd.read_csv("csv/low_result_us_6.csv")
+        pd.DataFrame(rows).to_csv('csv/low_result_us_7.csv', index=False) # 인덱스 칼럼 'Unnamed: 0' 생성하지 않음
+        df = pd.read_csv("csv/low_result_us_7.csv")
         saved = sort_csv_by_today_desc(
-            in_path=r"csv/low_result_us_6.csv",
-            out_path=r"csv/low_result_us_6_desc.csv",
+            in_path=r"csv/low_result_us_7.csv",
+            out_path=r"csv/low_result_us_7_desc.csv",
         )
         print("saved:", saved)
 
