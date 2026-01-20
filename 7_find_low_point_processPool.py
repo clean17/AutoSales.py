@@ -160,6 +160,13 @@ def process_one(idx, count, ticker, tickers_dict):
     pos20_ratio = (last20_ret > 0).mean()           # True 비율 => 양봉 비율
     pos30_ratio = (last30_ret > 0).mean()           # True 비율 => 양봉 비율
 
+    # 추가 독립 피쳐
+    lower_wick_ratio = data['lower_wick_ratio']     # 아래꼬리 비율
+    close_pos = data['close_pos']                   # 당일 range 내 종가 위치(0~1)
+    bb_recover = data['bb_recover']                 # 하단밴드 복귀 이벤트
+    z20 = data['z20']                               # z-score
+    macd_hist_chg = data['macd_hist_chg']           # MACD hist 가속
+
 
     ########################################################################
 
@@ -296,6 +303,10 @@ def process_one(idx, count, ticker, tickers_dict):
 
     ########################################################################
 
+    """
+    높은 전환관계의 피쳐들
+    lower_wick_ratio, close_pos, bb_recover, z20, macd_hist_chg, today_pct, ma5_chg_rate
+    """
     row = {
         "ticker": ticker,
         "stock_name": stock_name,
@@ -304,41 +315,35 @@ def process_one(idx, count, ticker, tickers_dict):
         "predict_str": predict_str,                      # 상승/미달
 
         "ma5_chg_rate": ma5_chg_rate,                    # 5일선 기울기 👍
-        # "ma20_chg_rate": ma20_chg_rate,                  # 20일선 기울기 (7일 전환엔 보조, 실제로 거의 조건에 안쓰임)
-
         "vol20": vol20,                                  # 20일 평균 변동성
-        "vol30": vol30,                                  # 30일 평균 변동성 (vol20과 중복, 7일 내 수익 목표라면 20을 사용해)
-
-        # "mean_ret20": mean_ret20,                        # 20일 평균 등락률 (실제로 거의 조건에 안쓰임)
-        "mean_ret30": mean_ret30,                        # 30일 평균 등락률
-
         "pos20_ratio": pos20_ratio,                      # 20일 평균 양봉비율 (전환 직전 눌림/반등 준비를 더 잘 반영할 가능성)
-        "pos30_ratio": pos30_ratio,                      # 30일 평균 양봉비율 (한 달 분위기(추세가 이미 시작됐는지) → 보조)
-
-        # "mean_prev3": mean_prev3,                        # 직전 3일 평균 거래대금 (today_tr_val/chg_tr_val과 중복)
         "today_tr_val": today_tr_val,                    # 오늘 거래대금 👍
         "chg_tr_val": chg_tr_val,                        # 거래대금 변동률 (chg_tr_val이 이미 mean_prev3 대비 변화율을 담고있다)
 
         "three_m_chg_rate": three_m_chg_rate,            # 3개월 종가 최저 대비 최고 등락률 👍
         "today_chg_rate": today_chg_rate,                # 3개월 종가 최고 대비 오늘 등락률 👍
-        "pct_vs_firstweek": pct_vs_firstweek,            # 3개월 주봉 첫주 대비 이번주 등락률
         "pct_vs_lastweek": pct_vs_lastweek,              # 저번주 대비 이번주 등락률
-        # "pct_vs_last2week": pct_vs_last2week,            # 2주 전 대비 이번주 등락률 (실제로 거의 조건에 안쓰임 ??)
-        # "pct_vs_last3week": pct_vs_last3week,            # 3주 전 대비 이번주 등락률 (실제로 거의 조건에 안쓰임 ??)
         "pct_vs_last4week": pct_vs_last4week,            # 4주 전 대비 이번주 등락률
-
         "today_pct": today_pct,                          # 오늘등락률 👍
 
+        "lower_wick_ratio": lower_wick_ratio,            # 아래꼬리 비율
+        "close_pos": close_pos,                          # 당일 range 내 종가 위치(0~1)
+        "bb_recover": bb_recover,                        # 하단밴드 복귀 이벤트
+        "z20": z20,                                      # z-score
+        "macd_hist_chg": macd_hist_chg,                  # MACD hist 가속
+
         "validation_chg_rate": validation_chg_rate,      # 검증 등락률
-        "validation_chg_rate1": validation_chg_rate1,      # 검증 등락률
-        "validation_chg_rate2": validation_chg_rate2,      # 검증 등락률
-        "validation_chg_rate3": validation_chg_rate3,      # 검증 등락률
-        "validation_chg_rate4": validation_chg_rate4,      # 검증 등락률
-        "validation_chg_rate5": validation_chg_rate5,      # 검증 등락률
-        "validation_chg_rate6": validation_chg_rate6,      # 검증 등락률
-        "validation_chg_rate7": validation_chg_rate7,      # 검증 등락률
-        # "cond": ", ".join(name for name, _ in true_conds),
-        # "cond": ", ".join(true_conds),
+        "validation_chg_rate1": validation_chg_rate1,    # 검증 등락률
+        "validation_chg_rate2": validation_chg_rate2,    # 검증 등락률
+        "validation_chg_rate3": validation_chg_rate3,    # 검증 등락률
+        "validation_chg_rate4": validation_chg_rate4,    # 검증 등락률
+        "validation_chg_rate5": validation_chg_rate5,    # 검증 등락률
+        "validation_chg_rate6": validation_chg_rate6,    # 검증 등락률
+        "validation_chg_rate7": validation_chg_rate7,    # 검증 등락률
+        # "vol30": vol30,                                  # 30일 평균 변동성 (vol20과 중복, 7일 내 수익 목표라면 20을 사용해)
+        # "pos30_ratio": pos30_ratio,                      # 30일 평균 양봉비율 (한 달 분위기(추세가 이미 시작됐는지) → 보조)
+        # "mean_ret30": mean_ret30,                        # 30일 평균 등락률 (한 달 반 분위기라서 컨텍스트(보조) 성격이 강함)
+        # "pct_vs_firstweek": pct_vs_firstweek,            # 3개월 주봉 첫주 대비 이번주 등락률
     }
 
 
@@ -394,7 +399,7 @@ if __name__ == "__main__":
 
     # 10이면, 10거래일의 하루전부터, -1이면 어제
     # origin_idx = idx = -1
-    origin_idx = idx = 1
+    origin_idx = idx = 7
     workers = os.cpu_count()
     BATCH_SIZE = 20
 
@@ -464,13 +469,13 @@ if __name__ == "__main__":
         # print(f"  지난주 대비 등락률: {row['pct_vs_lastweek']}%")
         print(f"  오늘 등락률        : {row['today_pct']}%")
         print(f"  검증 등락률(max)   : {row['validation_chg_rate']}%")
-        print(f"  검증 등락률1       : {row['validation_chg_rate1']}%")
-        print(f"  검증 등락률2       : {row['validation_chg_rate2']}%")
-        print(f"  검증 등락률3       : {row['validation_chg_rate3']}%")
-        print(f"  검증 등락률4       : {row['validation_chg_rate4']}%")
-        print(f"  검증 등락률5       : {row['validation_chg_rate5']}%")
-        print(f"  검증 등락률6       : {row['validation_chg_rate6']}%")
-        print(f"  검증 등락률7       : {row['validation_chg_rate7']}%")
+        # print(f"  검증 등락률1       : {row['validation_chg_rate1']}%")
+        # print(f"  검증 등락률2       : {row['validation_chg_rate2']}%")
+        # print(f"  검증 등락률3       : {row['validation_chg_rate3']}%")
+        # print(f"  검증 등락률4       : {row['validation_chg_rate4']}%")
+        # print(f"  검증 등락률5       : {row['validation_chg_rate5']}%")
+        # print(f"  검증 등락률6       : {row['validation_chg_rate6']}%")
+        # print(f"  검증 등락률7       : {row['validation_chg_rate7']}%")
         # cond = row.get('cond')
         # if cond is not None:
         #     print(f"  조건             : {row['cond']}")
@@ -483,11 +488,11 @@ if __name__ == "__main__":
     else:
         total_up_rate = up_cnt/(shortfall_cnt+up_cnt)*100
 
-        # CSV 저장
-        pd.DataFrame(rows).to_csv('csv/low_result_6.csv', index=False) # 인덱스 칼럼 'Unnamed: 0' 생성하지 않음
+        # # CSV 저장
+        pd.DataFrame(rows).to_csv('csv/low_result_7.csv', index=False) # 인덱스 칼럼 'Unnamed: 0' 생성하지 않음
         saved = sort_csv_by_today_desc(
-            in_path=r"csv/low_result_6.csv",
-            out_path=r"csv/low_result_6_desc.csv",
+            in_path=r"csv/low_result_7.csv",
+            out_path=r"csv/low_result_7_desc.csv",
         )
         print("saved:", saved)
 
