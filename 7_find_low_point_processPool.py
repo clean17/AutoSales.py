@@ -161,11 +161,18 @@ def process_one(idx, count, ticker, tickers_dict):
     pos30_ratio = (last30_ret > 0).mean()           # True 비율 => 양봉 비율
 
     # 추가 독립 피쳐
-    lower_wick_ratio = data['lower_wick_ratio']     # 아래꼬리 비율
-    close_pos = data['close_pos']                   # 당일 range 내 종가 위치(0~1)
-    bb_recover = data['bb_recover']                 # 하단밴드 복귀 이벤트
-    z20 = data['z20']                               # z-score
-    macd_hist_chg = data['macd_hist_chg']           # MACD hist 가속
+    def to_float(x):
+        return float(x) if pd.notna(x) else np.nan
+
+    def to_int01(x):
+        return int(bool(x)) if pd.notna(x) else 0
+
+    last = data.iloc[-1]
+    lower_wick_ratio = to_float(last.get("lower_wick_ratio"))
+    close_pos        = to_float(last.get("close_pos"))
+    bb_recover       = to_int01(last.get("bb_recover"))
+    z20              = to_float(last.get("z20"))
+    macd_hist_chg    = to_float(last.get("macd_hist_chg"))
 
 
     ########################################################################
