@@ -168,11 +168,11 @@ def process_one(idx, count, ticker, tickers_dict):
         return int(bool(x)) if pd.notna(x) else 0
 
     last = data.iloc[-1]
-    lower_wick_ratio = to_float(last.get("lower_wick_ratio"))
-    close_pos        = to_float(last.get("close_pos"))
-    bb_recover       = to_int01(last.get("bb_recover"))
-    z20              = to_float(last.get("z20"))
-    macd_hist_chg    = to_float(last.get("macd_hist_chg"))
+    lower_wick_ratio = round(to_float(last.get("lower_wick_ratio")), 4)
+    close_pos        = round(to_float(last.get("close_pos")), 4)
+    bb_recover       = round(to_int01(last.get("bb_recover")), 4)
+    z20              = round(to_float(last.get("z20")), 4)
+    macd_hist_chg    = round(to_float(last.get("macd_hist_chg")), 4)
 
 
     ########################################################################
@@ -262,50 +262,46 @@ def process_one(idx, count, ticker, tickers_dict):
 
 
     # --- build_conditions()가 참조하는 컬럼들을 data에 주입 (스칼라 → 컬럼 브로드캐스트) ---
-    # rule_features = {
-    #     "ma5_chg_rate": ma5_chg_rate,
-    #     "ma20_chg_rate": ma20_chg_rate,
-    #     "vol20": vol20,
-    #     "vol30": vol30,
-    #     "mean_ret20": mean_ret20,
-    #     "mean_ret30": mean_ret30,
-    #     "pos20_ratio": pos20_ratio,
-    #     "pos30_ratio": pos30_ratio,
-    #     "mean_prev3": mean_prev3,
-    #     "today_tr_val": today_tr_val,
-    #     "chg_tr_val": chg_tr_val,
-    #     "three_m_chg_rate": three_m_chg_rate,
-    #     "today_chg_rate": today_chg_rate,
-    #     "pct_vs_firstweek": pct_vs_firstweek,
-    #     "pct_vs_lastweek": pct_vs_lastweek,
-    #     "pct_vs_last2week": pct_vs_last2week,
-    #     "pct_vs_last3week": pct_vs_last3week,
-    #     "pct_vs_last4week": pct_vs_last4week,
-    #     "today_pct": today_pct,
-    # }
-    #
-    # # data에 컬럼이 없거나 NaN이면 넣기 (기존 컬럼 있으면 덮어쓸지 말지는 옵션)
-    # data = data.copy()
-    # for k, v in rule_features.items():
-    #     data[k] = v
-    #
-    #
-    # # 룰 마스크 생성 (각 룰마다 Series[bool] 반환)
-    # try:
-    #     rule_masks = build_conditions(data)
-    # except KeyError as e:
-    #     print(f"[{ticker}] rule build_conditions KeyError: {e} (missing column in data)")
-    #     return
-    #
-    # # 오늘(마지막 행)에서 True인 룰 이름만 추출
-    # true_conds = [
-    #     name for name in RULE_NAMES
-    #     if name in rule_masks and bool(rule_masks[name].iloc[-1])
-    # ]
-    #
-    # # True가 하나도 없으면 pass
-    # if not true_conds:
-    #     return
+    rule_features = {
+        "ma5_chg_rate": ma5_chg_rate,                    # 5일선 기울기 👍
+        "vol20": vol20,                                  # 20일 평균 변동성
+        "pos20_ratio": pos20_ratio,                      # 20일 평균 양봉비율 (전환 직전 눌림/반등 준비를 더 잘 반영할 가능성)
+        "today_tr_val": today_tr_val,                    # 오늘 거래대금 👍
+        "chg_tr_val": chg_tr_val,                        # 거래대금 변동률 (chg_tr_val이 이미 mean_prev3 대비 변화율을 담고있다)
+        "three_m_chg_rate": three_m_chg_rate,            # 3개월 종가 최저 대비 최고 등락률 👍
+        "today_chg_rate": today_chg_rate,                # 3개월 종가 최고 대비 오늘 등락률 👍
+        "pct_vs_lastweek": pct_vs_lastweek,              # 저번주 대비 이번주 등락률
+        "pct_vs_last4week": pct_vs_last4week,            # 4주 전 대비 이번주 등락률
+        "today_pct": today_pct,                          # 오늘등락률 👍
+        "lower_wick_ratio": lower_wick_ratio,            # 아래꼬리 비율
+        "close_pos": close_pos,                          # 당일 range 내 종가 위치(0~1)
+        "bb_recover": bb_recover,                        # 하단밴드 복귀 이벤트
+        "z20": z20,                                      # z-score
+        "macd_hist_chg": macd_hist_chg,                  # MACD hist 가속
+    }
+
+    # data에 컬럼이 없거나 NaN이면 넣기 (기존 컬럼 있으면 덮어쓸지 말지는 옵션)
+    data = data.copy()
+    for k, v in rule_features.items():
+        data[k] = v
+
+
+    # 룰 마스크 생성 (각 룰마다 Series[bool] 반환)
+    try:
+        rule_masks = build_conditions(data)
+    except KeyError as e:
+        print(f"[{ticker}] rule build_conditions KeyError: {e} (missing column in data)")
+        return
+
+    # 오늘(마지막 행)에서 True인 룰 이름만 추출
+    true_conds = [
+        name for name in RULE_NAMES
+        if name in rule_masks and bool(rule_masks[name].iloc[-1])
+    ]
+
+    # True가 하나도 없으면 pass
+    if not true_conds:
+        return
 
 
     ########################################################################
@@ -333,9 +329,8 @@ def process_one(idx, count, ticker, tickers_dict):
         "pct_vs_last4week": pct_vs_last4week,            # 4주 전 대비 이번주 등락률
         "today_pct": today_pct,                          # 오늘등락률 👍
 
-        "lower_wick_ratio": lower_wick_ratio,            # 아래꼬리 비율
+        "lower_wick_ratio": lower_wick_ratio,            # 아래꼬리 비율  (거의 안씀)
         "close_pos": close_pos,                          # 당일 range 내 종가 위치(0~1)
-        "bb_recover": bb_recover,                        # 하단밴드 복귀 이벤트
         "z20": z20,                                      # z-score
         "macd_hist_chg": macd_hist_chg,                  # MACD hist 가속
 
@@ -351,6 +346,7 @@ def process_one(idx, count, ticker, tickers_dict):
         # "pos30_ratio": pos30_ratio,                      # 30일 평균 양봉비율 (한 달 분위기(추세가 이미 시작됐는지) → 보조)
         # "mean_ret30": mean_ret30,                        # 30일 평균 등락률 (한 달 반 분위기라서 컨텍스트(보조) 성격이 강함)
         # "pct_vs_firstweek": pct_vs_firstweek,            # 3개월 주봉 첫주 대비 이번주 등락률
+        # "bb_recover": bb_recover,                        # 하단밴드 복귀 이벤트  (거의 안씀)
     }
 
 
@@ -410,8 +406,8 @@ if __name__ == "__main__":
     workers = os.cpu_count()
     BATCH_SIZE = 20
 
-    end_idx = origin_idx + 170 # 마지막 idx (05/13부터 데이터 만드는 용)
-    # end_idx = origin_idx + 90 # 마지막 idx
+    # end_idx = origin_idx + 170 # 마지막 idx (05/13부터 데이터 만드는 용)
+    end_idx = origin_idx + 50 # 마지막 idx
     # end_idx = origin_idx + 1 # 그날 하루만
 
     with ProcessPoolExecutor(max_workers=workers - 2) as executor:
@@ -496,12 +492,12 @@ if __name__ == "__main__":
         total_up_rate = up_cnt/(shortfall_cnt+up_cnt)*100
 
         # # CSV 저장
-        pd.DataFrame(rows).to_csv('csv/low_result_7.csv', index=False) # 인덱스 칼럼 'Unnamed: 0' 생성하지 않음
-        saved = sort_csv_by_today_desc(
-            in_path=r"csv/low_result_7.csv",
-            out_path=r"csv/low_result_7_desc.csv",
-        )
-        print("saved:", saved)
+        # pd.DataFrame(rows).to_csv('csv/low_result_7.csv', index=False) # 인덱스 칼럼 'Unnamed: 0' 생성하지 않음
+        # saved = sort_csv_by_today_desc(
+        #     in_path=r"csv/low_result_7.csv",
+        #     out_path=r"csv/low_result_7_desc.csv",
+        # )
+        # print("saved:", saved)
 
     print(f"저점 매수 스크립트 결과 : {total_up_rate:.2f}%")
 

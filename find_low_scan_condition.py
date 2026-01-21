@@ -4,14 +4,11 @@ from pathlib import Path
 import heapq
 from itertools import count
 
-# df = pd.read_csv("csv/low_result_250513_desc.csv")
-# df = pd.read_csv("csv/low_result_250507_desc.csv")
-
-df = pd.read_csv("csv/low_result_6_desc.csv")
+df = pd.read_csv("csv/low_result_7_desc.csv")
 # df = pd.read_csv("csv/low_result_us_6_desc.csv")   # 미장
 
 TARGET_COL = "validation_chg_rate"
-MIN_RATE = 0.82
+MIN_RATE = 0.8
 target = (df[TARGET_COL].to_numpy() >= 7)
 out_path = Path("lowscan_rules.py")
 # out_path = Path("lowscan_rules_us.py")   # 미장
@@ -49,6 +46,48 @@ for f in features:
         literal_masks.append(col > thr)
 
 
+feature_groups = {
+    # 전환 캔들 축 (둘 중 1개만)
+    "lower_wick_ratio": "TURN_CANDLE",
+    "close_pos": "TURN_CANDLE",
+
+    # 볼린저/위치 축 (둘 중 1개만)
+    "bb_recover": "BOLL",
+    "z20": "BOLL",
+
+    # 모멘텀 축 (최대 2개)
+    "today_pct": "MOMENTUM",
+    "ma5_chg_rate": "MOMENTUM",
+    "macd_hist_chg": "MOMENTUM",
+
+    # 거래대금 축 (둘 다 같이 허용)
+    "today_tr_val": "VOLUME",
+    "chg_tr_val": "VOLUME",
+
+    # 주간 퍼센트 축 (최대 1개)
+    "pct_vs_lastweek": "WEEK",
+    "pct_vs_last4week": "WEEK",
+
+    # 3개월 레짐 축 (둘 다 같이 허용해도 됨)
+    "three_m_chg_rate": "REGIME",
+    "today_chg_rate": "REGIME",
+
+    # 환경 축 (둘 다 같이 허용해도 됨)
+    "vol20": "ENV",
+    "pos20_ratio": "ENV",
+}
+
+group_limits = {
+    "TURN_CANDLE": 1,  # lower_wick_ratio + close_pos 동시 금지
+    "BOLL": 1,         # bb_recover + z20 동시 금지
+    "MOMENTUM": 2,     # today_pct/ma5/macd 중 2개까지만
+    "WEEK": 1,         # lastweek/last4week 둘 중 1개만
+    "VOLUME": 2,       # 둘 다 허용
+    "REGIME": 2,       # 둘 다 허용
+    "ENV": 2,          # 둘 다 허용
+}
+
+
 """
 expand_ratio = 0.45 → beam 5k~10k도 그럭저럭
 expand_ratio = 0.40 → beam 10k~30k 권장
@@ -69,6 +108,9 @@ def mine_rules(
         expand_ratio=0.45,
         cnt_priority_ratio=0.85,   # <-- 여기부터 cnt를 더 중요하게 볼 임계치
         top_n=None,                # 원하면 최종 결과 상위 N개만 리턴
+        #  그룹 제약 추가
+        feature_groups=None,     # dict: feature_name -> group_name
+        group_limits=None,       # dict: group_name -> max_allowed_in_rule
 ):
     """
     (count, ratio, up_cnt, conds) 리스트 반환
@@ -80,6 +122,9 @@ def mine_rules(
     최종 out 정렬 정책(변경):
     - ratio >= cnt_priority_ratio 이면 cnt 우선(그 다음 ratio)
     - ratio <  cnt_priority_ratio 이면 ratio 우선(그 다음 cnt)
+
+    그룹 제약:
+    - feature_groups에 매핑된 피쳐들은 같은 그룹에서 group_limits 개수 이상 못 씀
     """
 
     beams = [(np.ones(N, dtype=bool), [])]
@@ -88,6 +133,14 @@ def mine_rules(
     print('beam', beam)
     print("expand_ratio", expand_ratio, "min_ratio", min_ratio, "min_count", min_count)
     print("cnt_priority_ratio", cnt_priority_ratio)
+
+    if feature_groups is None:
+        feature_groups = {}
+    if group_limits is None:
+        group_limits = {}
+
+    def get_group(feat_name: str):
+        return feature_groups.get(feat_name)
 
     # beam(확장 후보)용 비교키
     # "좋은 후보"가 더 큰 key를 갖도록 설계 (나중에 key 비교로 worst 교체)
@@ -109,11 +162,30 @@ def mine_rules(
         uid = count()
 
         for base_mask, conds in beams:
-            used = {c[0] for c in conds}
+            used_feats = {c[0] for c in conds}
+
+            # 현재 rule에서 그룹 사용량 계산
+            group_used = {}
+            for f in used_feats:
+                g = get_group(f)
+                if g is None:
+                    continue
+                group_used[g] = group_used.get(g, 0) + 1
 
             for (lit, lmask) in zip(literals, literal_masks):
-                if lit[0] in used:
+                feat = lit[0]
+
+                # 동일 feature 중복 금지 (기존)
+                if feat in used_feats:
                     continue
+
+                # 그룹 제약 체크
+                g = get_group(feat)
+                if g is not None:
+                    limit = group_limits.get(g, None)
+                    if limit is not None:
+                        if group_used.get(g, 0) >= limit:
+                            continue
 
                 m = base_mask & lmask
                 cnt = int(m.sum())
@@ -225,7 +297,25 @@ def rule_to_code(name, conds, thr_round=3):
 # 뎁스 증가에 따른 ratio 상승이 완만해야 한다
 
 # 국장
-rules = mine_rules(min_ratio=MIN_RATE, min_count=40, max_depth=5, beam=30000, expand_ratio=0.4, cnt_priority_ratio=MIN_RATE, top_n=10000)
+rules = mine_rules(
+    min_ratio=MIN_RATE, min_count=30, max_depth=5,
+    beam=30000, expand_ratio=0.42,
+    cnt_priority_ratio=MIN_RATE, top_n=300,
+    feature_groups=feature_groups,
+    group_limits=group_limits,
+)
+# 0.75, 30, 4, 0.38, 10000 > 50일 조건 > .... 67%
+# 0.75, 30, 4, 0.4, 400 > 50일 조건 > 35/83 > 70%
+# 0.75, 30, 4, 0.4, 10000 > 50일 조건 > 42/97 > 70%
+# 0.75, 30, 4, 0.42, 10000 > 50일 조건 > 35/85 > 70%
+# 0.75, 30, 4, 0.43, 500 > 50일 조건 > 16/39 > 70%
+# 0.75, 30, 4, 0.42, 500 > 50일 조건 > 34/85 > 71% ------------------
+# 0.75, 30, 4, 0.42, 300 > 50일 조건 > 29/76 > 72%
+
+# 0.8, 30, 5, 0.44, 10000 > 50일 조건 > 20/55 73%
+# 0.8, 30, 5, 0.43, 10000 > 50일 조건 > 20/55 73%
+# 0.8, 30, 5, 0.42, 1000 > 50일 조건 > 24/62 72%
+# 0.8, 30, 5, 0.42, 500 > 50일 조건 > 15/57 79% ---------------------
 
 # 미장
 # rules = mine_rules(min_ratio=MIN_RATE, min_count=50, max_depth=6, beam=30000, expand_ratio=0.45, top_n=10000)

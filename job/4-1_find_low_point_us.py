@@ -130,7 +130,7 @@ def process_one(idx, count, ticker, exchangeRate):
 
     # 최근 10일 5일선이 20일선보다 낮은데 3% 하락이 있으면서 오늘 3% 상승 ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
     # 변경점...  10일 +- 3일로 설정해봐야 할지도
-    signal = signal_any_drop(data, 6, 3.0 ,-2.5, 'today_chg_rate') # 45/71 ---
+    signal = signal_any_drop(data, 7, 3.0 ,-2.5, 'today_chg_rate') # 45/71 ---
     if not signal:
         return
 
