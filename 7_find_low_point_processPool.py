@@ -280,6 +280,18 @@ def process_one(idx, count, ticker, tickers_dict):
         "macd_hist_chg": macd_hist_chg,                  # MACD hist 가속
     }
 
+
+    # import lowscan_rules_80_30_5_42_400 as r1
+    import lowscan_rules_80_30_5_42_300 as r2
+    import lowscan_rules_84_30_5_42 as r4
+    import lowscan_rules_85_30_5_42 as r5
+    import lowscan_rules_85_30_6_42 as r6
+
+    # modules = [r1, r2, r3, r4, r5, r6]
+    # modules = [r2, r3, r4, r5, r6]
+    # modules = [r1, r2, r4, r5, r6]  # ---------------
+    modules = [r2, r4, r5, r6] # ---------------
+
     # data에 컬럼이 없거나 NaN이면 넣기 (기존 컬럼 있으면 덮어쓸지 말지는 옵션)
     data = data.copy()
     for k, v in rule_features.items():
@@ -302,6 +314,30 @@ def process_one(idx, count, ticker, tickers_dict):
     # True가 하나도 없으면 pass
     if not true_conds:
         return
+
+    # for mod in modules:
+    #     try:
+    #         rule_masks = mod.build_conditions(data)   # dict: rule_name -> Series[bool]
+    #     except KeyError as e:
+    #         print(f"[{ticker}] rule build_conditions KeyError in {mod.__name__}: {e} (missing column in data)")
+    #         return
+    #
+    #     RULE_NAMES = mod.RULE_NAMES
+    #
+    #     true_conds = [
+    #         name for name in RULE_NAMES
+    #         if name in rule_masks and bool(rule_masks[name].iloc[-1])
+    #     ]
+    #
+    #     # 이 모듈에서 하나라도 True면 통과 → 다음 로직 진행
+    #     if true_conds:
+    #         # 필요하면 어떤 모듈/룰이었는지 저장
+    #         matched_module = mod.__name__
+    #         matched_rules = true_conds
+    #         break
+    # else:
+    #     # 모든 모듈을 다 봤는데도 True가 하나도 없으면 pass
+    #     return
 
 
     ########################################################################
@@ -402,7 +438,7 @@ if __name__ == "__main__":
 
     # 10이면, 10거래일의 하루전부터, -1이면 어제
     # origin_idx = idx = -1
-    origin_idx = idx = 7
+    origin_idx = idx = 9
     workers = os.cpu_count()
     BATCH_SIZE = 20
 
