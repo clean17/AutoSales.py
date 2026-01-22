@@ -8,7 +8,7 @@ df = pd.read_csv("csv/low_result_7_desc.csv")
 # df = pd.read_csv("csv/low_result_us_6_desc.csv")   # 미장
 
 TARGET_COL = "validation_chg_rate"
-MIN_RATE = 0.8
+MIN_RATE = 0.75
 target = (df[TARGET_COL].to_numpy() >= 7)
 out_path = Path("lowscan_rules.py")
 # out_path = Path("lowscan_rules_us.py")   # 미장
@@ -47,44 +47,41 @@ for f in features:
 
 
 feature_groups = {
-    # 전환 캔들 축 (둘 중 1개만)
-    "lower_wick_ratio": "TURN_CANDLE",
-    "close_pos": "TURN_CANDLE",
+    # 캔들/당일 종가 위치(턴/마감 강도)
+    "close_pos": "CANDLE",
 
-    # 볼린저/위치 축 (둘 중 1개만)
-    "bb_recover": "BOLL",
-    "z20": "BOLL",
-
-    # 모멘텀 축 (최대 2개)
-    "today_pct": "MOMENTUM",
+    # 단기 모멘텀/가속 (너 룰에서 여러 개 쓰면 과적합 위험)
+    "today_pct": "MOMENTUM", # 오늘 등락
     "ma5_chg_rate": "MOMENTUM",
-    "macd_hist_chg": "MOMENTUM",
 
-    # 거래대금 축 (둘 다 같이 허용)
+    # 변동성 레짐 (둘 다 쓰면 “변동성 중복 강화” 가능)
+    "vol15": "VOLATILITY", # 15일 평균 변동성
+    "vol30": "VOLATILITY",
+
+    # 수급/거래대금 축
+    "mean_prev3": "VOLUME",
     "today_tr_val": "VOLUME",
-    "chg_tr_val": "VOLUME",
 
-    # 주간 퍼센트 축 (최대 1개)
+    # 주간 모멘텀 축
     "pct_vs_lastweek": "WEEK",
     "pct_vs_last4week": "WEEK",
 
-    # 3개월 레짐 축 (둘 다 같이 허용해도 됨)
+    # 3개월 레짐/위치 축
     "three_m_chg_rate": "REGIME",
     "today_chg_rate": "REGIME",
 
-    # 환경 축 (둘 다 같이 허용해도 됨)
-    "vol20": "ENV",
-    "pos20_ratio": "ENV",
+    # “상승 일수/양봉 비율” (성격이 따로라 별도 그룹 추천)
+    "pos20_ratio": "BREADTH",
 }
 
 group_limits = {
-    "TURN_CANDLE": 1,  # lower_wick_ratio + close_pos 동시 금지
-    "BOLL": 1,         # bb_recover + z20 동시 금지
-    "MOMENTUM": 2,     # today_pct/ma5/macd 중 2개까지만
-    "WEEK": 1,         # lastweek/last4week 둘 중 1개만
-    "VOLUME": 2,       # 둘 다 허용
-    "REGIME": 2,       # 둘 다 허용
-    "ENV": 2,          # 둘 다 허용
+    "CANDLE": 1,       # close_pos는 단독 1개
+    "MOMENTUM": 2,     # today_pct + ma5_chg_rate 같이 써도 OK
+    "VOLATILITY": 1,   # vol15/vol30 둘 중 하나만 (과적합 방지에 매우 효과적)  ---- 룰이 너무 안 나온다 > 2 // 실전 성과가 흔들린다 > 1
+    "VOLUME": 2,       # mean_prev3 + today_tr_val 같이 써도 OK
+    "WEEK": 1,         # lastweek/last4week 둘 중 하나만 (중복 방지)         ---- 룰이 너무 안 나온다 > 2 // 실전 성과가 흔들린다 > 1
+    "REGIME": 2,       # 3개월 관련 2개까지 허용(둘 다 써도 됨)
+    "BREADTH": 1,      # pos20_ratio는 1개만
 }
 
 
@@ -131,7 +128,7 @@ def mine_rules(
     good = {}
 
     print('beam', beam)
-    print("expand_ratio", expand_ratio, "min_ratio", min_ratio, "min_count", min_count)
+    print("min_ratio", min_ratio, "min_count", min_count, "max_depth", max_depth, "expand_ratio", expand_ratio, "top_n", top_n)
     print("cnt_priority_ratio", cnt_priority_ratio)
 
     if feature_groups is None:
@@ -298,24 +295,34 @@ def rule_to_code(name, conds, thr_round=3):
 
 # 국장
 rules = mine_rules(
-    min_ratio=MIN_RATE, min_count=30, max_depth=5,
+    min_ratio=MIN_RATE, min_count=30, max_depth=4,
     beam=30000, expand_ratio=0.42,
-    cnt_priority_ratio=MIN_RATE, top_n=300,
+    cnt_priority_ratio=MIN_RATE, top_n=1000,
     feature_groups=feature_groups,
     group_limits=group_limits,
 )
-# 0.75, 30, 4, 0.38, 10000 > 50일 조건 > .... 67%
-# 0.75, 30, 4, 0.4, 400 > 50일 조건 > 35/83 > 70%
-# 0.75, 30, 4, 0.4, 10000 > 50일 조건 > 42/97 > 70%
+# 0.75, 30, 4, 0.40, 10000 > 50일 조건 > 42/97 > 70%
 # 0.75, 30, 4, 0.42, 10000 > 50일 조건 > 35/85 > 70%
-# 0.75, 30, 4, 0.43, 500 > 50일 조건 > 16/39 > 70%
-# 0.75, 30, 4, 0.42, 500 > 50일 조건 > 34/85 > 71% ------------------
-# 0.75, 30, 4, 0.42, 300 > 50일 조건 > 29/76 > 72%
+# 0.75, 30, 4, 0.43, 500   > 50일 조건 > 16/39 > 70%
+# 0.75, 30, 4, 0.42, 500   > 50일 조건 > 34/85 > 71% ----
+# 0.75, 30, 4, 0.42, 400   > 50일 조건 > 30/78 > 72%
+# 0.75, 30, 4, 0.42, 300   > 50일 조건 > 29/76 > 72%
 
-# 0.8, 30, 5, 0.44, 10000 > 50일 조건 > 20/55 73%
 # 0.8, 30, 5, 0.43, 10000 > 50일 조건 > 20/55 73%
-# 0.8, 30, 5, 0.42, 1000 > 50일 조건 > 24/62 72%
-# 0.8, 30, 5, 0.42, 500 > 50일 조건 > 15/57 79% ---------------------
+# 0.8, 30, 5, 0.42, 1000  > 50일 조건 > 24/62 72%
+# 0.8, 30, 5, 0.42, 500   > 50일 조건 > 15/57 79%
+# 0.8, 30, 5, 0.42, 400   > 50일 조건 > 14/57 80% ---------------------
+# 0.8, 30, 5, 0.42, 300   > 50일 조건 > 9/47  84% ---------------------
+
+# 0.82, 30, 5, 0.40, 300 > 50일 조건 > 17/57 77%
+# 0.83, 30, 5, 0.42, 500 > 50일 조건 > 17/66 80% ---------------------
+# 0.84, 30, 5, 0.42, 500 > 50일 조건 > 4/26  87% ---------------------
+# 0.85, 30, 5, 0.42, 500 > 50일 조건 > 1/15  94% ---------------------
+
+# 0.85, 30, 6, 0.42, 400 > 50일 조건 > 10/56 85% ---------------------
+# 0.87, 30, 6, 0.42, 400 > 50일 조건 > 3/37  92% ---------------------
+# 0.90, 30, 6, 0.42, 400 > 50일 조건 > 1/11  92% ---------------------
+
 
 # 미장
 # rules = mine_rules(min_ratio=MIN_RATE, min_count=50, max_depth=6, beam=30000, expand_ratio=0.45, top_n=10000)
