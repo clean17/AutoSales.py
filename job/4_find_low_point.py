@@ -12,15 +12,14 @@ if ROOT not in sys.path:
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
-import unicodedata
 from pathlib import Path
 import matplotlib.pyplot as plt
 import requests
 import time
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
-from lowscan_rules import build_conditions, RULE_NAMES
-
-
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import lowscan_rules_80_25_4_42 as rule1
+import lowscan_rules_77_25_5_42 as rule2
+modules = [rule1]
 # 자동 탐색 (utils.py를 찾을 때까지 위로 올라가 탐색)
 here = Path(__file__).resolve()
 for parent in [here.parent, *here.parents]:
@@ -91,10 +90,6 @@ def process_one(idx, count, ticker, tickers_dict):
     # 직전 날까지의 마지막 3일 거래대금 평균
     today_tr_val = trading_value.iloc[-1]
     mean_prev3 = trading_value.iloc[:-1].tail(3).mean()
-    if not np.isfinite(mean_prev3) or mean_prev3 == 0:
-        chg_tr_val = 0.0
-    else:
-        chg_tr_val = (today_tr_val-mean_prev3)/mean_prev3*100
 
     # ★★★★★ 3거래일 평균 거래대금 5억보다 작으면 패스 ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
     if round(mean_prev3, 1) / 100_000_000 < 3:
@@ -136,19 +131,21 @@ def process_one(idx, count, ticker, tickers_dict):
     ########################################################################
 
     # ★★★★★ 최근 20일 변동성 너무 낮으면 제외 (지루한 종목)
+    last15_ret = data['등락률'].tail(15)           # 등락률이 % 단위라고 가정
     last20_ret = data['등락률'].tail(20)           # 등락률이 % 단위라고 가정
     last30_ret = data['등락률'].tail(30)
-    vol20 = last20_ret.std()                      # 표준편차
+    vol15 = last15_ret.std()                      # 표준편차
     vol30 = last30_ret.std()                      # 표준편차
-
-    # 평균 등락률
-    mean_ret20 = last20_ret.mean()
-    mean_ret30 = last30_ret.mean()
 
     # 양봉 비율이 30% 미만이면 제외 (계속 음봉 위주)
     pos20_ratio = (last20_ret > 0).mean()           # True 비율 => 양봉 비율
-    pos30_ratio = (last30_ret > 0).mean()           # True 비율 => 양봉 비율
 
+    # 추가 독립 피쳐
+    def to_float(x):
+        return float(x) if pd.notna(x) else np.nan
+
+    last = data.iloc[-1]
+    close_pos        = round(to_float(last.get("close_pos")), 4)
 
     ########################################################################
 
@@ -173,47 +170,32 @@ def process_one(idx, count, ticker, tickers_dict):
 
     ########################################################################
 
-    ma5_chg_rate = round(ma5_chg_rate, 2)
-    ma20_chg_rate = round(ma20_chg_rate, 2)
-    vol20 = round(vol20, 2)
-    vol30 = round(vol30, 2)
-    mean_ret20 = round(mean_ret20, 2)
-    mean_ret30 = round(mean_ret30, 2)
-    pos20_ratio = round(pos20_ratio*100, 2)
-    pos30_ratio = round(pos30_ratio*100, 2)
-    mean_prev3 = round(mean_prev3, 1)
-    today_tr_val = round(today_tr_val, 1)
-    chg_tr_val = round(chg_tr_val, 1)
-    three_m_chg_rate = round(three_m_chg_rate, 2)
-    today_chg_rate = round(today_chg_rate, 2)
-    pct_vs_firstweek = round(result['pct_vs_firstweek'], 2)
-    pct_vs_lastweek = round(result['pct_vs_lastweek'], 2)
-    pct_vs_last2week = round(result['pct_vs_last2week'], 2)
-    pct_vs_last3week = round(result['pct_vs_last3week'], 2)
-    pct_vs_last4week = round(result['pct_vs_last4week'], 2)
-    today_pct = round(data.iloc[-1]['등락률'], 1)
+    ma5_chg_rate = round(ma5_chg_rate, 4)
+    vol15 = round(vol15, 4)
+    vol30 = round(vol30, 4)
+    pos20_ratio = round(pos20_ratio*100, 4)
+    mean_prev3 = round(mean_prev3, 4)
+    today_tr_val = round(today_tr_val, 4)
+    three_m_chg_rate = round(three_m_chg_rate, 4)
+    today_chg_rate = round(today_chg_rate, 4)
+    pct_vs_lastweek = round(result['pct_vs_lastweek'], 4)
+    pct_vs_last4week = round(result['pct_vs_last4week'], 4)
+    today_pct = round(data.iloc[-1]['등락률'], 2)
 
     # --- build_conditions()가 참조하는 컬럼들을 data에 주입 (스칼라 → 컬럼 브로드캐스트) ---
     rule_features = {
-        "ma5_chg_rate": ma5_chg_rate,
-        "ma20_chg_rate": ma20_chg_rate,
-        "vol20": vol20,
-        "vol30": vol30,
-        "mean_ret20": mean_ret20,
-        "mean_ret30": mean_ret30,
-        "pos20_ratio": pos20_ratio,
-        "pos30_ratio": pos30_ratio,
-        "mean_prev3": mean_prev3,
-        "today_tr_val": today_tr_val,
-        "chg_tr_val": chg_tr_val,
-        "three_m_chg_rate": three_m_chg_rate,
-        "today_chg_rate": today_chg_rate,
-        "pct_vs_firstweek": pct_vs_firstweek,
-        "pct_vs_lastweek": pct_vs_lastweek,
-        "pct_vs_last2week": pct_vs_last2week,
-        "pct_vs_last3week": pct_vs_last3week,
-        "pct_vs_last4week": pct_vs_last4week,
-        "today_pct": today_pct,
+        "ma5_chg_rate": ma5_chg_rate,                    # 5일선 기울기 👍
+        "vol15": vol15,                                  # 20일 평균 변동성
+        "vol30": vol30,                                  # 30일 평균 변동성
+        "pos20_ratio": pos20_ratio,                      # 20일 평균 양봉비율 (전환 직전 눌림/반등 준비를 더 잘 반영할 가능성)
+        "today_tr_val": today_tr_val,                    # 오늘 거래대금 👍
+        "mean_prev3": mean_prev3,                        # 직전 3일 평균 거래대금 (조건에서 다수 사용)
+        "three_m_chg_rate": three_m_chg_rate,            # 3개월 종가 최저 대비 최고 등락률 👍
+        "today_chg_rate": today_chg_rate,                # 3개월 종가 최고 대비 오늘 등락률 👍
+        "pct_vs_lastweek": pct_vs_lastweek,              # 저번주 대비 이번주 등락률
+        "pct_vs_last4week": pct_vs_last4week,            # 4주 전 대비 이번주 등락률
+        "today_pct": today_pct,                          # 오늘등락률 👍
+        "close_pos": close_pos,                          # 당일 range 내 종가 위치(0~1)
     }
 
     # data에 컬럼이 없거나 NaN이면 넣기 (기존 컬럼 있으면 덮어쓸지 말지는 옵션)
@@ -221,25 +203,29 @@ def process_one(idx, count, ticker, tickers_dict):
     for k, v in rule_features.items():
         data[k] = v
 
+    for mod in modules:
+        try:
+            rule_masks = mod.build_conditions(data)   # dict: rule_name -> Series[bool]
+        except KeyError as e:
+            print(f"[{ticker}] rule build_conditions KeyError in {mod.__name__}: {e} (missing column in data)")
+            return
 
-    # 룰 마스크 생성 (각 룰마다 Series[bool] 반환)
-    try:
-        rule_masks = build_conditions(data)
-    except KeyError as e:
-        print(f"[{ticker}] rule build_conditions KeyError: {e} (missing column in data)")
+        RULE_NAMES = mod.RULE_NAMES
+
+        true_conds = [
+            name for name in RULE_NAMES
+            if name in rule_masks and bool(rule_masks[name].iloc[-1])
+        ]
+
+        # 이 모듈에서 하나라도 True면 통과 → 다음 로직 진행
+        if true_conds:
+            # 필요하면 어떤 모듈/룰이었는지 저장
+            matched_module = mod.__name__
+            matched_rules = true_conds
+            break
+    else:
+        # 모든 모듈을 다 봤는데도 True가 하나도 없으면 pass
         return
-
-    # 오늘(마지막 행)에서 True인 룰 이름만 추출
-    true_conds = [
-        name for name in RULE_NAMES
-        if name in rule_masks and bool(rule_masks[name].iloc[-1])
-    ]
-
-    # True가 하나도 없으면 pass
-    if not true_conds:
-        return
-
-
 
     # ─────────────────────────────────────────────────────────────
     # 2) 시가 총액 500억 이하 패스
@@ -293,29 +279,19 @@ def process_one(idx, count, ticker, tickers_dict):
         "ticker": ticker,
         "stock_name": stock_name,
         "today" : str(data.index[-1].date()),
-        # "3_months_ago": str(m_data.index[0].date()),
-        # "predict_str": predict_str,                      # 상승/미달
-        "ma5_chg_rate": ma5_chg_rate,                    # 5일선 기울기
-        "ma20_chg_rate": ma20_chg_rate,                  # 20일선 기울기
-        "vol20": vol20,                                  # 20일 평균 변동성
+        "ma5_chg_rate": ma5_chg_rate,                    # 5일선 기울기 👍
+        "vol15": vol15,                                  # 15일 평균 변동성
         "vol30": vol30,                                  # 30일 평균 변동성
-        "mean_ret20": mean_ret20,                        # 20일 평균 등락률
-        "mean_ret30": mean_ret30,                        # 30일 평균 등락률
-        "pos20_ratio": pos20_ratio,                      # 20일 평균 양봉비율
-        "pos30_ratio": pos30_ratio,                      # 30일 평균 양봉비율
-        # "mean_prev3": mean_prev3,                        # 직전 3일 평균 거래대금
-        # "today_tr_val": today_tr_val,                    # 오늘 거래대금
-        "chg_tr_val": chg_tr_val,                        # 거래대금 변동률
-        "three_m_chg_rate": three_m_chg_rate,            # 3개월 종가 최저 대비 최고 등락률
-        "today_chg_rate": today_chg_rate,                # 3개월 종가 최고 대비 오늘 등락률
-        "pct_vs_firstweek": pct_vs_firstweek,            # 3개월 주봉 첫주 대비 이번주 등락률
+        "pos20_ratio": pos20_ratio,                      # 20일 평균 양봉비율 (전환 직전 눌림/반등 준비를 더 잘 반영할 가능성)
+        "mean_prev3": mean_prev3,                        # 직전 3일 평균 거래대금 (조건에서 다수 사용)
+        "today_tr_val": today_tr_val,                    # 오늘 거래대금 👍
+        "three_m_chg_rate": three_m_chg_rate,            # 3개월 종가 최저 대비 최고 등락률 👍
+        "today_chg_rate": today_chg_rate,                # 3개월 종가 최고 대비 오늘 등락률 👍
         "pct_vs_lastweek": pct_vs_lastweek,              # 저번주 대비 이번주 등락률
-        "pct_vs_last2week": pct_vs_last2week,            # 2주 전 대비 이번주 등락률
-        "pct_vs_last3week": pct_vs_last3week,            # 3주 전 대비 이번주 등락률
         "pct_vs_last4week": pct_vs_last4week,            # 4주 전 대비 이번주 등락률
-        "today_pct": today_pct,                          # 오늘등락률
+        "today_pct": today_pct,                          # 오늘등락률 👍
+        "close_pos": close_pos,                          # 당일 range 내 종가 위치(0~1)
     }
-
 
 
     today_str = str(today)
@@ -444,18 +420,8 @@ if __name__ == "__main__":
     # 🔥 여기서 한 번에, 깔끔하게 출력
     for count, row in enumerate(rows):
         print(f"\nProcessing {count+1}/{len(rows)} : {row['stock_name']} [{row['ticker']}]")
-        # print(f"  3개월 전 날짜           : {row['3_months_ago']}")
-        # print(f"  직전 3일 평균 거래대금  : {row['mean_prev3'] / 100_000_000:.0f}억")
-        # print(f"  오늘 거래대금           : {row['today_tr_val'] / 100_000_000:.0f}억")
-        print(f"  거래대금 변동률         : {row['chg_tr_val']}%")
-        # print(f"  20일선 기울기                      ( > -1.7): {row['ma20_chg_rate']}")
-        print(f"  최근 20일 변동성                   ( > 1.5%): {row['vol20']}%")
-        print(f"  최근 20일 평균 등락률            ( >= -0.5%): {row['mean_ret20']}%")      # -3% 보다 커야함
-        # print(f"  최근 30일 중 양봉 비율              ( > 30%): {row['pos30_ratio']}%")
-        print(f"  3개월 종가 최저 대비 최고 등락률 (30% ~ 80%): {row['three_m_chg_rate']}%" )    # 30 ~ 65 선호, 28-30이하 애매, 70이상 과열
-        print(f"  3개월 종가 최고 대비 오늘 등락률   ( > -40%): {row['today_chg_rate']}%")     # -10(15) ~ -25(30) 선호, -10(15)이상은 아직 고점, -25(30) 아래는 미달일 경우가 있음
-        print(f"  3개월 주봉 첫주 대비 이번주 등락률 ( > -20%): {row['pct_vs_firstweek']}%")   # -15 ~ 20 선호, -20이하는 장기 하락 추세, 30이상은 급등 끝물
-        print(f"  지난주 대비 등락률: {row['pct_vs_lastweek']}%")
+        print(f"  직전 3일 평균 거래대금  : {row['mean_prev3'] / 100_000_000:.0f}억")
+        print(f"  오늘 거래대금           : {row['today_tr_val'] / 100_000_000:.0f}억")
         print(f"  오늘 등락률       : {row['today_pct']}%")
 
 
