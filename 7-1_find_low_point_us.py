@@ -28,7 +28,7 @@ else:
 
 from utils import _col, get_kor_ticker_dict_list, add_technical_features, plot_candles_weekly, plot_candles_daily, \
     drop_sparse_columns, drop_trading_halt_rows, signal_any_drop, low_weekly_check, get_nasdaq_symbols, \
-    get_usd_krw_rate, add_today_change_rate, sort_csv_by_today_desc
+    get_usd_krw_rate, add_today_change_rate, sort_csv_by_today_desc, safe_read_pickle
 
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
 root_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(=루트)
@@ -49,7 +49,8 @@ def process_one(idx, count, ticker, exchangeRate):
         return
 
     # print('filepath', filepath)
-    df = pd.read_pickle(filepath)
+    # df = pd.read_pickle(filepath)
+    df = safe_read_pickle(filepath)
     # print(df)
 
     # 데이터가 부족하면 패스

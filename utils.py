@@ -875,13 +875,7 @@ def add_technical_features(data, window=20, num_std=2):
 
 
     # ===== 추가(전환+7일용 추천 피쳐들) =====
-    data['lower_wick_ratio'] = (np.minimum(o, c) - l) / (h - l + eps)  # 아래꼬리 비율
     data['close_pos'] = (c - l) / (h - l + eps)                        # 당일 range 내 종가 위치(0~1)
-
-    data['bb_recover'] = (c > data['LowerBand']) & (c.shift(1) < data['LowerBand'].shift(1))  # 하단밴드 복귀 이벤트
-    data['z20'] = (c - data['MA20']) / (data['STD20'] + eps)                                   # z-score
-
-    data['macd_hist_chg'] = data['MACD_hist'].diff()  # MACD hist 가속
 
     # 안전 처리
     data.replace([np.inf, -np.inf], np.nan, inplace=True)
