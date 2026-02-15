@@ -1732,6 +1732,117 @@ def signal_any_drop(data: pd.DataFrame,
 
     return bool(cond_today and cond_past_anydrop and cond_ma_order)
 
+def signal_swing_rebound(
+        data: pd.DataFrame,
+        # 기존 아이디어 관련
+        ma_days: int = 12,                 # 어제~과거 ma_days일 동안 MA5<MA20 유지
+        up_thr: float = 1.8,               # 오늘 등락률(%) 최소 상승폭 (3.0 고집 말고 1.5~2.5 추천)
+        down_thr: float = -2.5,            # 과거 중 하루라도 급락이 있었는지
+        today_chg_rate: str = "등락률",
+        # 과매도 필터 - 전체적으로 최근 ret_lookback일 누적 하락이 충분히 컸고(과매도)
+        ret_lookback: int = 10,
+        ret_thr: float = -7.0,             # 최근 ret_lookback일 누적수익률(%) 기준 (어제까지)
+        # 박스 하단 지지(저점 영역) > 최근 며칠은 저점 이탈 없이 버텼고(지지 확인)
+        low_lookback: int = 60,
+        low_band: float = 0.03,            # 최근 60일 최저가 대비 0~3% 이내
+        hold_days: int = 3,                # 최근 hold_days일 동안 종가 기준 저점 이탈 금지
+        close_col: str = "종가",
+        # 추가 확인 (데드캣 방지)
+        require_close_above_ma5: bool = True,
+        # 거래량(옵션)
+        vol_col: str = "거래량",
+        use_volume: bool = False,
+        vol_lookback: int = 20,
+        vol_mult: float = 1.3
+) -> bool:
+    """
+    단기 스윙용 '과매도 + 박스하단 지지 + 반등' 신호.
+
+    필요 컬럼(기본): '등락률', 'MA5', 'MA20', '종가'
+    거래량 옵션: '거래량'
+    """
+
+    # 최소 길이 체크
+    '''
+    필요한 계산(최근 60일 저점, 최근 10일 누적수익률 등)을 하려면 최소 데이터 길이가 필요함.
+    “오늘 포함”이라 +1이 들어감.
+    '''
+    min_len = max(ma_days + 1, ret_lookback + 1, low_lookback + 1, hold_days + 1)
+    if len(data) < min_len:
+        return False
+
+    # 숫자 변환
+    chg  = pd.to_numeric(data[today_chg_rate], errors="coerce")
+    ma5  = pd.to_numeric(data["MA5"], errors="coerce")
+    ma20 = pd.to_numeric(data["MA20"], errors="coerce")
+    close = pd.to_numeric(data[close_col], errors="coerce")
+
+    if chg.isna().any() or ma5.isna().any() or ma20.isna().any() or close.isna().any():
+        return False
+
+    # 오늘 값(마지막 행)
+    today_chg = chg.iloc[-1]
+    today_close = close.iloc[-1]
+    today_ma5 = ma5.iloc[-1]
+
+    # 1) 오늘 반등
+    cond_today = (today_chg >= up_thr)
+
+    # 2) 과거 ma_days 구간: MA5 < MA20 "항상" + 급락 "한번이라도"
+    past_chg  = chg.iloc[-(ma_days+1):-1]     # 어제~과거 ma_days
+    past_ma5  = ma5.iloc[-(ma_days+1):-1]
+    past_ma20 = ma20.iloc[-(ma_days+1):-1]
+
+    cond_past_anydrop = past_chg.le(down_thr).any()
+    cond_ma_order     = past_ma5.lt(past_ma20).all()
+
+    # 3) 최근 ret_lookback일 누적수익률(어제까지) <= ret_thr
+    # 등락률이 일간 % 라는 가정 하에 누적수익률 계산
+    past_ret = chg.iloc[-(ret_lookback+1):-1] / 100.0
+    cum_ret = (1.0 + past_ret).prod() - 1.0
+    cond_oversold = (cum_ret * 100.0 <= ret_thr)
+
+    # 4) 박스 하단 지지
+    # - 최근 low_lookback일 최저 종가(어제까지 기준)와의 거리
+    low_window = close.iloc[-(low_lookback+1):-1]  # 어제까지 low_lookback
+    recent_low = low_window.min()
+
+    # (a) 현재가가 저점 근처(0~3% 이내)
+    cond_near_low = (today_close <= recent_low * (1.0 + low_band))
+
+    # (b) 최근 hold_days일 동안 종가로 저점 이탈 금지 (어제 포함)
+    #     => 최근 hold_days일 종가가 recent_low보다 낮게 마감한 적이 없어야 함
+    hold_window = close.iloc[-(hold_days+1):-1]    # 어제~과거 hold_days
+    cond_hold = (hold_window >= recent_low).all()
+
+    # 5) 데드캣 완화: 오늘 종가가 MA5 위로 회복(선택)
+    cond_above_ma5 = True
+    if require_close_above_ma5:
+        cond_above_ma5 = (today_close >= today_ma5)
+
+    # 6) 거래량 옵션
+    cond_volume = True
+    if use_volume:
+        if vol_col not in data.columns:
+            return False
+        vol = pd.to_numeric(data[vol_col], errors="coerce")
+        if vol.isna().any():
+            return False
+        today_vol = vol.iloc[-1]
+        avg_vol = vol.iloc[-(vol_lookback+1):-1].mean()  # 어제까지 평균
+        cond_volume = (today_vol >= avg_vol * vol_mult)
+
+    return bool(
+        cond_today
+        and cond_past_anydrop
+        and cond_ma_order
+        and cond_oversold
+        and cond_near_low
+        and cond_hold
+        and cond_above_ma5
+        and cond_volume
+    )
+
 def low_weekly_check(data: pd.DataFrame):
     # 인덱스가 날짜/시간이어야 함
     if not isinstance(data.index, (pd.DatetimeIndex, pd.PeriodIndex)):
