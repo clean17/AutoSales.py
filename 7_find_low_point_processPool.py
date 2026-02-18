@@ -92,9 +92,11 @@ def process_one(idx, count, ticker, tickers_dict):
     # 직전 날까지의 마지막 3일 거래대금 평균
     today_tr_val = trading_value.iloc[-1]
     mean_prev3 = trading_value.iloc[:-1].tail(3).mean()
+    mean_prev20 = trading_value.iloc[:-1].tail(20).mean()
 
     # ★★★★★ 3거래일 평균 거래대금 5억보다 작으면 패스 ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-    if round(mean_prev3, 1) / 100_000_000 < 3:
+    # if round(mean_prev3, 1) / 100_000_000 < 3:
+    if round(mean_prev20, 1) / 100_000_000 < 3:
         return
 
 
@@ -218,6 +220,7 @@ def process_one(idx, count, ticker, tickers_dict):
     vol30 = round(vol30, 4)
     pos20_ratio = round(pos20_ratio*100, 4)
     mean_prev3 = round(mean_prev3, 4)
+    mean_prev20 = round(mean_prev20, 4)
     today_tr_val = round(today_tr_val, 4)
     three_m_chg_rate = round(three_m_chg_rate, 4)
     today_chg_rate = round(today_chg_rate, 4)
@@ -246,6 +249,7 @@ def process_one(idx, count, ticker, tickers_dict):
         "pos20_ratio": pos20_ratio,                      # 20일 평균 양봉비율 (전환 직전 눌림/반등 준비를 더 잘 반영할 가능성)
         "today_tr_val": today_tr_val,                    # 오늘 거래대금 👍
         "mean_prev3": mean_prev3,                        # 직전 3일 평균 거래대금 (조건에서 다수 사용)
+        "mean_prev20": mean_prev20,                      # 직전 20일 평균 거래대금
         "three_m_chg_rate": three_m_chg_rate,            # 3개월 종가 최저 대비 최고 등락률 👍
         "today_chg_rate": today_chg_rate,                # 3개월 종가 최고 대비 오늘 등락률 👍
         "pct_vs_lastweek": pct_vs_lastweek,              # 저번주 대비 이번주 등락률
@@ -303,6 +307,7 @@ def process_one(idx, count, ticker, tickers_dict):
         "pos20_ratio": pos20_ratio,                      # 20일 평균 양봉비율 (전환 직전 눌림/반등 준비를 더 잘 반영할 가능성)
 
         "mean_prev3": mean_prev3,                        # 직전 3일 평균 거래대금 (조건에서 다수 사용)
+        "mean_prev20": mean_prev20,                      # 직전 20일 평균 거래대금 (조건에서 다수 사용)
         "today_tr_val": today_tr_val,                    # 오늘 거래대금 👍
 
         "three_m_chg_rate": three_m_chg_rate,            # 3개월 종가 최저 대비 최고 등락률 👍
