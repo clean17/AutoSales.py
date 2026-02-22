@@ -77,7 +77,7 @@ def process_one(idx, count, ticker, tickers_dict):
 
     try:
         requests.post(
-            'https://chickchick.shop/stocks/interest/graph',
+            'https://chickchick.kr/stocks/interest/graph',
             json={
                 "nation": "kor",
                 "stock_code": str(ticker),

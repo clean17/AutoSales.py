@@ -146,7 +146,7 @@ for count, ticker in enumerate(tickers):
 
     try:
         res = requests.post(
-            'https://chickchick.shop/stocks/info',
+            'https://chickchick.kr/stocks/info',
             json={"stock_name": str(ticker)},
             timeout=10
         )
@@ -162,7 +162,7 @@ for count, ticker in enumerate(tickers):
         # 현재 종가 가져오기
         try:
             res = requests.post(
-                'https://chickchick.shop/stocks/amount',
+                'https://chickchick.kr/stocks/amount',
                 json={
                     "product_code": str(product_code)
                 },
@@ -177,7 +177,7 @@ for count, ticker in enumerate(tickers):
     if last_close is not None:
         try:
             requests.post(
-                'https://chickchick.shop/stocks/interest/insert',
+                'https://chickchick.kr/stocks/interest/insert',
                 json={
                     "nation": "kor",
                     "stock_code": str(ticker),

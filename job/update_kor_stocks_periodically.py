@@ -139,7 +139,7 @@ if __name__ == "__main__":
     if len(payload) == 0:
         isEmpty = True
     # 2) 전송 (엔드포인트 주소 맞춰서 변경)
-    API_URL = "https://chickchick.shop/stocks/update"
+    API_URL = "https://chickchick.kr/stocks/update"
     post_stocks_update(API_URL, payload, batch_size=500)
 
     print('update KOSDAQ')
@@ -147,14 +147,14 @@ if __name__ == "__main__":
     if len(payload) == 0:
         isEmpty = True
     # 2) 전송 (엔드포인트 주소 맞춰서 변경)
-    API_URL = "https://chickchick.shop/stocks/update"
+    API_URL = "https://chickchick.kr/stocks/update"
     post_stocks_update(API_URL, payload, batch_size=500)
 
     # 항상 post_stocks_update() 다음 /delisted-stock을 요청해야한다
     if isEmpty == False:
         print('delete delisted stock')
         payload = {}
-        API_URL = "https://chickchick.shop/stocks/delisted-stock"
+        API_URL = "https://chickchick.kr/stocks/delisted-stock"
         with requests.Session() as s:
             headers = {"Content-Type": "application/json"}
             try:

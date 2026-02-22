@@ -232,7 +232,7 @@ def process_one(idx, count, ticker, tickers_dict):
     # ─────────────────────────────────────────────────────────────
     try:
         res = requests.post(
-            'https://chickchick.shop/stocks/info',
+            'https://chickchick.kr/stocks/info',
             json={"stock_name": str(ticker)},
             timeout=10
         )
@@ -251,7 +251,7 @@ def process_one(idx, count, ticker, tickers_dict):
 
     try:
         res2 = requests.post(
-            'https://chickchick.shop/stocks/overview',
+            'https://chickchick.kr/stocks/overview',
             json={"product_code": str(product_code)},
             timeout=10
         )
@@ -319,7 +319,7 @@ def process_one(idx, count, ticker, tickers_dict):
 
     try:
         res = requests.post(
-            'https://chickchick.shop/stocks/info',
+            'https://chickchick.kr/stocks/info',
             json={"stock_name": str(ticker)},
             timeout=10
         )
@@ -331,7 +331,7 @@ def process_one(idx, count, ticker, tickers_dict):
 
     try:
         res2 = requests.post(
-            'https://chickchick.shop/stocks/overview',
+            'https://chickchick.kr/stocks/overview',
             json={"product_code": str(product_code)},
             timeout=10
         )
@@ -344,7 +344,7 @@ def process_one(idx, count, ticker, tickers_dict):
 
     try:
         requests.post(
-            'https://chickchick.shop/stocks/interest/insert',
+            'https://chickchick.kr/stocks/interest/insert',
             json={
                 "nation": "kor",
                 "stock_code": str(ticker),

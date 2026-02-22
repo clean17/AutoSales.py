@@ -44,6 +44,7 @@ os.makedirs(pickle_dir, exist_ok=True)
 today = datetime.today().strftime('%Y%m%d')
 start_yesterday = (datetime.today() - timedelta(days=1)).strftime('%Y%m%d')
 TRADING_VALUE = 4_000_000_000 # 거래대금 40억
+TODAY_RATE_OF_INCREASE = 3
 
 # tickers = get_kor_ticker_list()
 tickers_dict = get_kor_ticker_dict_list()
@@ -180,7 +181,7 @@ for count, ticker in enumerate(tickers):
     today_price_change_pct = round(today_price_change_pct, 2)
 
     # 오늘 상승률이 X% 가 안되면 제외
-    if today_price_change_pct < 4.5:
+    if today_price_change_pct < TODAY_RATE_OF_INCREASE:
         condition_passed = False
         condition_passed2 = False
         # continue  # 오늘 10% 미만 상승이면 제외
@@ -191,7 +192,7 @@ for count, ticker in enumerate(tickers):
     # ─────────────────────────────────────────────────────────────
     try:
         res = requests.post(
-            'https://chickchick.shop/stocks/info',
+            'https://chickchick.kr/stocks/info',
             json={"stock_name": str(ticker)},
             timeout=10
         )
@@ -210,7 +211,7 @@ for count, ticker in enumerate(tickers):
 
     try:
         res2 = requests.post(
-            'https://chickchick.shop/stocks/overview',
+            'https://chickchick.kr/stocks/overview',
             json={"product_code": str(product_code)},
             timeout=10
         )
@@ -287,7 +288,7 @@ for count, ticker in enumerate(tickers):
     # 현재 종가 가져오기
     try:
         res = requests.post(
-            'https://chickchick.shop/stocks/amount',
+            'https://chickchick.kr/stocks/amount',
             json={
                 "product_code": str(product_code)
             },
@@ -309,7 +310,7 @@ for count, ticker in enumerate(tickers):
 
         try:
             requests.post(
-                'https://chickchick.shop/stocks/interest/insert',
+                'https://chickchick.kr/stocks/interest/insert',
                 json={
                     "nation": "kor",
                     "stock_code": str(ticker),
@@ -340,7 +341,7 @@ for count, ticker in enumerate(tickers):
 
         try:
             requests.post(
-                'https://chickchick.shop/stocks/interest/insert',
+                'https://chickchick.kr/stocks/interest/insert',
                 json={
                     "nation": "kor",
                     "stock_code": str(ticker),

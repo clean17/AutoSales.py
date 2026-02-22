@@ -338,7 +338,7 @@ def get_kor_ticker_list():
     # tickers_kosdaq = get_safe_ticker_list(market="KOSDAQ")
     # tickers = tickers_kospi + tickers_kosdaq
 
-    url = "https://chickchick.shop/stocks/kor"
+    url = "https://chickchick.kr/stocks/kor"
     res = requests.get(url)
     try:
         data = res.json()
@@ -348,7 +348,7 @@ def get_kor_ticker_list():
     return tickers
 
 def get_kor_ticker_dict_list():
-    url = "https://chickchick.shop/stocks/kor"
+    url = "https://chickchick.kr/stocks/kor"
     res = requests.get(url)
     try:
         data = res.json()
@@ -363,7 +363,7 @@ def get_kor_ticker_dict_list():
 def get_kor_summary_ticker_dict_list():
     days_ago_14 = (datetime.today() - timedelta(days=14)).strftime('%Y%m%d')
     res = requests.post(
-        'https://chickchick.shop/stocks/interest/data/fire',
+        'https://chickchick.kr/stocks/interest/data/fire',
         json={
             "date": str(days_ago_14)
         },
@@ -382,7 +382,7 @@ def get_kor_summary_ticker_dict_list():
 def get_favorite_ticker_dict_list():
     days_ago_14 = (datetime.today() - timedelta(days=14)).strftime('%Y%m%d')
     res = requests.post(
-        'https://chickchick.shop/stocks/interest/data/favorite/schedule',
+        'https://chickchick.kr/stocks/interest/data/favorite/schedule',
         json={
             "date": str(days_ago_14)
         },
@@ -399,7 +399,7 @@ def get_favorite_ticker_dict_list():
     }
 
 def get_kor_interest_ticker_dick_list():
-    url = "https://chickchick.shop/stocks/interest/data/today"
+    url = "https://chickchick.kr/stocks/interest/data/today"
     payload = {
         "date": today,
     }
