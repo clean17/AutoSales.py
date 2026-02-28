@@ -242,8 +242,8 @@ for iteration in range(MAX_ITERATIONS):
 
         # 마지막 행의 데이터를 가져옴
         last_row = data.iloc[-1]
-        # 종가가 0.0이거나 400원 미만인지 확인
-        if last_row['종가'] == 0.0 or last_row['종가'] < 500:
+        # 종가가 0.0이거나 700원 미만인지 확인
+        if last_row['종가'] == 0.0 or last_row['종가'] < 700:
             print("                                                        종가가 0이거나 500원 미만이므로 작업을 건너뜁니다.")
             continue
 

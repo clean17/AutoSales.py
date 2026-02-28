@@ -74,9 +74,9 @@ for count, ticker in enumerate(tickers):
         # print(f"                                                        데이터 부족 → pass")
         continue
 
-    # 500원 미만이면 패스
+    # 700원 미만이면 패스
     last_row = data.iloc[-1]
-    if last_row['종가'] < 500:
+    if last_row['종가'] < 700:
         # print("                                                        종가가 0이거나 500원 미만 → pass")
         continue
 
