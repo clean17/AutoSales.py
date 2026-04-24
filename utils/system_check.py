@@ -8,6 +8,18 @@ System monitor started...
 [MON] CPU=41.8% MEM=71.7%
 
 [Ctrl + C] 로 종료하게 되면 간단한 그래프를 생성한다
+
+===== SUMMARY =====
+CPU AVG: 17.39%
+CPU MAX: 46.50%
+CPU P50: 14.60%   # 중앙값
+CPU P90: 31.80%   # 상위 10% 구간
+CPU P95: 38.60%   # 상위 5% 구간
+MEM AVG: 75.71%
+MEM MAX: 76.90%
+MEM P90: 76.20%   # 상위 10% 구간
+
+
 """
 
 import psutil
@@ -31,6 +43,12 @@ CPU_WARN = 80  # 경고 기준 %
 cpu_list = []
 mem_list = []
 time_list = []
+
+CPU_COUNT = psutil.cpu_count()
+
+
+def normalize_cpu(cpu_percent):
+    return cpu_percent / CPU_COUNT
 
 
 def get_usage():
@@ -79,13 +97,13 @@ def save_graph():
     if not cpu_list:
         return
 
-    plt.figure()
+    plt.figure(figsize=(20, 12))
 
     plt.plot(time_list, cpu_list, label="CPU %")
     plt.plot(time_list, mem_list, label="MEM %")
 
-    # x축 시간 라벨을 최대 10개만 표시
-    max_ticks = 10
+    # x축 시간 라벨을 최대 20개만 표시
+    max_ticks = 20
     total = len(time_list)
 
     if total <= max_ticks:
@@ -105,8 +123,47 @@ def save_graph():
     plt.legend()
 
     plt.tight_layout()
-    plt.savefig("system_usage.png")
-    print("Graph saved: system_usage.png")
+    plt.savefig(f"system_usage_{today}.png")
+    print(f"Graph saved: system_usage_{today}.png")
+
+
+def print_top_processes():
+    # CPU 측정 초기화
+    procs = []
+    for p in psutil.process_iter(['pid', 'name']):
+        try:
+            p.cpu_percent(None)
+            procs.append(p)
+        except:
+            pass
+
+    # 시간 간격 (중요)
+    time.sleep(1)
+
+    processes = []
+    for p in procs:
+        try:
+            processes.append({
+                'pid': p.pid,
+                'name': p.name(),
+                'cpu_percent': p.cpu_percent(None),
+                'memory_percent': p.memory_percent()
+            })
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+
+    top_cpu = sorted(processes, key=lambda x: x['cpu_percent'], reverse=True)[:10]
+    top_mem = sorted(processes, key=lambda x: x['memory_percent'], reverse=True)[:10]
+
+    print("\n===== TOP 10 CPU =====")
+    for p in top_cpu:
+        cpu = normalize_cpu(p['cpu_percent'])
+        print(f"{p['name']:<25} PID={p['pid']:<6} CPU={cpu:.1f}% MEM={p['memory_percent']:.1f}%")
+
+    print("\n===== TOP 10 MEM =====")
+    for p in top_mem:
+        print(f"{p['name']:<25} PID={p['pid']:<6} CPU={p['cpu_percent']:.1f}% MEM={p['memory_percent']:.1f}%")
+
 
 def main():
     print("System monitor started...")
@@ -127,7 +184,6 @@ def main():
             log_usage(cpu, mem)
 
 
-            # 🔥 경고 추가
             if cpu >= CPU_WARN:
                 print(f"[WARN] CPU HIGH! {cpu:.1f}%")
 
@@ -140,6 +196,7 @@ def main():
 
     except KeyboardInterrupt:
         print_summary()
+        print_top_processes()
         save_graph()
 
 
