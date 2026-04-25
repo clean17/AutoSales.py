@@ -1,3 +1,8 @@
+"""
+기업 밸류업 통합홈페이지 제공하는 엑셀 다운
+한국 증시 종목들의 회사명, 시장구분, 종목코드, 업종등의 데이터를 갱신하는 스크립트
+"""
+
 import os, sys
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT not in sys.path:

@@ -1,4 +1,6 @@
-
+"""
+관심 종목의 오늘 그래프 생성
+"""
 import matplotlib
 matplotlib.use("Agg")  # ✅ 비인터랙티브 백엔드 (창 안 띄움)
 import os, sys

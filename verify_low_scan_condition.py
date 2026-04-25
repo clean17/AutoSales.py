@@ -1,3 +1,7 @@
+"""
+생성한 저점 매수 조건을 검증하는 스크립트
+"""
+
 from utils import sort_csv_by_today_desc
 import pandas as pd
 from pathlib import Path

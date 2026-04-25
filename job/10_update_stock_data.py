@@ -1,3 +1,7 @@
+"""
+월-금 01시에 모든 종목의 지정한 기간동안의 OHLCV 데이터를 갱신 (2시간 30분 정도 시간 소모)
+"""
+
 import os, sys
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT not in sys.path:
@@ -53,4 +57,4 @@ hours, remainder = divmod(int(elapsed), 3600)
 minutes, seconds = divmod(remainder, 60)
 
 if elapsed > 20:
-    print(f"총 소요 시간: {hours}시간 {minutes}분 {seconds}초")
+    print(f"[10_update_stock_data.py] 총 소요 시간: {hours}시간 {minutes}분 {seconds}초")

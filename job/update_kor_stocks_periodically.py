@@ -1,3 +1,8 @@
+"""
+pykrx를 통해 현재 KOSPI, KOSDAQ 종목리스트를 갱신
+ - 2026.02.21 한국거래소에서 데이터를 반환하지 않아 현재 사용하지 않음
+"""
+
 import os, sys
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT not in sys.path:
