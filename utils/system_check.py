@@ -28,6 +28,7 @@ import json
 import statistics
 import matplotlib.pyplot as plt
 from datetime import datetime
+import os
 
 today = datetime.now().strftime("%Y%m%d")
 year = datetime.now().strftime("%Y")
@@ -36,9 +37,9 @@ day = datetime.now().strftime("%d")
 print(f"{today} {year} {month} {day}")
 
 INTERVAL = 10  # 초
-LOG_FILE = "../system_usage.jsonl"
 CPU_WARN = 80  # 경고 기준 %
-
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+LOG_FILE = os.path.join(BASE_DIR, "system_usage.jsonl")
 
 cpu_list = []
 mem_list = []
@@ -123,7 +124,7 @@ def save_graph():
     plt.legend()
 
     plt.tight_layout()
-    plt.savefig(f"system_usage_{today}.png")
+    plt.savefig(os.path.join(BASE_DIR, f"system_usage_{today}.png"))
     print(f"Graph saved: system_usage_{today}.png")
 
 
