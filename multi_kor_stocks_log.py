@@ -27,7 +27,7 @@ tf.random.set_seed(42)
 random.seed(42)
 
 
-output_dir = 'D:\\kospi_stocks'
+output_dir = 'F:\\kospi_stocks'
 # output_dir = 'D:\\stocks'
 os.makedirs(output_dir, exist_ok=True)
 

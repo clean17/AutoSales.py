@@ -30,7 +30,7 @@ tf.random.set_seed(42)
 random.seed(42)
 
 
-output_dir = 'D:\\kospi_stocks'
+output_dir = 'F:\\kospi_stocks'
 os.makedirs(output_dir, exist_ok=True)
 
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기

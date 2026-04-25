@@ -125,7 +125,11 @@ for count, ticker in enumerate(tickers):
     # plt.show()
 
     # 파일 저장 (옵션)
-    output_dir = 'D:\\interest_stocks'
+    year = datetime.now().strftime("%Y")
+    month = datetime.now().strftime("%m")
+    day = datetime.now().strftime("%d")
+
+    output_dir = f'F:\\interest_stocks\\{year}\\{month}\\{day}'
     os.makedirs(output_dir, exist_ok=True)
 
     final_file_name = f'{today} {stock_name} [{ticker}].webp'

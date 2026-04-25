@@ -36,8 +36,8 @@ from utils import _col, get_kor_ticker_dict_list, add_technical_features, plot_c
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
 root_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(=루트)
 pickle_dir = os.path.join(root_dir, '../pickle')
-output_dir = 'D:\\5below20'
-# output_dir = 'D:\\5below20_test'
+output_dir = 'F:\\5below20'
+# output_dir = 'F:\\5below20_test'
 
 
 
