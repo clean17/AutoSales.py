@@ -8,10 +8,11 @@ from pathlib import Path
 import heapq
 from itertools import count
 
-df = pd.read_csv("csv/low_result_7_desc.csv")
+# df = pd.read_csv("csv/low_result_7_desc.csv")
+df = pd.read_csv("csv/low_result_7_desc2.csv")
 # df = pd.read_csv("csv/low_result_us_6_desc.csv")   # 미장
 
-MIN_RATE = 0.78
+MIN_RATE = 0.74
 # TARGET_COL = "validation_chg_rate"         # 검증등락률
 # target = (df[TARGET_COL].to_numpy() >= 7)  # 7퍼 이상 검증 통과
 
@@ -204,8 +205,6 @@ def mine_rules(
                 if ratio >= min_ratio:
                     key2 = tuple(sorted((c[0], c[1], round(float(c[2]), 6)) for c in (conds + [lit])))
                     prev = good.get(key2)
-                    if (prev is None) or (cnt > prev[0]) or (cnt == prev[0] and ratio > prev[1]):
-                        good[key2] = (cnt, ratio, up, conds + [lit])
                     if (prev is None) or (score > prev[4]):
                         good[key2] = (cnt, ratio, up, conds + [lit], score)
 
