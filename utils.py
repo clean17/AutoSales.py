@@ -127,6 +127,41 @@ def nrmse(y, yhat, eps=1e-8):
     return float(np.sqrt(np.mean((np.asarray(yhat)-np.asarray(y))**2)) / (np.mean(np.abs(y))+eps))
 
 
+
+def safe_rate(x, base):
+    """
+    안전하게 비율(%)을 계산
+    safe_rate(110, 100)   # 10.0 (%)
+    safe_rate(90, 100)    # -10.0 (%)
+    safe_rate(np.nan, 100) # NaN
+    safe_rate(120, 0)      # NaN
+    """
+    if pd.isna(x) or base == 0 or not np.isfinite(base):
+        return np.nan
+    return (x - base) / base * 100
+
+
+def volume_rank(series, window=20):
+    """
+    거래량의 상대적 순위를 구하는 함수
+    반환값 범위: 0 ~ 1
+    값이 클수록 → 오늘 거래량이 과거 20일 중 상위권에 위치.
+    값이 작을수록 → 오늘 거래량이 과거 20일 중 하위권에 위치.
+    """
+    return series.rolling(window).apply(
+        lambda x: (x <= x.iloc[-1]).mean(), raw=False
+    )
+
+
+def to_float(x):
+    """
+    값을 안전하게 float으로 변환하는 유틸리티
+    숫자나 문자열 숫자 → float 타입으로 변환
+    NaN이나 결측치 → np.nan으로 반환
+    """
+    return float(x) if pd.notna(x) else np.nan
+
+
 # --- 2) 유틸: naive 생성 ---
 def make_naive_preds(y_hist_end, horizon, mode="price"):
     """
@@ -806,6 +841,17 @@ def add_technical_features(data, window=20, num_std=2):
     data['volume_ratio'] = v / v.rolling(20).mean()
 
 
+    # 중기 위치 확인 (추세 필터)
+    data['dist_to_ma20'] = (data[col_c].iloc[-1] - data['MA20'].iloc[-1]) / data['MA20'].iloc[-1]
+
+
+    # 오늘 거래량이 최근 20일 중 어느 정도 위치냐
+    # 0.9 이상 → 거의 최고 거래량
+    # 0.5 → 평범
+    # 0.2 → 거래 죽음
+    data['volume_rank_20d'] = volume_rank(data[col_v], 20)
+
+
     # === 추가 지표 ===
     # MACD
     """
@@ -875,7 +921,9 @@ def add_technical_features(data, window=20, num_std=2):
 
 
     # ===== 추가(전환+7일용 추천 피쳐들) =====
-    data['close_pos'] = (c - l) / (h - l + eps)                        # 당일 range 내 종가 위치(0~1)
+    # 당일 range 내 종가 위치(0~1)
+    # 1 → 종가가 최고가 근처 (강함)
+    data['close_pos'] = (c - l) / (h - l + eps)
 
     # 안전 처리
     data.replace([np.inf, -np.inf], np.nan, inplace=True)
@@ -914,6 +962,8 @@ def check_column_types(data, columns):
 
 
 # 미장 한글 종목명 요청
+# https://wts-info-api.tossinvest.com/api/v3/search-all/wts-auto-complete
+# {"query":"kbi메탈","sections":[{"type":"SCREENER"},{"type":"NEWS"},{"type":"PRODUCT","option":{"addIntegratedSearchResult":true}},{"type":"TICS"}]}
 def get_name_from_usa_ticker(ticker: str) -> Optional[str]:
     TOSSINVEST_API_URL = "https://wts-info-api.tossinvest.com/api/v3/search-all/wts-auto-complete"
 
@@ -1697,7 +1747,7 @@ def drop_sparse_columns(df: pd.DataFrame, threshold: float = 0.10, *, check_inf:
 
 
 def signal_any_drop(data: pd.DataFrame,
-                    days: int = 12,
+                    days: int = 10,
                     up_thr: float = 3.0,
                     down_thr: float = -3.0,
                     today_chg_rate: str = "등락률") -> bool:
@@ -1709,10 +1759,17 @@ def signal_any_drop(data: pd.DataFrame,
     컬럼 필요: '등락률', 'MA5', 'MA20'
     """
 
+    # 한국/영문 칼럼 자동 식별
+    col_o = _col(data, '시가',   'Open')
+    col_h = _col(data, '고가',   'High')
+    col_l = _col(data, '저가',   'Low')
+    col_c = _col(data, '종가',   'Close')
+    col_v = _col(data, '거래량', 'Volume')
+
     # 안전 변환
-    chg  = pd.to_numeric(data[today_chg_rate], errors='coerce')
-    ma5  = pd.to_numeric(data['MA5'],   errors='coerce')
-    ma20 = pd.to_numeric(data['MA20'],  errors='coerce')
+    chg   = pd.to_numeric(data[today_chg_rate], errors='coerce')
+    ma5   = pd.to_numeric(data['MA5'],   errors='coerce')
+    ma20  = pd.to_numeric(data['MA20'],  errors='coerce')
 
     # 오늘 등락률(마지막 행)
     today_chg = chg.iloc[-1]
@@ -1730,12 +1787,12 @@ def signal_any_drop(data: pd.DataFrame,
     cond_past_anydrop = past_chg.le(down_thr).any()     # 하루라도 down_thr 이하
     cond_ma_order     = past_ma5.lt(past_ma20).all()    # days기간 내내 MA5 < MA20
 
-    return bool(cond_today and cond_past_anydrop and cond_ma_order)
+    return bool(cond_today and cond_past_anydrop and cond_ma_order and volume_spike)
 
 def signal_swing_rebound(
         data: pd.DataFrame,
         # 기존 아이디어 관련
-        ma_days: int = 12,                 # 어제~과거 ma_days일 동안 MA5<MA20 유지
+        ma_days: int = 10,                 # 어제~과거 ma_days일 동안 MA5<MA20 유지
         up_thr: float = 1.8,               # 오늘 등락률(%) 최소 상승폭 (3.0 고집 말고 1.5~2.5 추천)
         down_thr: float = -2.5,            # 과거 중 하루라도 급락이 있었는지
         today_chg_rate: str = "등락률",
@@ -1844,6 +1901,11 @@ def signal_swing_rebound(
     )
 
 def low_weekly_check(data: pd.DataFrame):
+    """
+    주봉 기준으로 최근 1~4주간의 종가 변화를 퍼센트로 계산
+    특정 기준(-1% 하락)을 충족했는지 여부를 체크하는 역할
+    >> 주봉 데이터를 리샘플링해 최근 주가 흐름을 퍼센트로 비교하고, 단기 하락 여부를 판별하는 함수
+    """
     # 인덱스가 날짜/시간이어야 함
     if not isinstance(data.index, (pd.DatetimeIndex, pd.PeriodIndex)):
         data = data.copy()
@@ -1865,36 +1927,36 @@ def low_weekly_check(data: pd.DataFrame):
         col_v: 'sum'
     }).dropna(subset=[col_c])  # 종가 없는 주 제거
 
-    # 직전 2주 추출
-    prev_close = weekly.iloc[-2][col_c]
-    two_w_close = weekly.iloc[-3][col_c]
+    # 최근 ~ 4주 전 주봉 종가 추출
+    first_w_close = weekly.iloc[0][col_c]    # 첫번째 주 종가
+    this_w_close  = weekly.iloc[-1][col_c]   # 이번 주 종가
+    prev_w_close  = weekly.iloc[-2][col_c]
+    two_w_close   = weekly.iloc[-3][col_c]
     three_w_close = weekly.iloc[-4][col_c]
-    four_w_close = weekly.iloc[-5][col_c]
-    this_close = weekly.iloc[-1][col_c]   # 마지막 주 종가
-    first      = weekly.iloc[0][col_c]    # 첫번째 주 종가
+    four_w_close  = weekly.iloc[-5][col_c]
 
     '''
-    prev_close = 100
-    this_close = 105
+    prev_w_close = 100
+    this_w_close = 105
     one_w_ago_pct = (105 / 100) - 1   # 1.05 - 1 = 0.05    >> one_w_ago_pct = 0.05 (5% 상승)
     '''
-    pct_from_first  = (this_close / first) - 1           # 이번 주 종가(this_close)가 첫 번째 주 종가(first) 대비 몇 % 변했는지
-    one_w_ago_pct   = (this_close / prev_close) - 1      # 저번주 대비 이번주 증감률
-    two_w_ago_pct   = (this_close / two_w_close) - 1     # 2주 대비 이번주 증감률
-    three_w_ago_pct = (this_close / three_w_close) - 1   # 3주 대비 이번주 증감률
-    four_w_ago_pct  = (this_close / four_w_close) - 1    # 4주 대비 이번주 증감률
-    is_drop_over_1  = one_w_ago_pct < -0.01              # -1% 보다 더 하락했는가 // -0.005   # -0.5%
+    pct_from_first  = (this_w_close / first_w_close) - 1     # 이번 주 종가(this_w_close)가 첫 번째 주 종가(first_w_close) 대비 몇 % 변했는지
+    one_w_ago_pct   = (this_w_close / prev_w_close) - 1      # 저번주 대비 이번주 증감률
+    two_w_ago_pct   = (this_w_close / two_w_close) - 1       # 2주 대비 이번주 증감률
+    three_w_ago_pct = (this_w_close / three_w_close) - 1     # 3주 대비 이번주 증감률
+    four_w_ago_pct  = (this_w_close / four_w_close) - 1      # 4주 대비 이번주 증감률
+    is_drop_over_1  = one_w_ago_pct < -0.01                  # -1% 보다 더 하락했는가 // -0.005   # -0.5%
 
     return {
         "ok": True,
-        # "this_week_close": float(this_close),
-        # "last_week_close": float(prev_close),
-        "pct_vs_lastweek": float(one_w_ago_pct*100),                    # 저번주 대비 이번주 증감률, 예: -0.0312 == -3.12%
-        "pct_vs_last2week": float(two_w_ago_pct*100),                   # 2주 전 대비 이번주 증감률
-        "pct_vs_last3week": float(three_w_ago_pct*100),                 # 3주 전 대비 이번주 증감률
-        "pct_vs_last4week": float(four_w_ago_pct*100),                  # 4주 전 대비 이번주 증감률
+        # "this_week_close": round(float(this_w_close), 3),
+        # "last_week_close": round(float(prev_w_close), 3),
+        "pct_vs_lastweek": round(float(one_w_ago_pct*100), 3),          # 저번주 대비 이번주 증감률, -0.0312 -> -3.12%
+        "pct_vs_last2week": round(float(two_w_ago_pct*100), 3),         # 2주 전 대비 이번주 증감률
+        "pct_vs_last3week": round(float(three_w_ago_pct*100), 3),       # 3주 전 대비 이번주 증감률
+        "pct_vs_last4week": round(float(four_w_ago_pct*100), 3),        # 4주 전 대비 이번주 증감률
+        "pct_vs_firstweek": round(float(pct_from_first*100), 3),        # 3개월 첫주 대비 이번주 증감률, -0.22 -> -22% 하락
         "is_drop_more_than_minus1pct": bool(is_drop_over_1),            # 주봉 증감률이 기준보다 하락했는지
-        "pct_vs_firstweek": float(pct_from_first*100),                  # -0.22 -> -22% 하락
     }
 
 
