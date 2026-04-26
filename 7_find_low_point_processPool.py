@@ -320,21 +320,6 @@ def process_one(idx, count, ticker, tickers_dict):
         "today" : str(data.index[-1].date()),
         "predict_str": predict_str,                      # 상승/미달
 
-        "ma5_chg_rate": ma5_chg_rate,                    # 오늘의 5일선 기울기 👍
-        # "vol15": vol15,                                  # 15일 평균 변동성
-        "vol_ratio": vol_ratio,                          # 단기 변동성과 장기 변동성을 비교하는 비율
-
-        # "mean_prev3": mean_prev3,                        # 직전 3일 평균 거래대금 (조건에서 다수 사용)
-        "volume_rank_20d": volume_rank_20d,              # 20일 거래대금 순위 (1이면 오늘이 최고 높음)
-
-        "three_m_max_cur": three_m_max_cur,              # 3개월 종가 최고 대비 오늘 등락률 👍
-        # "three_m_min_cur": three_m_min_cur,              # 3개월 종가 최저 대비 오늘 등락률 👍
-
-        # "pct_vs_lastweek": result['pct_vs_lastweek'],    # 저번주 대비 이번주 등락률
-
-        # "today_pct": today_pct,                          # 오늘등락률 👍 (오늘 +3% 이상 (signal_any_drop))
-        "close_pos": close_pos,                          # 당일 range 내 종가 위치(0~1)
-
         "validation_chg_rate": validation_chg_rate,      # 검증 등락률
         "validation_chg_rate1": validation_chg_rate1,    # 검증 등락률
         "validation_chg_rate2": validation_chg_rate2,    # 검증 등락률
@@ -344,6 +329,7 @@ def process_one(idx, count, ticker, tickers_dict):
         "validation_chg_rate6": validation_chg_rate6,    # 검증 등락률
         "validation_chg_rate7": validation_chg_rate7,    # 검증 등락률
     }
+    row.update(rule_features)
 
     # 처음으로 수익률 뚫는 날, 조건이 뚫을 수 있는지 확인
     vals = [
