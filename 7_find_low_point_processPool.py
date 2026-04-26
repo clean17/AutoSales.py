@@ -176,8 +176,7 @@ def process_one(idx, count, ticker, tickers_dict):
         return
 
     close_pos = round(to_float(data.iloc[-1].get("close_pos")), 3)  # 당일 range 내 종가 위치(0~1), 1 → 종가가 최고가 근처 (강함), 평균 0.75
-    # if close_pos < 0.60:
-    if close_pos < 0.55:
+    if close_pos < 0.60:
         return
 
     dist_to_ma20 = round(float(data['dist_to_ma20'].iloc[-1]), 3)   # 중기 위치 확인 (약한 필터.. 너무 아래 → 아직 추세 죽음)
@@ -185,8 +184,7 @@ def process_one(idx, count, ticker, tickers_dict):
         return
 
     pos20_ratio = round((last20_ret > 0).mean(), 3)                 # 양봉 비율이 30% 미만이면 제외 (계속 음봉 위주), (가장 약한 필터 > 굳이 조건 없어도 됨)
-    # if pos20_ratio < 0.35:    # 더 낮으면 데드캣 비율이 높다
-    if pos20_ratio < 0.3:    # 더 낮으면 데드캣 비율이 높다
+    if pos20_ratio < 0.35:    # 더 낮으면 데드캣 비율이 높다
         return
 
     # 변동 타겟 수익률
@@ -256,33 +254,26 @@ def process_one(idx, count, ticker, tickers_dict):
     """
     🔥 필수 4축
         1️⃣ 위치
-            dist_to_ma20
             three_m_min_cur
         2️⃣ 추세
             ma5_chg_rate
-            pct_vs_lastweek
         3️⃣ 거래량
             volume_rank_20d
         4️⃣ 강도
             close_pos
-            today_pct
     """
     rule_features = {
         "ma5_chg_rate": ma5_chg_rate,                    # 오늘의 5일선 기울기 👍
-        "vol15": vol15,                                  # 15일 평균 변동성
+        # "vol15": vol15,                                  # 15일 평균 변동성
         "vol_ratio": vol_ratio,                          # 단기 변동성과 장기 변동성을 비교하는 비율
 
-        "dist_to_ma20": dist_to_ma20,                    # 중기 위치 확인
-        "pos20_ratio": pos20_ratio,                      # 20일 평균 양봉비율 (전환 직전 눌림/반등 준비를 더 잘 반영할 가능성)
-
-        "mean_prev3": mean_prev3,                        # 직전 3일 평균 거래대금 (조건에서 다수 사용)
+        # "mean_prev3": mean_prev3,                        # 직전 3일 평균 거래대금 (조건에서 다수 사용)
         "volume_rank_20d": volume_rank_20d,              # 20일 거래대금 순위 (1이면 오늘이 최고 높음)
 
         "three_m_max_cur": three_m_max_cur,              # 3개월 종가 최고 대비 오늘 등락률 👍
-        "three_m_min_cur": three_m_min_cur,              # 3개월 종가 최저 대비 오늘 등락률 👍
+        # "three_m_min_cur": three_m_min_cur,              # 3개월 종가 최저 대비 오늘 등락률 👍
 
-        "pct_vs_lastweek": result['pct_vs_lastweek'],    # 저번주 대비 이번주 등락률
-        "pct_vs_last4week": result['pct_vs_last4week'],  # 4주 전 대비 이번주 등락률 (중기 모멘텀.. 3개월 비교가 있으므로 커버된다.. 백테스트에서 성능 상승 확인됐을 때 유지한다)
+        # "pct_vs_lastweek": result['pct_vs_lastweek'],    # 저번주 대비 이번주 등락률
 
         # "today_pct": today_pct,                          # 오늘등락률 👍 (오늘 +3% 이상 (signal_any_drop))
         "close_pos": close_pos,                          # 당일 range 내 종가 위치(0~1)
@@ -330,20 +321,16 @@ def process_one(idx, count, ticker, tickers_dict):
         "predict_str": predict_str,                      # 상승/미달
 
         "ma5_chg_rate": ma5_chg_rate,                    # 오늘의 5일선 기울기 👍
-        "vol15": vol15,                                  # 15일 평균 변동성
+        # "vol15": vol15,                                  # 15일 평균 변동성
         "vol_ratio": vol_ratio,                          # 단기 변동성과 장기 변동성을 비교하는 비율
 
-        "dist_to_ma20": dist_to_ma20,                    # 중기 위치 확인
-        "pos20_ratio": pos20_ratio,                      # 20일 평균 양봉비율 (전환 직전 눌림/반등 준비를 더 잘 반영할 가능성)
-
-        "mean_prev3": mean_prev3,                        # 직전 3일 평균 거래대금 (조건에서 다수 사용)
+        # "mean_prev3": mean_prev3,                        # 직전 3일 평균 거래대금 (조건에서 다수 사용)
         "volume_rank_20d": volume_rank_20d,              # 20일 거래대금 순위 (1이면 오늘이 최고 높음)
 
         "three_m_max_cur": three_m_max_cur,              # 3개월 종가 최고 대비 오늘 등락률 👍
-        "three_m_min_cur": three_m_min_cur,              # 3개월 종가 최저 대비 오늘 등락률 👍
+        # "three_m_min_cur": three_m_min_cur,              # 3개월 종가 최저 대비 오늘 등락률 👍
 
-        "pct_vs_lastweek": result['pct_vs_lastweek'],    # 저번주 대비 이번주 등락률
-        "pct_vs_last4week": result['pct_vs_last4week'],  # 4주 전 대비 이번주 등락률 (중기 모멘텀.. 3개월 비교가 있으므로 커버된다.. 백테스트에서 성능 상승 확인됐을 때 유지한다)
+        # "pct_vs_lastweek": result['pct_vs_lastweek'],    # 저번주 대비 이번주 등락률
 
         # "today_pct": today_pct,                          # 오늘등락률 👍 (오늘 +3% 이상 (signal_any_drop))
         "close_pos": close_pos,                          # 당일 range 내 종가 위치(0~1)
