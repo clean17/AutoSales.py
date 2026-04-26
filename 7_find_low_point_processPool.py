@@ -78,8 +78,9 @@ def process_one(idx, count, ticker, tickers_dict):
         data = df
         remaining_data = None
 
-    if data.empty:
-        return None
+    # 데이터가 부족하면 패스
+    if data.empty or len(data) < 70:
+        return
 
     today = data.index[-1].strftime("%Y%m%d") # 마지막 인덱스
     if count == 0:
@@ -114,6 +115,10 @@ def process_one(idx, count, ticker, tickers_dict):
 
     # drop 이후 3차 생성
     data = add_technical_features(data)
+
+    # 데이터가 부족하면 패스
+    if data.empty or len(data) < 70:
+        return
 
     # 5일, 20일 이동평균선 없으면 패스
     REQUIRED_COLS = ["MA5", "MA20", "등락률", "volume_rank_20d"]
