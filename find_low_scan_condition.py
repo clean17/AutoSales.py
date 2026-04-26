@@ -1,3 +1,7 @@
+"""
+생성한 csv 파일을 가지고 저점 조건을 찾는 스크립트
+"""
+
 import pandas as pd
 import numpy as np
 from pathlib import Path
@@ -7,22 +11,32 @@ from itertools import count
 df = pd.read_csv("csv/low_result_7_desc.csv")
 # df = pd.read_csv("csv/low_result_us_6_desc.csv")   # 미장
 
-TARGET_COL = "validation_chg_rate"
-MIN_RATE = 0.80
-target = (df[TARGET_COL].to_numpy() >= 7)
+MIN_RATE = 0.78
+# TARGET_COL = "validation_chg_rate"         # 검증등락률
+# target = (df[TARGET_COL].to_numpy() >= 7)  # 7퍼 이상 검증 통과
+
+TARGET_COL = "is_success"                  # 동적 검증등락률 통과
+target = df[TARGET_COL].to_numpy() == 1
+
 out_path = Path("lowscan_rules.py")
 # out_path = Path("lowscan_rules_us.py")   # 미장
 
 # 숫자 피처들(원하면 더/덜 제외 가능)
-exclude = {"ticker", "stock_name", "predict_str", "today", TARGET_COL,
-           "validation_chg_rate1",
-           "validation_chg_rate2",
-           "validation_chg_rate3",
-           "validation_chg_rate4",
-           "validation_chg_rate5",
-           "validation_chg_rate6",
-           "validation_chg_rate7",
-           }
+exclude = {
+    "ticker", "stock_name", "predict_str", "today",
+
+    "validation_chg_rate",
+    "validation_chg_rate1",
+    "validation_chg_rate2",
+    "validation_chg_rate3",
+    "validation_chg_rate4",
+    "validation_chg_rate5",
+    "validation_chg_rate6",
+    "validation_chg_rate7",
+
+    "hit_day", "is_success", "target",
+}
+
 features = [c for c in df.columns if c not in exclude]
 
 N = len(df)
@@ -35,7 +49,24 @@ for f in features:
     col = df[f].astype(float).to_numpy()
     col_nonan = col[~np.isnan(col)]
     # 분위수 촘촘하게(원하면 0.05~0.95를 더 촘촘히)
-    qs = np.unique(np.quantile(col_nonan, np.linspace(0.05, 0.95, 19)))
+    """
+    0.05, 0.10, 0.15, 0.20, ... 0.95
+      → 총 19개 threshold
+      
+    0.1, 0.2, 0.3, ... 0.9
+      → 총 9개 threshold
+      
+    덜 촘촘하게 = 과적합 방지하면서 빠르게
+    
+    depth4에서 데드캣을 이미 거른 뒤 depth5를 만들 거면 np.linspace(0.2, 0.8, 7) 괜찮음
+    
+    0.05~0.95, 19개	많음	세밀하지만 과적합 위험 큼
+    0.1~0.9, 9개	중간	균형
+    0.2~0.8, 7개	적음	안정적, 룰 적음, 과적합 감소
+    """
+    # qs = np.unique(np.quantile(col_nonan, np.linspace(0.05, 0.95, 19)))
+    # qs = np.unique(np.quantile(col_nonan, np.linspace(0.1, 0.9, 9)))
+    qs = np.unique(np.quantile(col_nonan, np.linspace(0.2, 0.8, 7)))
 
     for thr in qs:
         thr = float(thr)
@@ -261,7 +292,7 @@ def test_condition(name, cond, df, verbose=False):
     up_cnt = (sub["validation_chg_rate"] >= 7).sum()
     ratio = up_cnt / len(sub)
 
-    if ratio < MIN_RATE:
+    if ratio <= MIN_RATE:
         return False
 
     if len(sub) < 19:
@@ -270,8 +301,8 @@ def test_condition(name, cond, df, verbose=False):
     if verbose:
         print(f"\n=== {name} ===")
         print(f"선택된 행 수: {len(sub)}")
-        print(f"  validation_chg_rate >= 7 개수 : {up_cnt}")
-        print(f"  Ratio (>=7)      : {ratio:.3f}")
+        print(f"성공 개수   : {up_cnt}")
+        print(f"성공률      : {ratio:.3f}")
 
     return True
 
