@@ -1789,7 +1789,7 @@ def signal_any_drop(data: pd.DataFrame,
     cond_today        = (today_chg >= up_thr)
     cond_past_anydrop = past_chg.le(down_thr).any()     # 하루라도 down_thr 이하
     cond_ma_order     = past_ma5.lt(past_ma20).all()    # days기간 내내 MA5 < MA20
-    cond_vol_rank     = data['volume_rank_20d'].iloc[-1] > 0.45   # 거래량 없는 반등 제거
+    cond_vol_rank     = data['volume_rank_20d'].iloc[-1] > 0.5   # 거래량 없는 반등 제거
 
     return bool(cond_today and cond_past_anydrop and cond_ma_order and cond_vol_rank)
 

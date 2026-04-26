@@ -150,22 +150,8 @@ def process_one(idx, count, ticker, tickers_dict):
     """
 
     # 최근 12일 5일선이 20일선보다 낮은데 3% 하락이 있으면서 오늘 4% 상승 ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-    # signal = signal_any_drop(data, 12, 4.0 ,-3.0) # 40/55 ---
-    # signal = signal_any_drop(data, 10, 4.0 ,-2.0) # 49/83
-    # signal = signal_any_drop(data, 10, 4.0 ,-2.2) # 49/83
-    # signal = signal_any_drop(data, 10, 4.0 ,-2.6) # 48/83
-    # signal = signal_any_drop(data, 10, 4.0 ,-2.8) # 46/78
-    signal = signal_any_drop(data, 7, 3.0, -2.5) # 45/71 ---
-    # signal = signal_any_drop(data, 10, 4.0 ,-3.2) # 44/68
-    # signal = signal_any_drop(data, 10, 4.0 ,-3.4) # 42/64
-    # signal = signal_any_drop(data, 10, 4.0 ,-3.6) # 39/57
-    # signal = signal_any_drop(data, 10, 4.0 ,-3.8) # 37/49 ---
-    # signal = signal_any_drop(data, 10, 4.0 ,-4.0) # 34/44
-    # signal = signal_any_drop(data, 10, 4.0 ,-2.5) # 49/83
-    # signal = signal_any_drop(data, 9, 4.0 ,-2.5) # 50/85
-    # signal = signal_any_drop(data, 8, 4.0 ,-2.5) # 46/92
-    # signal = signal_any_drop(data, 7, 4.0 ,-2.5) # 46/92
-    # signal = signal_any_drop(data, 6, 4.0 ,-2.5) # 40/92
+    signal = signal_any_drop(data, 7, 3.0, -2.5)
+    # signal = signal_any_drop(data, 8, 3.5, -3.0)
     if not signal:
         return
 
@@ -183,22 +169,25 @@ def process_one(idx, count, ticker, tickers_dict):
     vol30       = round(v30, 3)                                     # 30일 변동률 (표준편차)
     vol_ratio   = round(v15 / (v30 + 1e-9), 3)                      # 단기 변동성과 장기 변동성을 비교하는 비율
 
-    # depth4 필터
+    # depth4 필터 (데드캣 바운스 제거)
     volume_rank_20d = data['volume_rank_20d'].iloc[-1]              # 거래량 없는 반등 제거 (최근 20일 평균 거래량과 비교, 평균 0.75)
-    # if volume_rank_20d < 0.6:
-    #     return
+    # if volume_rank_20d < 0.70:
+    if volume_rank_20d < 0.65:
+        return
 
     close_pos = round(to_float(data.iloc[-1].get("close_pos")), 3)  # 당일 range 내 종가 위치(0~1), 1 → 종가가 최고가 근처 (강함), 평균 0.75
-    # if close_pos < 0.6:
-    #     return
+    # if close_pos < 0.60:
+    if close_pos < 0.55:
+        return
 
-    dist_to_ma20 = round(float(data['dist_to_ma20'].iloc[-1]), 3)   # 중기 위치 확인 (약한 필터)
-    # if dist_to_ma20 < -0.08:
-    #     return
+    dist_to_ma20 = round(float(data['dist_to_ma20'].iloc[-1]), 3)   # 중기 위치 확인 (약한 필터.. 너무 아래 → 아직 추세 죽음)
+    if dist_to_ma20 < -0.08:
+        return
 
     pos20_ratio = round((last20_ret > 0).mean(), 3)                 # 양봉 비율이 30% 미만이면 제외 (계속 음봉 위주), (가장 약한 필터 > 굳이 조건 없어도 됨)
-    # if pos20_ratio < 0.35:
-    #     return
+    # if pos20_ratio < 0.35:    # 더 낮으면 데드캣 비율이 높다
+    if pos20_ratio < 0.3:    # 더 낮으면 데드캣 비율이 높다
+        return
 
     # 변동 타겟 수익률
     VALIDATION_TARGET_RETURN = 1.5 * vol15
@@ -272,7 +261,7 @@ def process_one(idx, count, ticker, tickers_dict):
         2️⃣ 추세
             ma5_chg_rate
             pct_vs_lastweek
-         3️⃣ 거래량
+        3️⃣ 거래량
             volume_rank_20d
         4️⃣ 강도
             close_pos
