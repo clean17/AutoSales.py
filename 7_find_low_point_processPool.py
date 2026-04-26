@@ -1,7 +1,6 @@
 '''
-저점을 찾는 스크립트
+저점을 찾는 스크립트 (저점매수 + 반등 + 모멘텀)
 signal_any_drop 를 통해서 5일선이 20일선보다 아래에 있으면서 최근 -3%이 존재 + 오늘 4% 이상 상승
-3일 평균 거래대금이 1000억 이상이면 무조건 사야한다
 '''
 import matplotlib
 matplotlib.use("Agg")  # ✅ 비인터랙티브 백엔드 (창 안 띄움)
@@ -38,17 +37,21 @@ else:
 
 from utils import get_kor_ticker_dict_list, add_technical_features, plot_candles_weekly, plot_candles_daily, \
     drop_sparse_columns, drop_trading_halt_rows, signal_any_drop, low_weekly_check, extract_numbers_from_filenames, \
-    sort_csv_by_today_desc, safe_read_pickle
+    sort_csv_by_today_desc, safe_read_pickle, safe_rate, to_float
 
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
 root_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(=루트)
 pickle_dir = os.path.join(root_dir, 'pickle')
-output_dir = 'D:\\5below20_test'
-# output_dir = 'D:\\5below20'
+output_dir = 'F:\\5below20_test'
+# output_dir = 'F:\\5below20'
 
 # 목표 검증 수익률
-VALIDATION_TARGET_RETURN = 8
+VALIDATION_TARGET_RETURN = 7
 render_graph = False
+
+BATCH_SIZE = 20       # 작업 사이즈
+START_OFFSET = 7      # 1이면 어제 기준부터 검증 가능.. 7일 검증을 사용하려면 7사용
+END_OFFSET = 100       # 과거 300거래일까지 생성
 
 
 def process_one(idx, count, ticker, tickers_dict):
@@ -61,12 +64,13 @@ def process_one(idx, count, ticker, tickers_dict):
 
     # df = pd.read_pickle(filepath)
     df = safe_read_pickle(filepath)
-    
+
     # 데이터가 부족하면 패스
     if df.empty or len(df) < 70:
         return
 
-    # idx만큼 뒤에서 자른다 (idx가 2라면 2일 전 데이터셋)
+    # 과거 데이터(data)와 / 검증 데이터(remaining_data)로 분리
+    # [0:150](0~149), idx = 10 >> [0:140](0~139) / [140:](140~149)
     if idx != 0:
         data = df[:-idx]
         remaining_data = df[len(df)-idx:]
@@ -86,17 +90,16 @@ def process_one(idx, count, ticker, tickers_dict):
 
     ########################################################################
 
+    today_pct = round(data.iloc[-1]['등락률'], 2)                     # 마지막 등락율
     trading_value = data['거래량'] * data['종가']
+    today_tr_val = round(trading_value.iloc[-1], 2)                  # 마지막 거래일 거래대금
+    mean_prev3 = round(trading_value.iloc[:-1].tail(3).mean(), 2)    # 마지막 3일 거래대금 평균
+    mean_prev20 = round(trading_value.iloc[:-1].tail(20).mean(), 2)  # 마지막 20일 거래대금 평균
 
 
-    # 직전 날까지의 마지막 3일 거래대금 평균
-    today_tr_val = trading_value.iloc[-1]
-    mean_prev3 = trading_value.iloc[:-1].tail(3).mean()
-    mean_prev20 = trading_value.iloc[:-1].tail(20).mean()
-
-    # ★★★★★ 3거래일 평균 거래대금 5억보다 작으면 패스 ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-    # if round(mean_prev3, 1) / 100_000_000 < 3:
-    if round(mean_prev20, 1) / 100_000_000 < 3:
+    # ★★★★★ x거래일 평균 거래대금 3억보다 작으면 패스 ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+    # if mean_prev3 / 100_000_000 < 3:
+    if mean_prev20 / 100_000_000 < 3:
         return
 
 
@@ -104,23 +107,42 @@ def process_one(idx, count, ticker, tickers_dict):
     data = add_technical_features(data)
 
     # 결측 제거
-    cleaned, cols_to_drop = drop_sparse_columns(data, threshold=0.10, check_inf=True, inplace=True)
-    data = cleaned
+    data, cols_to_drop = drop_sparse_columns(data, threshold=0.10, check_inf=True, inplace=True)
 
     # 거래정지/이상치 행 제거
     data, removed_idx = drop_trading_halt_rows(data)
 
-    # 5일, 20일 이동평균선 없으면 패스
-    if 'MA5' not in data.columns or 'MA20' not in data.columns:
-        return
+    # drop 이후 3차 생성
+    data = add_technical_features(data)
 
-    # 마지막 일자 5일선은 20일선보다 낮아야 한다
+    # 5일, 20일 이동평균선 없으면 패스
+    REQUIRED_COLS = ["MA5", "MA20", "등락률", "volume_rank_20d"]
+
+    for col in REQUIRED_COLS:
+        if col not in data.columns:
+            return
+
+    # 오늘의 5일션 변동율 계산 (퍼센트로 보려면 * 100)
     ma5_today = data['MA5'].iloc[-1]
     ma5_yesterday = data['MA5'].iloc[-2]
+    ma5_chg_rate = round(safe_rate(ma5_today, ma5_yesterday), 3)
 
-    # 변화율 계산 (퍼센트로 보려면 * 100)
-    ma5_chg_rate = (ma5_today - ma5_yesterday) / ma5_yesterday * 100
+    # 데드캣 바운드 제거
+    # if ma5_chg_rate <= 0:
+    #     return
 
+    """
+    depth4 (진입 gate) >> 실패 줄이기
+    - 오늘 +3% 이상
+    - 최근 7일 하락 존재
+    - 거래량 증가 (today > mean_prev3)
+    - 중기 위치 확인
+    - 양봉 비율
+    - 당일 종가 위치
+    
+    depth5 (점수) >> 수익률 극대화
+    - find_low_scan_condition.py 스크립트로 만든 조건
+    """
 
     # 최근 12일 5일선이 20일선보다 낮은데 3% 하락이 있으면서 오늘 4% 상승 ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
     # signal = signal_any_drop(data, 12, 4.0 ,-3.0) # 40/55 ---
@@ -145,22 +167,43 @@ def process_one(idx, count, ticker, tickers_dict):
 
     ########################################################################
 
-    # ★★★★★ 최근 20일 변동성 너무 낮으면 제외 (지루한 종목)
-    last15_ret = data['등락률'].tail(15)           # 등락률이 % 단위라고 가정
-    last20_ret = data['등락률'].tail(20)           # 등락률이 % 단위라고 가정
-    last30_ret = data['등락률'].tail(30)
-    vol15 = last15_ret.std()                      # 표준편차
-    vol30 = last30_ret.std()                      # 표준편차
+    # ★★★★★ 최근 변동성 너무 낮으면 제외 (지루한 종목)
+    last15_ret  = data['등락률'].tail(15)                            # 등락률이 % 단위라고 가정
+    last20_ret  = data['등락률'].tail(20)
+    last30_ret  = data['등락률'].tail(30)
+    v15         = last15_ret.std()
+    v30         = last30_ret.std()
 
-    # 양봉 비율이 30% 미만이면 제외 (계속 음봉 위주)
-    pos20_ratio = (last20_ret > 0).mean()           # True 비율 => 양봉 비율
+    vol15       = round(v15, 3)                                     # 15일 변동률 (표준편차)
+    vol30       = round(v30, 3)                                     # 30일 변동률 (표준편차)
+    vol_ratio   = round(v15 / (v30 + 1e-9), 3)                      # 단기 변동성과 장기 변동성을 비교하는 비율
 
-    # 추가 독립 피쳐
-    def to_float(x):
-        return float(x) if pd.notna(x) else np.nan
+    # depth4 필터
+    volume_rank_20d = data['volume_rank_20d'].iloc[-1]              # 거래량 없는 반등 제거 (최근 20일 평균 거래량과 비교, 평균 0.75)
+    # if volume_rank_20d < 0.6:
+    #     return
 
-    last = data.iloc[-1]
-    close_pos        = round(to_float(last.get("close_pos")), 4)
+    close_pos = round(to_float(data.iloc[-1].get("close_pos")), 3)  # 당일 range 내 종가 위치(0~1), 1 → 종가가 최고가 근처 (강함), 평균 0.75
+    # if close_pos < 0.6:
+    #     return
+
+    dist_to_ma20 = round(float(data['dist_to_ma20'].iloc[-1]), 3)   # 중기 위치 확인 (약한 필터)
+    # if dist_to_ma20 < -0.08:
+    #     return
+
+    pos20_ratio = round((last20_ret > 0).mean(), 3)                 # 양봉 비율이 30% 미만이면 제외 (계속 음봉 위주), (가장 약한 필터 > 굳이 조건 없어도 됨)
+    # if pos20_ratio < 0.35:
+    #     return
+
+    # 변동 타겟 수익률
+    VALIDATION_TARGET_RETURN = 1.5 * vol15
+
+    # 시장 필터
+    # market_return_5d > -2%                              # 최근 5일 시장 수익률
+
+    # 변동성 필터 (너무 위험한 종목 제거)
+    # vol15 < 특정값
+
 
     ########################################################################
 
@@ -169,92 +212,85 @@ def process_one(idx, count, ticker, tickers_dict):
     m_closes = m_data['종가']
     m_max = m_closes.max()
     m_min = m_closes.min()
-    m_current = m_closes[-1]
+    m_current = m_closes.iloc[-1]                               # 오늘 종가, 검증 데이터로 잘랐다면 검증 직전까지의 마지막 값 (수익률 분석 용도)
 
+    # three_m_max_min = round(safe_rate(m_max, m_min), 3)         # 최근 3개월 최고 대비 최저 등락률
+    three_m_max_cur = round(safe_rate(m_current, m_max), 3)     # 최근 3개월 최고 대비 오늘 등락률
+    three_m_min_cur = round(safe_rate(m_current, m_min), 3)     # 최근 3개월 최저 대비 오늘 등락률
+
+    predict_str = ''
+
+    # 검증 데이터 (마지막 n일)
     if remaining_data is not None:
-        r_data = remaining_data[:7]   # 10 > 7거래일로 수정
-        # r_closes = r_data['종가']
-        r_closes = remaining_data['종가'].iloc[:7].reset_index(drop=True)
-        r_closes = r_closes.reindex(range(7))  # 0~6 없으면 NaN으로 채움
-
-        # r_max = r_closes.max()
-        r_max = r_closes.max(skipna=True)
+        r_closes = remaining_data['종가'].iloc[:7].reset_index(drop=True)  # Series 인덱스 새로
+        r_closes = r_closes.reindex(range(7))      # 0~6 없으면 NaN으로 채움
+        r_max = r_closes.max(skipna=True)          # 결측치(NaN)를 무시하고 계산
 
         r1, r2, r3, r4, r5, r6, r7 = (r_closes.iloc[i] for i in range(7))
 
-        def safe_rate(x, base):
-            if pd.isna(x) or base == 0 or not np.isfinite(base):
-                return np.nan
-            return (x - base) / base * 100
+        # 마지막 종가로부터 n일차 동안의 수익률
+        validation_chg_rate  = round(safe_rate(r_max, m_current), 2)
+        validation_chg_rate1 = round(safe_rate(r1, m_current), 2)
+        validation_chg_rate2 = round(safe_rate(r2, m_current), 2)
+        validation_chg_rate3 = round(safe_rate(r3, m_current), 2)
+        validation_chg_rate4 = round(safe_rate(r4, m_current), 2)
+        validation_chg_rate5 = round(safe_rate(r5, m_current), 2)
+        validation_chg_rate6 = round(safe_rate(r6, m_current), 2)
+        validation_chg_rate7 = round(safe_rate(r7, m_current), 2)
 
-        # validation_chg_rate = (r_max-m_current)/m_current*100    # 검증 등락률
-        validation_chg_rate  = safe_rate(r_max, m_current)
-        validation_chg_rate1 = safe_rate(r1, m_current)
-        validation_chg_rate2 = safe_rate(r2, m_current)
-        validation_chg_rate3 = safe_rate(r3, m_current)
-        validation_chg_rate4 = safe_rate(r4, m_current)
-        validation_chg_rate5 = safe_rate(r5, m_current)
-        validation_chg_rate6 = safe_rate(r6, m_current)
-        validation_chg_rate7 = safe_rate(r7, m_current)
+        predict_str = '상승'
+        if validation_chg_rate < VALIDATION_TARGET_RETURN:
+            predict_str = '미달'
 
     else:
         validation_chg_rate = 0
-
-    three_m_chg_rate=(m_max-m_min)/m_min*100        # 최근 3개월 동안의 등락률
-    today_chg_rate=(m_current-m_max)/m_max*100      # 최근 3개월 최고 대비 오늘 등락률 계산
-
-
+        validation_chg_rate1 = 0
+        validation_chg_rate2 = 0
+        validation_chg_rate3 = 0
+        validation_chg_rate4 = 0
+        validation_chg_rate5 = 0
+        validation_chg_rate6 = 0
+        validation_chg_rate7 = 0
 
     result = low_weekly_check(m_data)
-    if result["ok"]:
-        # ★★★★★ 저번주 대비 이번주 증감률 -1%보다 낮으면 패스 (아직 하락 추세) ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-        if result["is_drop_more_than_minus1pct"]:
-            # return
-            pass
 
 
     ########################################################################
 
-    ma5_chg_rate = round(ma5_chg_rate, 4)
-    vol15 = round(vol15, 4)
-    vol30 = round(vol30, 4)
-    pos20_ratio = round(pos20_ratio*100, 4)
-    mean_prev3 = round(mean_prev3, 4)
-    mean_prev20 = round(mean_prev20, 4)
-    today_tr_val = round(today_tr_val, 4)
-    three_m_chg_rate = round(three_m_chg_rate, 4)
-    today_chg_rate = round(today_chg_rate, 4)
-    pct_vs_lastweek = round(result['pct_vs_lastweek'], 4)
-    pct_vs_last4week = round(result['pct_vs_last4week'], 4)
-    today_pct = round(data.iloc[-1]['등락률'], 2)
-    validation_chg_rate = round(validation_chg_rate, 2)
-    validation_chg_rate1 = round(validation_chg_rate1, 2)
-    validation_chg_rate2 = round(validation_chg_rate2, 2)
-    validation_chg_rate3 = round(validation_chg_rate3, 2)
-    validation_chg_rate4 = round(validation_chg_rate4, 2)
-    validation_chg_rate5 = round(validation_chg_rate5, 2)
-    validation_chg_rate6 = round(validation_chg_rate6, 2)
-    validation_chg_rate7 = round(validation_chg_rate7, 2)
-
-    predict_str = '상승'
-    if validation_chg_rate < VALIDATION_TARGET_RETURN:
-        predict_str = '미달'
-
 
     # --- build_conditions()가 참조하는 컬럼들을 data에 주입 (스칼라 → 컬럼 브로드캐스트) ---
+    """
+    🔥 필수 4축
+        1️⃣ 위치
+            dist_to_ma20
+            three_m_min_cur
+        2️⃣ 추세
+            ma5_chg_rate
+            pct_vs_lastweek
+         3️⃣ 거래량
+            volume_rank_20d
+        4️⃣ 강도
+            close_pos
+            today_pct
+    """
     rule_features = {
-        "ma5_chg_rate": ma5_chg_rate,                    # 5일선 기울기 👍
-        "vol15": vol15,                                  # 20일 평균 변동성
-        "vol30": vol30,                                  # 30일 평균 변동성
+        "ma5_chg_rate": ma5_chg_rate,                    # 오늘의 5일선 기울기 👍
+        "vol15": vol15,                                  # 15일 평균 변동성
+        "vol_ratio": vol_ratio,                          # 단기 변동성과 장기 변동성을 비교하는 비율
+
+        "dist_to_ma20": dist_to_ma20,                    # 중기 위치 확인
         "pos20_ratio": pos20_ratio,                      # 20일 평균 양봉비율 (전환 직전 눌림/반등 준비를 더 잘 반영할 가능성)
-        "today_tr_val": today_tr_val,                    # 오늘 거래대금 👍
+
         "mean_prev3": mean_prev3,                        # 직전 3일 평균 거래대금 (조건에서 다수 사용)
-        "mean_prev20": mean_prev20,                      # 직전 20일 평균 거래대금
-        "three_m_chg_rate": three_m_chg_rate,            # 3개월 종가 최저 대비 최고 등락률 👍
-        "today_chg_rate": today_chg_rate,                # 3개월 종가 최고 대비 오늘 등락률 👍
-        "pct_vs_lastweek": pct_vs_lastweek,              # 저번주 대비 이번주 등락률
-        "pct_vs_last4week": pct_vs_last4week,            # 4주 전 대비 이번주 등락률
-        "today_pct": today_pct,                          # 오늘등락률 👍
+        "volume_rank_20d": volume_rank_20d,              # 20일 거래대금 순위 (1이면 오늘이 최고 높음)
+
+        "three_m_max_cur": three_m_max_cur,              # 3개월 종가 최고 대비 오늘 등락률 👍
+        "three_m_min_cur": three_m_min_cur,              # 3개월 종가 최저 대비 오늘 등락률 👍
+
+        "pct_vs_lastweek": result['pct_vs_lastweek'],    # 저번주 대비 이번주 등락률
+        "pct_vs_last4week": result['pct_vs_last4week'],  # 4주 전 대비 이번주 등락률 (중기 모멘텀.. 3개월 비교가 있으므로 커버된다.. 백테스트에서 성능 상승 확인됐을 때 유지한다)
+
+        # "today_pct": today_pct,                          # 오늘등락률 👍 (오늘 +3% 이상 (signal_any_drop))
         "close_pos": close_pos,                          # 당일 range 내 종가 위치(0~1)
     }
 
@@ -264,60 +300,59 @@ def process_one(idx, count, ticker, tickers_dict):
         data[k] = v
 
 
-    for mod in modules:
-        try:
-            rule_masks = mod.build_conditions(data)   # dict: rule_name -> Series[bool]
-        except KeyError as e:
-            print(f"[{ticker}] rule build_conditions KeyError in {mod.__name__}: {e} (missing column in data)")
-            return
-
-        RULE_NAMES = mod.RULE_NAMES
-
-        true_conds = [
-            name for name in RULE_NAMES
-            if name in rule_masks and bool(rule_masks[name].iloc[-1])
-        ]
-
-        # 이 모듈에서 하나라도 True면 통과 → 다음 로직 진행
-        if true_conds:
-            # 필요하면 어떤 모듈/룰이었는지 저장
-            matched_module = mod.__name__
-            matched_rules = true_conds
-            break
-    else:
-        # 모든 모듈을 다 봤는데도 True가 하나도 없으면 pass
-        return
+    # 여러 모듈(modules)에서 조건(rule)을 검사해서, 하나라도 만족하면 해당 모듈/룰을 선택하는 로직
+    # for mod in modules:
+    #     try:
+    #         rule_masks = mod.build_conditions(data)   # dict: rule_name -> Series[bool]
+    #     except KeyError as e:
+    #         print(f"[{ticker}] rule build_conditions KeyError in {mod.__name__}: {e} (missing column in data)")
+    #         return
+    #
+    #     RULE_NAMES = mod.RULE_NAMES
+    #
+    #     true_conds = [
+    #         name for name in RULE_NAMES
+    #         if name in rule_masks and bool(rule_masks[name].iloc[-1])
+    #     ]
+    #
+    #     # 이 모듈에서 하나라도 True면 통과 → 다음 로직 진행
+    #     if true_conds:
+    #         # 필요하면 어떤 모듈/룰이었는지 저장
+    #         matched_module = mod.__name__
+    #         matched_rules = true_conds
+    #         break
+    # else:
+    #     # 모든 모듈을 다 봤는데도 True가 하나도 없으면 pass
+    #     return
 
 
     ########################################################################
 
-    """
-    높은 전환관계의 피쳐들
-    close_pos, today_pct, ma5_chg_rate
-    """
+
     row = {
         "ticker": ticker,
         "stock_name": stock_name,
         "today" : str(data.index[-1].date()),
         "predict_str": predict_str,                      # 상승/미달
 
-        "ma5_chg_rate": ma5_chg_rate,                    # 5일선 기울기 👍
+        "ma5_chg_rate": ma5_chg_rate,                    # 오늘의 5일선 기울기 👍
         "vol15": vol15,                                  # 15일 평균 변동성
-        "vol30": vol30,                                  # 30일 평균 변동성
+        "vol_ratio": vol_ratio,                          # 단기 변동성과 장기 변동성을 비교하는 비율
+
+        "dist_to_ma20": dist_to_ma20,                    # 중기 위치 확인
         "pos20_ratio": pos20_ratio,                      # 20일 평균 양봉비율 (전환 직전 눌림/반등 준비를 더 잘 반영할 가능성)
 
         "mean_prev3": mean_prev3,                        # 직전 3일 평균 거래대금 (조건에서 다수 사용)
-        "mean_prev20": mean_prev20,                      # 직전 20일 평균 거래대금 (조건에서 다수 사용)
-        "today_tr_val": today_tr_val,                    # 오늘 거래대금 👍
+        "volume_rank_20d": volume_rank_20d,              # 20일 거래대금 순위 (1이면 오늘이 최고 높음)
 
-        "three_m_chg_rate": three_m_chg_rate,            # 3개월 종가 최저 대비 최고 등락률 👍
-        "today_chg_rate": today_chg_rate,                # 3개월 종가 최고 대비 오늘 등락률 👍
-        "pct_vs_lastweek": pct_vs_lastweek,              # 저번주 대비 이번주 등락률
-        "pct_vs_last4week": pct_vs_last4week,            # 4주 전 대비 이번주 등락률
-        "today_pct": today_pct,                          # 오늘등락률 👍
+        "three_m_max_cur": three_m_max_cur,              # 3개월 종가 최고 대비 오늘 등락률 👍
+        "three_m_min_cur": three_m_min_cur,              # 3개월 종가 최저 대비 오늘 등락률 👍
 
+        "pct_vs_lastweek": result['pct_vs_lastweek'],    # 저번주 대비 이번주 등락률
+        "pct_vs_last4week": result['pct_vs_last4week'],  # 4주 전 대비 이번주 등락률 (중기 모멘텀.. 3개월 비교가 있으므로 커버된다.. 백테스트에서 성능 상승 확인됐을 때 유지한다)
+
+        # "today_pct": today_pct,                          # 오늘등락률 👍 (오늘 +3% 이상 (signal_any_drop))
         "close_pos": close_pos,                          # 당일 range 내 종가 위치(0~1)
-
 
         "validation_chg_rate": validation_chg_rate,      # 검증 등락률
         "validation_chg_rate1": validation_chg_rate1,    # 검증 등락률
@@ -329,10 +364,34 @@ def process_one(idx, count, ticker, tickers_dict):
         "validation_chg_rate7": validation_chg_rate7,    # 검증 등락률
     }
 
+    # 처음으로 수익률 뚫는 날, 조건이 뚫을 수 있는지 확인
+    vals = [
+        validation_chg_rate1,
+        validation_chg_rate2,
+        validation_chg_rate3,
+        validation_chg_rate4,
+        validation_chg_rate5,
+        validation_chg_rate6,
+        validation_chg_rate7,
+    ]
 
-    origin = df.copy()
+    hit_day = None
+
+    for i, v in enumerate(vals, start=1):
+        if v >= VALIDATION_TARGET_RETURN:
+            hit_day = i
+            break
+
+    row["hit_day"] = hit_day if hit_day is not None else 0
+    row["is_success"] = 1 if hit_day is not None else 0
+    row["target"] = VALIDATION_TARGET_RETURN
+
+
+    origin = []
+    plot_job = {}
 
     if render_graph:
+        origin = df.copy()
         #연산하는 시간 걸리니 그래프 안그리면 패스
         # 2차 생성 feature
         origin = add_technical_features(origin)
@@ -342,20 +401,16 @@ def process_one(idx, count, ticker, tickers_dict):
         # 거래정지/이상치 행 제거
         origin, o_removed_idx = drop_trading_halt_rows(origin)
 
+        today_str = str(today)
+        title = f"{today_str} {stock_name} [{ticker}] {round(data.iloc[-1]['등락률'], 2)}% Daily Chart - {predict_str} {validation_chg_rate}%"
+        final_file_name = f"{today} {stock_name} [{ticker}] {round(data.iloc[-1]['등락률'], 2)}%_{predict_str}.webp"
+        os.makedirs(output_dir, exist_ok=True)
+        final_file_path = os.path.join(output_dir, final_file_name)
 
-    today_str = str(today)
-    title = f"{today_str} {stock_name} [{ticker}] {round(data.iloc[-1]['등락률'], 2)}% Daily Chart - {predict_str} {validation_chg_rate}%"
-    final_file_name = f"{today} {stock_name} [{ticker}] {round(data.iloc[-1]['등락률'], 2)}%_{predict_str}.webp"
-    os.makedirs(output_dir, exist_ok=True)
-    final_file_path = os.path.join(output_dir, final_file_name)
-
-    # 그래프 그릴 때 필요한 것만 모아서 리턴
-    plot_job = {
-        "origin": origin,
-        "today": today_str,
-        "title": title,
-        "save_path": final_file_path,
-    }
+        plot_job['origin'] = origin
+        plot_job['today'] = today_str
+        plot_job['title'] = title
+        plot_job['save_path'] = final_file_path
 
 
     return {
@@ -375,41 +430,43 @@ if __name__ == "__main__":
     tickers = list(tickers_dict.keys())
     # tickers = extract_numbers_from_filenames(directory = r'D:\5below20_test\4퍼', isToday=False)
 
-    shortfall_cnt = 0
-    up_cnt = 0
-    rows=[]
-    plot_jobs = []
 
-    # 10이면, 10거래일의 하루전부터, -1이면 어제
-    # origin_idx = idx = -1
-    origin_idx = idx = 9
-    workers = os.cpu_count()
-    BATCH_SIZE = 20
+    shortfall_cnt = 0    # 미달 수량
+    up_cnt = 0           # 성공 수량
+    rows = []            # 결과 종목 데이터 저장
+    plot_jobs = []       # 그래프 생성용 데이터 저장
 
-    # end_idx = origin_idx + 170 # 마지막 idx (05/13부터 데이터 만드는 용)
-    end_idx = origin_idx + 50 # 마지막 idx
-    # end_idx = origin_idx + 1 # 그날 하루만
 
-    with ProcessPoolExecutor(max_workers=workers - 2) as executor:
-        futures = []
+    with ProcessPoolExecutor(max_workers=os.cpu_count() - 2) as executor:
+        futures = []  # 작업 저장 리스트
 
-        while idx < end_idx:
-            batch_end = min(idx + BATCH_SIZE, end_idx)
+        # 전체 작업을 BATCH_SIZE 단위로 나눠서 반복 처리
+        for batch_start in range(START_OFFSET, END_OFFSET + 1, BATCH_SIZE):
+            batch_end = min(batch_start + BATCH_SIZE - 1, END_OFFSET)
 
-            # idx를 배치 단위로 1씩 증가시키며(최대 10번) 작업 제출
-            for cur_idx in range(idx + 1, batch_end + 1):
+            print(f"processing offset {batch_start} ~ {batch_end}")
+            # cur_idx 만큼 데이터셋을 뒤에서부터 자른다 >> 잘라낸 마지막 리스트가 검증 리스트
+            """
+              cur_idx: 며칠 전 기준으로 검증할 것인가
+              cur_idx = 1   → 오늘 기준 하루 전까지 data, 이후 7일 검증
+              cur_idx = 7   → 7거래일 전까지 data, 이후 7일 검증
+              cur_idx = 100 → 100거래일 전까지 data, 이후 7일 검증
+              cur_idx가 7부터 올라가면서 검증 데이터셋을 만든다
+            """
+            for cur_idx in range(batch_start, batch_end + 1):
                 # print('cur_idx', cur_idx)
                 for count, ticker in enumerate(tickers):
+                    # 작업 제출: process_one 함수를 병렬 실행 >> 제출된 작업을 futures 리스트에 저장
                     futures.append(executor.submit(process_one, cur_idx, count, ticker, tickers_dict))
 
-            # 이번 배치가 끝날 때까지 대기
+            # 제출된 작업이 끝날 때까지 대기
             for fut in as_completed(futures):
                 fut.result()   # 예외 발생 시 여기서 터져서 디버깅 쉬움
 
             # 다음 배치로 idx 이동
             idx = batch_end
 
-        # 완료된 것부터 하나씩 받아서 집계
+        # 모든 작업이 완료되면 하나씩 꺼내서 집계
         for f in as_completed(futures):
             try:
                 res = f.result()
@@ -438,17 +495,15 @@ if __name__ == "__main__":
     # 🔥 여기서 한 번에, 깔끔하게 출력
     for row in rows_sorted:
         print(f"\n {row['today']}   {row['stock_name']} [{row['ticker']}] {row['predict_str']}")
-        # print(f"  직전 3일 평균 거래대금  : {row['mean_prev3'] / 100_000_000:.0f}억")
-        # print(f"  오늘 거래대금           : {row['today_tr_val'] / 100_000_000:.0f}억")
-        print(f"  오늘 등락률        : {row['today_pct']}%")
+        # print(f"  오늘 등락률        : {row['today_pct']}%")
         print(f"  검증 등락률(max)   : {row['validation_chg_rate']}%")
-        print(f"  검증 등락률1       : {row['validation_chg_rate1']}%")
-        print(f"  검증 등락률2       : {row['validation_chg_rate2']}%")
-        print(f"  검증 등락률3       : {row['validation_chg_rate3']}%")
-        print(f"  검증 등락률4       : {row['validation_chg_rate4']}%")
-        print(f"  검증 등락률5       : {row['validation_chg_rate5']}%")
-        print(f"  검증 등락률6       : {row['validation_chg_rate6']}%")
-        print(f"  검증 등락률7       : {row['validation_chg_rate7']}%")
+        # print(f"  검증 등락률1       : {row['validation_chg_rate1']}%")
+        # print(f"  검증 등락률2       : {row['validation_chg_rate2']}%")
+        # print(f"  검증 등락률3       : {row['validation_chg_rate3']}%")
+        # print(f"  검증 등락률4       : {row['validation_chg_rate4']}%")
+        # print(f"  검증 등락률5       : {row['validation_chg_rate5']}%")
+        # print(f"  검증 등락률6       : {row['validation_chg_rate6']}%")
+        # print(f"  검증 등락률7       : {row['validation_chg_rate7']}%")
 
 
     print('shortfall_cnt', shortfall_cnt)
@@ -459,12 +514,12 @@ if __name__ == "__main__":
         total_up_rate = up_cnt/(shortfall_cnt+up_cnt)*100
 
         # CSV 저장
-        # pd.DataFrame(rows).to_csv('csv/low_result_7.csv', index=False) # 인덱스 칼럼 'Unnamed: 0' 생성하지 않음
-        # saved = sort_csv_by_today_desc(
-        #     in_path=r"csv/low_result_7.csv",
-        #     out_path=r"csv/low_result_7_desc.csv",
-        # )
-        # print("saved:", saved)
+        pd.DataFrame(rows).to_csv('csv/low_result_7.csv', index=False) # 인덱스 칼럼 'Unnamed: 0' 생성하지 않음
+        saved = sort_csv_by_today_desc(
+            in_path=r"csv/low_result_7.csv",
+            out_path=r"csv/low_result_7_desc.csv",
+        )
+        print("saved:", saved)
 
     print(f"저점 매수 스크립트 결과 : {total_up_rate:.2f}%")
 
@@ -493,7 +548,10 @@ if __name__ == "__main__":
         # 파일 저장 (옵션)
         plt.savefig(job["save_path"], format="webp", dpi=100, bbox_inches="tight", pad_inches=0.1)
         plt.close()
-    print('\n그래프 생성 완료')
+    if len(plot_jobs) > 0:
+        print('\n그래프 생성 완료')
+
+
 
     end = time.time()     # 끝 시간(초)
     elapsed = end - start

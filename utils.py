@@ -794,6 +794,9 @@ def add_technical_features(data, window=20, num_std=2):
 
     o, h, l, c, v = data[col_o], data[col_h], data[col_l], data[col_c], data[col_v]
 
+    data["등락률"] = c.pct_change() * 100
+    data["등락률"] = data["등락률"].replace([np.inf, -np.inf], np.nan).fillna(0)
+
     # 1) 타깃(로그수익률)
     ret1  = np.log(c).diff()
 
@@ -842,7 +845,7 @@ def add_technical_features(data, window=20, num_std=2):
 
 
     # 중기 위치 확인 (추세 필터)
-    data['dist_to_ma20'] = (data[col_c].iloc[-1] - data['MA20'].iloc[-1]) / data['MA20'].iloc[-1]
+    data["dist_to_ma20"] = (data[col_c] - data["MA20"]) / data["MA20"]
 
 
     # 오늘 거래량이 최근 20일 중 어느 정도 위치냐
@@ -1786,8 +1789,9 @@ def signal_any_drop(data: pd.DataFrame,
     cond_today        = (today_chg >= up_thr)
     cond_past_anydrop = past_chg.le(down_thr).any()     # 하루라도 down_thr 이하
     cond_ma_order     = past_ma5.lt(past_ma20).all()    # days기간 내내 MA5 < MA20
+    cond_vol_rank     = data['volume_rank_20d'].iloc[-1] > 0.45   # 거래량 없는 반등 제거
 
-    return bool(cond_today and cond_past_anydrop and cond_ma_order and volume_spike)
+    return bool(cond_today and cond_past_anydrop and cond_ma_order and cond_vol_rank)
 
 def signal_swing_rebound(
         data: pd.DataFrame,
