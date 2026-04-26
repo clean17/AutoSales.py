@@ -17,9 +17,10 @@ import matplotlib.pyplot as plt
 import requests
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
-import lowscan_rules_80_25_4_42 as rule1
-import lowscan_rules_77_25_5_42 as rule2
-modules = [rule1]
+# import lowscan_rules_80_25_4_42 as rule1
+# import lowscan_rules_77_25_5_42 as rule2
+import lowscan_rules as rule3
+modules = [rule3]
 # 자동 탐색 (utils.py를 찾을 때까지 위로 올라가 탐색)
 here = Path(__file__).resolve()
 for parent in [here.parent, *here.parents]:
@@ -31,7 +32,7 @@ else:
 
 from utils import _col, get_kor_ticker_dict_list, add_technical_features, plot_candles_weekly, plot_candles_daily, \
     drop_sparse_columns, drop_trading_halt_rows, signal_any_drop, low_weekly_check, extract_numbers_from_filenames, \
-    safe_read_pickle
+    safe_read_pickle, safe_rate, to_float
 
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
 root_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(=루트)
@@ -63,7 +64,8 @@ def process_one(idx, count, ticker, tickers_dict):
     if df.empty or len(df) < 70:
         return
 
-    # idx만큼 뒤에서 자른다 (idx가 2라면 2일 전 데이터셋)
+    # 과거 데이터(data)와 / 검증 데이터(remaining_data)로 분리
+    # [0:150](0~149), idx = 10 >> [0:140](0~139) / [140:](140~149)
     if idx != 0:
         data = df[:-idx]
         remaining_data = df[len(df)-idx:]
@@ -71,8 +73,9 @@ def process_one(idx, count, ticker, tickers_dict):
         data = df
         remaining_data = None
 
-    if data.empty:
-        return None
+    # 데이터가 부족하면 패스
+    if data.empty or len(data) < 70:
+        return
 
     today = data.index[-1].strftime("%Y%m%d") # 마지막 인덱스
     if count == 0:
@@ -83,16 +86,17 @@ def process_one(idx, count, ticker, tickers_dict):
 
     ########################################################################
 
+    today_pct = round(data.iloc[-1]['등락률'], 2)                     # 마지막 등락율
     closes = data['종가'].values
     trading_value = data['거래량'] * data['종가']
+    today_tr_val = round(trading_value.iloc[-1], 2)                  # 마지막 거래일 거래대금
+    mean_prev3 = round(trading_value.iloc[:-1].tail(3).mean(), 2)    # 마지막 3일 거래대금 평균
+    mean_prev20 = round(trading_value.iloc[:-1].tail(20).mean(), 2)  # 마지막 20일 거래대금 평균
 
 
-    # 직전 날까지의 마지막 3일 거래대금 평균
-    today_tr_val = trading_value.iloc[-1]
-    mean_prev3 = trading_value.iloc[:-1].tail(3).mean()
-
-    # ★★★★★ 3거래일 평균 거래대금 5억보다 작으면 패스 ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-    if round(mean_prev3, 1) / 100_000_000 < 3:
+    # ★★★★★ x거래일 평균 거래대금 3억보다 작으면 패스 ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+    # if mean_prev3 / 100_000_000 < 3:
+    if mean_prev20 / 100_000_000 < 3:
         return
 
 
@@ -100,52 +104,98 @@ def process_one(idx, count, ticker, tickers_dict):
     data = add_technical_features(data)
 
     # 결측 제거
-    cleaned, cols_to_drop = drop_sparse_columns(data, threshold=0.10, check_inf=True, inplace=True)
-    data = cleaned
+    data, cols_to_drop = drop_sparse_columns(data, threshold=0.10, check_inf=True, inplace=True)
 
     # 거래정지/이상치 행 제거
     data, removed_idx = drop_trading_halt_rows(data)
 
-    # 5일, 20일 이동평균선 없으면 패스
-    if 'MA5' not in data.columns or 'MA20' not in data.columns:
+    # drop 이후 3차 생성
+    data = add_technical_features(data)
+
+    # 데이터가 부족하면 패스
+    if data.empty or len(data) < 70:
         return
 
-    # 마지막 일자 5일선은 20일선보다 낮아야 한다
+    # 5일, 20일 이동평균선 없으면 패스
+    REQUIRED_COLS = ["MA5", "MA20", "등락률", "volume_rank_20d"]
+
+    for col in REQUIRED_COLS:
+        if col not in data.columns:
+            return
+
+    # 오늘의 5일션 변동율 계산 (퍼센트로 보려면 * 100)
     ma5_today = data['MA5'].iloc[-1]
     ma5_yesterday = data['MA5'].iloc[-2]
-    ma20_today = data['MA20'].iloc[-1]
-    ma20_yesterday = data['MA20'].iloc[-2]
+    ma5_chg_rate = round(safe_rate(ma5_today, ma5_yesterday), 3)
 
-    # 변화율 계산 (퍼센트로 보려면 * 100)
-    ma5_chg_rate = (ma5_today - ma5_yesterday) / ma5_yesterday * 100
-    ma20_chg_rate = (ma20_today - ma20_yesterday) / ma20_yesterday * 100
+    # 데드캣 바운드 제거
+    # if ma5_chg_rate <= 0:
+    #     return
 
+    """
+    depth4 (진입 gate) >> 실패 줄이기
+    - 오늘 +3% 이상
+    - 최근 7일 하락 존재
+    - 거래량 증가 (today > mean_prev3)
+    - 중기 위치 확인
+    - 양봉 비율
+    - 당일 종가 위치
+    
+    depth5 (점수) >> 수익률 극대화
+    - find_low_scan_condition.py 스크립트로 만든 조건
+    """
 
-    # 최근 10일 5일선이 20일선보다 낮은데 3% 하락이 있으면서 오늘 3% 상승 ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-    # 변경점...  10일 +- 3일로 설정해봐야 할지도
-    signal = signal_any_drop(data, 7, 3.0 ,-2.5) # 45/71 ---
+    # 최근 12일 5일선이 20일선보다 낮은데 3% 하락이 있으면서 오늘 4% 상승 ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+    signal = signal_any_drop(data, 7, 3.0, -2.5)
+    # signal = signal_any_drop(data, 8, 3.5, -3.0)
     if not signal:
         return
 
 
     ########################################################################
 
-    # ★★★★★ 최근 20일 변동성 너무 낮으면 제외 (지루한 종목)
-    last15_ret = data['등락률'].tail(15)           # 등락률이 % 단위라고 가정
-    last20_ret = data['등락률'].tail(20)           # 등락률이 % 단위라고 가정
-    last30_ret = data['등락률'].tail(30)
-    vol15 = last15_ret.std()                      # 표준편차
-    vol30 = last30_ret.std()                      # 표준편차
+    # ★★★★★ 최근 변동성 너무 낮으면 제외 (지루한 종목)
+    last15_ret  = data['등락률'].tail(15)                            # 등락률이 % 단위라고 가정
+    last20_ret  = data['등락률'].tail(20)
+    last30_ret  = data['등락률'].tail(30)
+    v15         = last15_ret.std()
+    v30         = last30_ret.std()
 
-    # 양봉 비율이 30% 미만이면 제외 (계속 음봉 위주)
-    pos20_ratio = (last20_ret > 0).mean()           # True 비율 => 양봉 비율
+    vol15       = round(v15, 3)                                     # 15일 변동률 (표준편차)
+    vol30       = round(v30, 3)                                     # 30일 변동률 (표준편차)
+    vol_ratio   = round(v15 / (v30 + 1e-9), 3)                      # 단기 변동성과 장기 변동성을 비교하는 비율
 
-    # 추가 독립 피쳐
-    def to_float(x):
-        return float(x) if pd.notna(x) else np.nan
+    ############################  deadcat_filter  ###########################
 
-    last = data.iloc[-1]
-    close_pos        = round(to_float(last.get("close_pos")), 4)
+    # depth4 필터 (데드캣 바운스 제거)
+    volume_rank_20d = data['volume_rank_20d'].iloc[-1]              # 거래량 없는 반등 제거 (최근 20일 평균 거래량과 비교, 평균 0.75)
+    # if volume_rank_20d < 0.70:
+    if volume_rank_20d < 0.65:
+        return
+
+    close_pos = round(to_float(data.iloc[-1].get("close_pos")), 3)  # 당일 range 내 종가 위치(0~1), 1 → 종가가 최고가 근처 (강함), 평균 0.75
+    if close_pos < 0.60:
+        return
+
+    dist_to_ma20 = round(float(data['dist_to_ma20'].iloc[-1]), 3)   # 중기 위치 확인 (약한 필터.. 너무 아래 → 아직 추세 죽음)
+    if dist_to_ma20 < -0.08:
+        return
+
+    pos20_ratio = round((last20_ret > 0).mean(), 3)                 # 양봉 비율이 30% 미만이면 제외 (계속 음봉 위주), (가장 약한 필터 > 굳이 조건 없어도 됨)
+    if pos20_ratio < 0.35:    # 더 낮으면 데드캣 비율이 높다
+        return
+
+    ########################################################################
+
+    # 변동 타겟 수익률
+    VALIDATION_TARGET_RETURN = 1.5 * vol15
+
+    # 시장 필터
+    # market_return_5d > -2%                              # 최근 5일 시장 수익률
+
+    # 변동성 필터 (너무 위험한 종목 제거)
+    # vol15 < 특정값
+
 
     ########################################################################
 
@@ -154,47 +204,45 @@ def process_one(idx, count, ticker, tickers_dict):
     m_closes = m_data['종가']
     m_max = m_closes.max()
     m_min = m_closes.min()
-    m_current = m_closes[-1]
+    m_current = m_closes.iloc[-1]                               # 오늘 종가, 검증 데이터로 잘랐다면 검증 직전까지의 마지막 값 (수익률 분석 용도)
 
-    three_m_chg_rate=(m_max-m_min)/m_min*100        # 최근 3개월 동안의 등락률
-    today_chg_rate=(m_current-m_max)/m_max*100      # 최근 3개월 최고 대비 오늘 등락률 계산
+    # three_m_max_min = round(safe_rate(m_max, m_min), 3)         # 최근 3개월 최고 대비 최저 등락률
+    three_m_max_cur = round(safe_rate(m_current, m_max), 3)     # 최근 3개월 최고 대비 오늘 등락률
+    three_m_min_cur = round(safe_rate(m_current, m_min), 3)     # 최근 3개월 최저 대비 오늘 등락률
 
 
     result = low_weekly_check(m_data)
-    if result["ok"]:
-        # ★★★★★ 저번주 대비 이번주 증감률 -1%보다 낮으면 패스 (아직 하락 추세) ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-        if result["is_drop_more_than_minus1pct"]:
-            # return
-            pass
 
 
     ########################################################################
 
-    ma5_chg_rate = round(ma5_chg_rate, 4)
-    vol15 = round(vol15, 4)
-    vol30 = round(vol30, 4)
-    pos20_ratio = round(pos20_ratio*100, 4)
-    mean_prev3 = round(mean_prev3, 4)
-    today_tr_val = round(today_tr_val, 4)
-    three_m_chg_rate = round(three_m_chg_rate, 4)
-    today_chg_rate = round(today_chg_rate, 4)
-    pct_vs_lastweek = round(result['pct_vs_lastweek'], 4)
-    pct_vs_last4week = round(result['pct_vs_last4week'], 4)
-    today_pct = round(data.iloc[-1]['등락률'], 2)
 
     # --- build_conditions()가 참조하는 컬럼들을 data에 주입 (스칼라 → 컬럼 브로드캐스트) ---
+    """
+    🔥 필수 4축
+        1️⃣ 위치
+            three_m_min_cur
+        2️⃣ 추세
+            ma5_chg_rate
+        3️⃣ 거래량
+            volume_rank_20d
+        4️⃣ 강도
+            close_pos
+    """
     rule_features = {
-        "ma5_chg_rate": ma5_chg_rate,                    # 5일선 기울기 👍
-        "vol15": vol15,                                  # 20일 평균 변동성
-        "vol30": vol30,                                  # 30일 평균 변동성
-        "pos20_ratio": pos20_ratio,                      # 20일 평균 양봉비율 (전환 직전 눌림/반등 준비를 더 잘 반영할 가능성)
-        "today_tr_val": today_tr_val,                    # 오늘 거래대금 👍
-        "mean_prev3": mean_prev3,                        # 직전 3일 평균 거래대금 (조건에서 다수 사용)
-        "three_m_chg_rate": three_m_chg_rate,            # 3개월 종가 최저 대비 최고 등락률 👍
-        "today_chg_rate": today_chg_rate,                # 3개월 종가 최고 대비 오늘 등락률 👍
-        "pct_vs_lastweek": pct_vs_lastweek,              # 저번주 대비 이번주 등락률
-        "pct_vs_last4week": pct_vs_last4week,            # 4주 전 대비 이번주 등락률
-        "today_pct": today_pct,                          # 오늘등락률 👍
+        "ma5_chg_rate": ma5_chg_rate,                    # 오늘의 5일선 기울기 👍
+        # "vol15": vol15,                                  # 15일 평균 변동성
+        "vol_ratio": vol_ratio,                          # 단기 변동성과 장기 변동성을 비교하는 비율
+
+        # "mean_prev3": mean_prev3,                        # 직전 3일 평균 거래대금 (조건에서 다수 사용)
+        "volume_rank_20d": volume_rank_20d,              # 20일 거래대금 순위 (1이면 오늘이 최고 높음)
+
+        "three_m_max_cur": three_m_max_cur,              # 3개월 종가 최고 대비 오늘 등락률 👍
+        # "three_m_min_cur": three_m_min_cur,              # 3개월 종가 최저 대비 오늘 등락률 👍
+
+        # "pct_vs_lastweek": result['pct_vs_lastweek'],    # 저번주 대비 이번주 등락률
+
+        # "today_pct": today_pct,                          # 오늘등락률 👍 (오늘 +3% 이상 (signal_any_drop))
         "close_pos": close_pos,                          # 당일 range 내 종가 위치(0~1)
     }
 
@@ -279,19 +327,8 @@ def process_one(idx, count, ticker, tickers_dict):
         "ticker": ticker,
         "stock_name": stock_name,
         "today" : str(data.index[-1].date()),
-        "ma5_chg_rate": ma5_chg_rate,                    # 5일선 기울기 👍
-        "vol15": vol15,                                  # 15일 평균 변동성
-        "vol30": vol30,                                  # 30일 평균 변동성
-        "pos20_ratio": pos20_ratio,                      # 20일 평균 양봉비율 (전환 직전 눌림/반등 준비를 더 잘 반영할 가능성)
-        "mean_prev3": mean_prev3,                        # 직전 3일 평균 거래대금 (조건에서 다수 사용)
-        "today_tr_val": today_tr_val,                    # 오늘 거래대금 👍
-        "three_m_chg_rate": three_m_chg_rate,            # 3개월 종가 최저 대비 최고 등락률 👍
-        "today_chg_rate": today_chg_rate,                # 3개월 종가 최고 대비 오늘 등락률 👍
-        "pct_vs_lastweek": pct_vs_lastweek,              # 저번주 대비 이번주 등락률
-        "pct_vs_last4week": pct_vs_last4week,            # 4주 전 대비 이번주 등락률
-        "today_pct": today_pct,                          # 오늘등락률 👍
-        "close_pos": close_pos,                          # 당일 range 내 종가 위치(0~1)
     }
+    row.update(rule_features)
 
 
     today_str = str(today)

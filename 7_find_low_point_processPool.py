@@ -12,7 +12,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
-import lowscan_rules_77_25_5_42 as rule0
+import lowscan_rules as rule0
 modules = [rule0]
 
 # import lowscan_rules_80_25_4_42 as rule1
@@ -169,6 +169,8 @@ def process_one(idx, count, ticker, tickers_dict):
     vol30       = round(v30, 3)                                     # 30일 변동률 (표준편차)
     vol_ratio   = round(v15 / (v30 + 1e-9), 3)                      # 단기 변동성과 장기 변동성을 비교하는 비율
 
+    ############################  deadcat_filter  ###########################
+
     # depth4 필터 (데드캣 바운스 제거)
     volume_rank_20d = data['volume_rank_20d'].iloc[-1]              # 거래량 없는 반등 제거 (최근 20일 평균 거래량과 비교, 평균 0.75)
     # if volume_rank_20d < 0.70:
@@ -186,6 +188,8 @@ def process_one(idx, count, ticker, tickers_dict):
     pos20_ratio = round((last20_ret > 0).mean(), 3)                 # 양봉 비율이 30% 미만이면 제외 (계속 음봉 위주), (가장 약한 필터 > 굳이 조건 없어도 됨)
     if pos20_ratio < 0.35:    # 더 낮으면 데드캣 비율이 높다
         return
+
+    ########################################################################
 
     # 변동 타겟 수익률
     VALIDATION_TARGET_RETURN = 1.5 * vol15
