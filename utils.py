@@ -778,7 +778,7 @@ def inverse_close_from_Xscale_fast(close_scaled_1d, scaler_X, idx_close):
 
 모델이 윈도우 내 패턴을 “요약 벡터”로 바로 보게 되어 학습 안정성·일반화에 보통 도움이 된다
 """
-def add_technical_features(data, window=20, num_std=2):
+def add_technical_features(data):
     data = data.sort_index()
     data = data.copy()
 
@@ -794,68 +794,61 @@ def add_technical_features(data, window=20, num_std=2):
 
     o, h, l, c, v = data[col_o], data[col_h], data[col_l], data[col_c], data[col_v]
 
-    data["등락률"] = c.pct_change() * 100
-    data["등락률"] = data["등락률"].replace([np.inf, -np.inf], np.nan).fillna(0)
+    data["등락률"] = (c.pct_change() * 100).replace([np.inf, -np.inf], np.nan).fillna(0)
 
-    # 1) 타깃(로그수익률)
-    ret1  = np.log(c).diff()
+    # 이동평균선
+    data['MA5']  = c.rolling(5).mean()
+    data['MA10'] = c.rolling(10).mean()
+    data['MA20'] = c.rolling(20).mean()
 
+    # 볼린저밴드 (MA20, STD20, 상단/하단 밴드)
+    data['STD20'] = c.rolling(20).std()
+    data['UpperBand'] = data['MA20'] + (2 * data['STD20'])
+    data['LowerBand'] = data['MA20'] - (2 * data['STD20'])
+    # 볼린저밴드 위치 (0~1)
+    data['BB_perc'] = (c - data['LowerBand']) / (data['UpperBand'] - data['LowerBand'] + 1e-9)
+
+    ###########################################################
+
+    """
+    저점 매수용 지표
+    """
+    # ★★★ 저점 대비 회복률
+    rolling_min_20d = c.rolling(20).min()
+    rolling_min_60d = c.rolling(60).min()
+    data['rebound_from_20d_low'] = safe_rate(c, rolling_min_20d)
+    data['rebound_from_60d_low'] = safe_rate(c, rolling_min_60d)
+
+    # ★★★ 낙폭 과대 지표
+    rolling_max_20d = c.rolling(20).max()
+    rolling_max_60d = c.rolling(60).max()
+    data['drawdown_20d'] = safe_rate(c, rolling_max_20d)
+    data['drawdown_60d'] = safe_rate(c, rolling_max_60d)
+
+    # ★★★ 당일 range 내 종가 위치(0~1)
+    # 1 → 종가가 최고가 근처 (강함)
+    data['close_pos'] = (c - l) / (h - l + eps)
+
+    # ★★★ 거래량 급증 신호
+    data['volume_ratio'] = v / v.rolling(20).mean()
+
+    # 오늘 거래량이 최근 20일 중 어느 정도 위치냐, (1: 1등, 0.5: 평균)
+    data['volume_rank_20d'] = volume_rank(v, 20)
+
+    # ★★★ 중기 위치 확인 (추세 필터)
+    # data["dist_to_ma5"]  = safe_rate(c, data["MA5"])
+    data["dist_to_ma20"] = safe_rate(c, data["MA20"])
+
+    data['upper_tail_ratio'] = (h - c) / (h - l + 1e-9)
+
+    ###########################################################
+    # === 추가 지표 ===
     """
     RSI(14) — 상대강도지수 (Relative Strength Index)
     70 이상이면 과매수, 30 이하이면 과매도
     """
-    data['RSI14'] = compute_rsi(c)  # 사전에 정의 필요
+    data['RSI14'] = compute_rsi(c)
 
-    # 볼린저밴드 (MA20, STD20, 상단/하단 밴드)
-    data['MA20'] =c.rolling(window=window).mean()
-    data['STD20'] =c.rolling(window=window).std()
-    data['UpperBand'] = data['MA20'] + (num_std * data['STD20'])
-    data['LowerBand'] = data['MA20'] - (num_std * data['STD20'])
-
-    # 볼린저밴드 위치 (0~1)
-    data['BB_perc'] = (data[col_c] - data['LowerBand']) / (data['UpperBand'] - data['LowerBand'] + 1e-9)
-
-    # 이동평균선
-    data['MA5'] =c.rolling(window=5).mean()
-    data['MA10'] =c.rolling(window=10).mean()
-    data['MA5_slope'] = data['MA5'].diff()
-    data['MA10_slope'] = data['MA10'].diff()
-    data['MA20_slope'] = data['MA20'].diff()
-
-    # 거래량 증감률
-    data['Volume_change'] = v.pct_change().replace([np.inf, -np.inf], 0).fillna(0) # 거래 중지등의 사건에 극단적 노이즈
-
-    vol = v.replace(0, np.nan)              # 0은 로그 불가 → NaN
-    data['Vol_logdiff'] = np.log(vol).diff()
-
-    # 당일 변동폭 (고가-저가 비율)
-    data['day_range_pct'] = (h - l) / (l + 1e-9)
-
-    # 캔들패턴 (양봉/음봉, 장대양봉 등)
-    # data['is_bullish'] = (data[col_c] > data['시가']).astype(int) # 양봉이면 1, 음봉이면 0
-    # 장대양봉(시가보다 종가가 2% 이상 상승)
-    # data['long_bullish'] = ((data[col_c] - data['시가']) / data['시가'] > 0.02).astype(int)
-
-    # 최근 N일간 등락률
-    # data['chg_5d'] = (data[col_c] /c.shift(5)) - 1
-    # 현재가 vs 이동평균(MA) 괴리율
-    data['ma10_gap'] = (data[col_c] - data['MA10']) / data['MA10']
-    # 거래량 급증 신호
-    data['volume_ratio'] = v / v.rolling(20).mean()
-
-
-    # 중기 위치 확인 (추세 필터)
-    data["dist_to_ma20"] = (data[col_c] - data["MA20"]) / data["MA20"]
-
-
-    # 오늘 거래량이 최근 20일 중 어느 정도 위치냐
-    # 0.9 이상 → 거의 최고 거래량
-    # 0.5 → 평범
-    # 0.2 → 거래 죽음
-    data['volume_rank_20d'] = volume_rank(data[col_v], 20)
-
-
-    # === 추가 지표 ===
     # MACD
     """
     단기(12일)·장기(26일) 이동평균 차이로 추세 방향을 측정. 0 이상이면 상승세, 0 이하이면 하락세
@@ -867,8 +860,9 @@ def add_technical_features(data, window=20, num_std=2):
     0선 위에서 골든크로스 = 강한 매수 신호, 0선 아래에서 데드크로스 = 강한 매도 신호    
     """
     macd_line, macd_signal, macd_hist = compute_macd(c, 12, 26, 9)
-    data['MACD'] = macd_line
-    data['MACD_signal'] = macd_signal
+    # data['MACD'] = macd_line
+    # data['MACD_signal'] = macd_signal
+    # 모멘텀 전환 확인
     data['MACD_hist'] = macd_hist
 
     # +DI / -DI / ADX
@@ -883,16 +877,17 @@ def add_technical_features(data, window=20, num_std=2):
     ADX가 높다고 해서 방향을 말해주진 않음 (강한 상승일 수도, 강한 하락일 수도 있음)
     """
     plus_di, minus_di, adx = compute_di_adx(h, l, c, 14)
-    data['PlusDI'] = plus_di
-    data['MinusDI'] = minus_di
-    data['ADX14'] = adx
+    # data['PlusDI'] = plus_di
+    # data['MinusDI'] = minus_di
+    # 하락 추세가 너무 강한 종목 제거
+    # data['ADX14'] = adx
 
     # ATR
     """
     ATR(14) — 평균진폭범위 (Average True Range)
     변동성 지표. 값이 높을수록 변동성이 큼
     """
-    data['ATR14'] = compute_atr(h, l, c, 14)
+    # data['ATR14'] = compute_atr(h, l, c, 14)
 
     """
     CCI(14) — 상품채널지수 (Commodity Channel Index)
@@ -901,7 +896,7 @@ def add_technical_features(data, window=20, num_std=2):
     
     단기 모멘텀 변화를 잘 포착하지만, 노이즈가 많음
     """
-    data['CCI14'] = compute_cci(h, l, c, 14)
+    # data['CCI14'] = compute_cci(h, l, c, 14)
 
     """
     Ultimate Oscillator
@@ -920,13 +915,13 @@ def add_technical_features(data, window=20, num_std=2):
     매수세(황소)와 매도세(곰) 힘을 비교. 양수면 매수세 우위
     추세의 속도 확인
     """
-    data['ROC12_pct'] = compute_roc(c, 12, pct=True)
+    # data['ROC12_pct'] = compute_roc(c, 12, pct=True)
 
+    ###########################################################
 
-    # ===== 추가(전환+7일용 추천 피쳐들) =====
-    # 당일 range 내 종가 위치(0~1)
-    # 1 → 종가가 최고가 근처 (강함)
-    data['close_pos'] = (c - l) / (h - l + eps)
+    vol = v.replace(0, np.nan)              # 0은 로그 불가 → NaN
+    data['Vol_logdiff'] = np.log(vol).diff()
+
 
     # 안전 처리
     data.replace([np.inf, -np.inf], np.nan, inplace=True)
@@ -1492,63 +1487,6 @@ def pass_filter_v2(
     return True
 
 
-# 5일선이 20일선 아래에서 근접하게 다가옴
-def near_bull_cross_signal(df: pd.DataFrame,
-                           lookback: int = 5,
-                           gap_bp: float = 0.004,    # MA20 대비 0.4% 이내
-                           min_rise_bp: float = 0.002, # delta가 최근 lookback동안 최소 0.2%p 이상 상승, 근접 “속도”의 최소 요구치.
-                           use_atr: bool = True
-                           ) -> bool:
-    """
-    df: MA5, MA20 컬럼 포함. 인덱스는 날짜(오름차순).
-    조건:
-      - 현재 MA5 < MA20 (아직 역전 전)
-      - 격차 |MA5-MA20| 가 MA20의 gap_bp 이내
-      - 최근 lookback일 동안 delta가 유의미하게 상승(=붙는 중)
-    """
-    s_ma5 = pd.to_numeric(df['MA5'], errors='coerce')
-    s_ma20 = pd.to_numeric(df['MA20'], errors='coerce')
-    if s_ma5.isna().iloc[-lookback:].any() or s_ma20.isna().iloc[-lookback:].any():
-        return False
-
-    delta = s_ma5 - s_ma20
-    # 아직 아래에 있음
-    if not (delta.iloc[-1] < 0):
-        return False
-
-    # # 현재 격차가 충분히 좁은가? (MA20의 퍼센트 기준)
-    # tight_now = abs(delta.iloc[-1]) <= (s_ma20.iloc[-1] * gap_bp)
-    #
-    # # 최근 lookback일 동안 delta가 유의미하게 상승(즉, 더 0에 가까워짐)
-    # delta_rise = (delta.iloc[-1] - delta.iloc[-lookback]) >= (s_ma20.iloc[-1] * min_rise_bp)
-
-    # 동적 갭 허용 (선택)
-    if use_atr and {'High','Low','Close'}.issubset(df.columns):
-        hl = df['High'] - df['Low']
-        hc = (df['High'] - df['Close'].shift()).abs()
-        lc = (df['Low']  - df['Close'].shift()).abs()
-        tr = pd.concat([hl, hc, lc], axis=1).max(axis=1)
-        atr = tr.rolling(14, min_periods=14).mean()
-        if not pd.isna(atr.iloc[-1]):
-            vol_bp = (atr / s_ma20).iloc[-1]
-            gap_bp = max(gap_bp, float(vol_bp) * 0.8)
-
-    tight_now = abs(delta.iloc[-1]) <= (s_ma20.iloc[-1] * gap_bp)
-
-    # 갭이 크면 상승 요구치 가중
-    gap_ratio = abs(delta.iloc[-1]) / s_ma20.iloc[-1]
-    req_rise  = s_ma20.iloc[-1] * min_rise_bp * (1.5 if gap_ratio > gap_bp*0.5 else 1.0)
-    delta_rise = (delta.iloc[-1] - delta.iloc[-lookback]) >= req_rise
-
-
-    # 보조: MA5 기울기 양수, MA20 기울기 비양수(완화 가능)
-    ma5_slope = s_ma5.iloc[-1] - s_ma5.iloc[-2]
-    # ma20_slope = s_ma20.iloc[-1] - s_ma20.iloc[-2]
-    # slope_ok = (ma5_slope > 0) and (ma20_slope <= 0)
-    slope_ok   = (ma5_slope > 0)  # MA20 기울기 조건은 완화
-
-    return bool(tight_now and delta_rise and slope_ok)
-
 
 ########## 필터링 추가 ##########
 
@@ -1789,7 +1727,7 @@ def signal_any_drop(data: pd.DataFrame,
     cond_today        = (today_chg >= up_thr)
     cond_past_anydrop = past_chg.le(down_thr).any()     # 하루라도 down_thr 이하
     cond_ma_order     = past_ma5.lt(past_ma20).all()    # days기간 내내 MA5 < MA20
-    cond_vol_rank     = data['volume_rank_20d'].iloc[-1] > 0.5   # 거래량 없는 반등 제거
+    cond_vol_rank     = data['volume_rank_20d'].iloc[-1] > 0.4   # 거래량 없는 반등 제거
 
     return bool(cond_today and cond_past_anydrop and cond_ma_order and cond_vol_rank)
 
@@ -1932,11 +1870,11 @@ def low_weekly_check(data: pd.DataFrame):
     }).dropna(subset=[col_c])  # 종가 없는 주 제거
 
     # 최근 ~ 4주 전 주봉 종가 추출
-    first_w_close = weekly.iloc[0][col_c]    # 첫번째 주 종가
+    # first_w_close = weekly.iloc[0][col_c]    # 첫번째 주 종가
     this_w_close  = weekly.iloc[-1][col_c]   # 이번 주 종가
     prev_w_close  = weekly.iloc[-2][col_c]
-    two_w_close   = weekly.iloc[-3][col_c]
-    three_w_close = weekly.iloc[-4][col_c]
+    # two_w_close   = weekly.iloc[-3][col_c]
+    # three_w_close = weekly.iloc[-4][col_c]
     four_w_close  = weekly.iloc[-5][col_c]
 
     '''
@@ -1944,23 +1882,23 @@ def low_weekly_check(data: pd.DataFrame):
     this_w_close = 105
     one_w_ago_pct = (105 / 100) - 1   # 1.05 - 1 = 0.05    >> one_w_ago_pct = 0.05 (5% 상승)
     '''
-    pct_from_first  = (this_w_close / first_w_close) - 1     # 이번 주 종가(this_w_close)가 첫 번째 주 종가(first_w_close) 대비 몇 % 변했는지
+    # pct_from_first  = (this_w_close / first_w_close) - 1     # 이번 주 종가(this_w_close)가 첫 번째 주 종가(first_w_close) 대비 몇 % 변했는지
     one_w_ago_pct   = (this_w_close / prev_w_close) - 1      # 저번주 대비 이번주 증감률
-    two_w_ago_pct   = (this_w_close / two_w_close) - 1       # 2주 대비 이번주 증감률
-    three_w_ago_pct = (this_w_close / three_w_close) - 1     # 3주 대비 이번주 증감률
+    # two_w_ago_pct   = (this_w_close / two_w_close) - 1       # 2주 대비 이번주 증감률
+    # three_w_ago_pct = (this_w_close / three_w_close) - 1     # 3주 대비 이번주 증감률
     four_w_ago_pct  = (this_w_close / four_w_close) - 1      # 4주 대비 이번주 증감률
-    is_drop_over_1  = one_w_ago_pct < -0.01                  # -1% 보다 더 하락했는가 // -0.005   # -0.5%
+    # is_drop_over_1  = one_w_ago_pct < -0.01                  # -1% 보다 더 하락했는가 // -0.005   # -0.5%
 
     return {
         "ok": True,
         # "this_week_close": round(float(this_w_close), 3),
         # "last_week_close": round(float(prev_w_close), 3),
         "pct_vs_lastweek": round(float(one_w_ago_pct*100), 3),          # 저번주 대비 이번주 증감률, -0.0312 -> -3.12%
-        "pct_vs_last2week": round(float(two_w_ago_pct*100), 3),         # 2주 전 대비 이번주 증감률
-        "pct_vs_last3week": round(float(three_w_ago_pct*100), 3),       # 3주 전 대비 이번주 증감률
+        # "pct_vs_last2week": round(float(two_w_ago_pct*100), 3),         # 2주 전 대비 이번주 증감률
+        # "pct_vs_last3week": round(float(three_w_ago_pct*100), 3),       # 3주 전 대비 이번주 증감률
         "pct_vs_last4week": round(float(four_w_ago_pct*100), 3),        # 4주 전 대비 이번주 증감률
-        "pct_vs_firstweek": round(float(pct_from_first*100), 3),        # 3개월 첫주 대비 이번주 증감률, -0.22 -> -22% 하락
-        "is_drop_more_than_minus1pct": bool(is_drop_over_1),            # 주봉 증감률이 기준보다 하락했는지
+        # "pct_vs_firstweek": round(float(pct_from_first*100), 3),        # 3개월 첫주 대비 이번주 증감률, -0.22 -> -22% 하락
+        # "is_drop_more_than_minus1pct": bool(is_drop_over_1),            # 주봉 증감률이 기준보다 하락했는지
     }
 
 
