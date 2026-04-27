@@ -816,14 +816,14 @@ def add_technical_features(data):
     # ★★★ 저점 대비 회복률
     rolling_min_20d = c.rolling(20).min()
     rolling_min_60d = c.rolling(60).min()
-    data['rebound_from_20d_low'] = safe_rate(c, rolling_min_20d)
-    data['rebound_from_60d_low'] = safe_rate(c, rolling_min_60d)
+    data['rebound_from_20d_low'] = safe_rate(c.iloc[-1], rolling_min_20d.iloc[-1])
+    data['rebound_from_60d_low'] = safe_rate(c.iloc[-1], rolling_min_60d.iloc[-1])
 
     # ★★★ 낙폭 과대 지표
     rolling_max_20d = c.rolling(20).max()
     rolling_max_60d = c.rolling(60).max()
-    data['drawdown_20d'] = safe_rate(c, rolling_max_20d)
-    data['drawdown_60d'] = safe_rate(c, rolling_max_60d)
+    data['drawdown_20d'] = safe_rate(c.iloc[-1], rolling_max_20d.iloc[-1])
+    data['drawdown_60d'] = safe_rate(c.iloc[-1], rolling_max_60d.iloc[-1])
 
     # ★★★ 당일 range 내 종가 위치(0~1)
     # 1 → 종가가 최고가 근처 (강함)
@@ -836,8 +836,8 @@ def add_technical_features(data):
     data['volume_rank_20d'] = volume_rank(v, 20)
 
     # ★★★ 중기 위치 확인 (추세 필터)
-    # data["dist_to_ma5"]  = safe_rate(c, data["MA5"])
-    data["dist_to_ma20"] = safe_rate(c, data["MA20"])
+    # data["dist_to_ma5"]  = safe_rate(c.iloc[-1], data["MA5"].iloc[-1])
+    data["dist_to_ma20"] = safe_rate(c.iloc[-1], data["MA20"].iloc[-1])
 
     data['upper_tail_ratio'] = (h - c) / (h - l + 1e-9)
 

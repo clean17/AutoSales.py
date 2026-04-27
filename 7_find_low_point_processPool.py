@@ -203,12 +203,15 @@ def process_one(idx, count, ticker, tickers_dict):
     # 거래 유입
     volume_ratio         = last['volume_ratio']
     volume_delta         = volume_ratio - data['volume_ratio'].iloc[-3]
-    tr_value_ratio       = today_tr_val / (mean_prev3 + 1e-9)
+    if mean_prev3 <= 0 or not np.isfinite(mean_prev3):
+        tr_value_ratio = 0
+    else:
+        tr_value_ratio = today_tr_val / mean_prev3
 
     # 오늘 반등의 질이 좋은가, 종합점수
     rebound_power = (
             max(today_pct, 0) * close_pos *
-            (today_tr_val / mean_prev3)
+            tr_value_ratio
     )
 
     # 반등은 강한데, 구조적 위험은 낮은 종목을 고르기 위한 점수
