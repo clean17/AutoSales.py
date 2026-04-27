@@ -40,7 +40,7 @@ for ticker in tickers:
     # 데이터셋 생성
     scaler = MinMaxScaler(feature_range=(0, 1))
     feature_cols = [
-        '종가', '고가', 'PBR', '저가', '거래량', 'RSI14', 'ma10_gap',
+        '종가', '고가', 'PBR', '저가', '거래량', 'RSI14',
     ]
     flattened_feature_names = []
     for t in range(LOOK_BACK):

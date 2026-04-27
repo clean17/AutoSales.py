@@ -234,7 +234,8 @@ def process_one(idx, count, ticker, tickers_dict):
         # "vol15": vol15,                                  # 15일 평균 변동성
         "vol_ratio": vol_ratio,                          # 단기 변동성과 장기 변동성을 비교하는 비율
 
-        # "mean_prev3": mean_prev3,                        # 직전 3일 평균 거래대금 (조건에서 다수 사용)
+        "mean_prev3": mean_prev3,                        # 직전 3일 평균 거래대금 (조건에서 다수 사용)
+        "today_tr_val": today_tr_val,                    # 오늘 거래대금
         "volume_rank_20d": volume_rank_20d,              # 20일 거래대금 순위 (1이면 오늘이 최고 높음)
 
         "three_m_max_cur": three_m_max_cur,              # 3개월 종가 최고 대비 오늘 등락률 👍
@@ -242,7 +243,7 @@ def process_one(idx, count, ticker, tickers_dict):
 
         # "pct_vs_lastweek": result['pct_vs_lastweek'],    # 저번주 대비 이번주 등락률
 
-        # "today_pct": today_pct,                          # 오늘등락률 👍 (오늘 +3% 이상 (signal_any_drop))
+        "today_pct": today_pct,                          # 오늘등락률 👍 (오늘 +3% 이상 (signal_any_drop))
         "close_pos": close_pos,                          # 당일 range 내 종가 위치(0~1)
     }
 
