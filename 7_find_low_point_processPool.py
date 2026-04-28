@@ -182,7 +182,6 @@ def process_one(idx, count, ticker, tickers_dict):
 
     # 거래 유입
     volume_ratio         = last['volume_ratio']
-    volume_ratio_3d_avg  = data['volume_ratio'].iloc[-3:].mean()
 
     if mean_prev3 <= 0 or not np.isfinite(mean_prev3):
         tr_value_ratio = 0
@@ -198,6 +197,10 @@ def process_one(idx, count, ticker, tickers_dict):
     volume_price_power = today_pct * volume_ratio
     # 추세 필터 강화
     trend_filter = dist_to_ma20 * close_pos
+    # 변동성 대비 상승
+    raw_eff = today_pct / (tr_value_ratio + 1e-6)
+    raw_eff = np.clip(raw_eff, 0, np.percentile(raw_eff, 95))
+    efficiency = np.log1p(raw_eff)
 
     # 오늘 반등의 질이 좋은가, 종합점수
     rebound_power = max(today_pct, 0) * close_pos * tr_value_ratio
@@ -271,6 +274,7 @@ def process_one(idx, count, ticker, tickers_dict):
 
         # 거래량
         "volume_ratio": volume_ratio,
+        "tr_value_ratio": tr_value_ratio,
 
         # 구조 / 리스크
         "dist_to_ma20": dist_to_ma20,
@@ -283,6 +287,7 @@ def process_one(idx, count, ticker, tickers_dict):
         "volume_price_power": volume_price_power,
         "rebound_power": rebound_power,
         "rebound_strength": rebound_strength,
+        "efficiency": efficiency,
         "trend_filter": trend_filter,
     }
 
