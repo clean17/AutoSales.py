@@ -164,41 +164,22 @@ def process_one(idx, count, ticker, tickers_dict):
     last20_ret           = data['등락률'].tail(20)
     last60_ret           = data['등락률'].tail(60)
 
-    # 당일 등락률
-    today_pct            = round(last['등락률'], 2)
-    close_pos            = last['close_pos']
-    # 종가 강도
-    close_pos_trend      = close_pos - data['close_pos'].iloc[-3]
-    upper_tail_ratio     = last['upper_tail_ratio']
 
     # 과매도 전환 지표
     RSI14                = data['RSI14'].iloc[-1]
     RSI_rebound          = RSI14 - data['RSI14'].iloc[-3]
-    MACD_hist            = data['MACD_hist'].iloc[-1]
-    MACD_turn            = MACD_hist > data['MACD_hist'].iloc[-2] # 전환
 
-    # 저점 반등
-    rebound_from_20d_low = data['rebound_from_20d_low'].iloc[-1]
-
-    # 반등 가속도
-    rebound_acc          = rebound_from_20d_low - data['rebound_from_20d_low'].iloc[-4]
-
-    # 하락 멈춤
-    drawdown_flat = abs(
-        data['drawdown_20d'].iloc[-1] - data['drawdown_20d'].iloc[-2]
-    ) < 1
-    # 갭상승 후 밀림 → 데드캣 가능성 높음
-    gap_pct              = (data['시가'].iloc[-1] - data['종가'].iloc[-2]) / data['종가'].iloc[-2]
 
     # 낙폭 위험
     drawdown_60d         = last['drawdown_60d']
-    drawdown_recovery    = data['drawdown_20d'].iloc[-1] - data['drawdown_20d'].iloc[-4]
     dist_to_ma20         = last['dist_to_ma20']
-    # 많이 깨졌고, 아직 20일선 아래 깊게 있으면 위험
-    deadcat_risk = (
-            abs(min(drawdown_60d, 0)) / 50 *
-            max(0, -dist_to_ma20)
-    )
+    # 저점 반등
+    rebound_from_20d_low = data['rebound_from_20d_low'].iloc[-1]
+    # 저점 대비 위치 정규화
+    rebound_strength = min(rebound_from_20d_low / (abs(drawdown_60d) + 1e-6), 5)
+
+    # 갭상승 후 밀림 → 데드캣 가능성 높음
+    gap_pct              = (data['시가'].iloc[-1] - data['종가'].iloc[-2]) / data['종가'].iloc[-2]
 
     # 거래 유입
     volume_ratio         = last['volume_ratio']
@@ -208,24 +189,35 @@ def process_one(idx, count, ticker, tickers_dict):
     else:
         tr_value_ratio = today_tr_val / mean_prev3
 
+    # 당일 등락률
+    today_pct            = round(last['등락률'], 2)
+    close_pos            = last['close_pos']
+
+    # 상승 + 거래량 결합
+    volume_price_power = today_pct * volume_ratio
+    # 추세 필터 강화
+    trend_filter = dist_to_ma20 * close_pos
+    # 비정상 거래
+    volume_spike = volume_ratio / (abs(volume_delta) + 1)
+    # 변동성 대비 상승
+    efficiency = min((today_pct / (tr_value_ratio + 1e-6)), 10)
+
     # 오늘 반등의 질이 좋은가, 종합점수
-    rebound_power = (
-            max(today_pct, 0) * close_pos *
-            tr_value_ratio
-    )
+    rebound_power = max(today_pct, 0) * close_pos * tr_value_ratio
+
+    # 많이 깨졌고, 아직 20일선 아래 깊게 있으면 위험
+    deadcat_risk = abs(min(drawdown_60d, 0)) / 50 * max(0, -dist_to_ma20)
 
     # 반등은 강한데, 구조적 위험은 낮은 종목을 고르기 위한 점수
-    bottom_buy_score = rebound_power / (1 + deadcat_risk)
+    bottom_buy_score = min((rebound_power / (1 + deadcat_risk)), 100)
 
     ############################  deadcat_filter  ###########################
 
-    # 종가가 고가 근처인지 확인
-    # 당일 range 내 종가 위치(0~1), 1 → 종가가 최고가 근처 (강함), 평균 0.75
-    # if close_pos < 0.60:
+    # if RSI_rebound < -15.25:
     #     return
-
-
-    # if dist_to_ma20 < -0.08:
+    # if volume_delta < -14.52:
+    #     return
+    # if gap_pct < -0.09: # 성공 최소값
     #     return
 
     ########################################################################
@@ -290,34 +282,28 @@ def process_one(idx, count, ticker, tickers_dict):
     rule_features = {
         # 반등 방향
         "RSI_rebound": RSI_rebound,
-        "MACD_turn": MACD_turn,
 
-        # 반등 강도
+        # 상승 강도
         "today_pct": today_pct,
-        "close_pos": close_pos,
-        "close_pos_trend": close_pos_trend,
-        "rebound_acc": rebound_acc,
 
-        # 거래 유입
+        # 거래량
         "volume_ratio": volume_ratio,
         "volume_delta": volume_delta,
         "tr_value_ratio": tr_value_ratio,
 
         # 구조 / 리스크
-        "drawdown_60d": drawdown_60d,
-        "drawdown_recovery": drawdown_recovery,
         "dist_to_ma20": dist_to_ma20,
-        "deadcat_risk": deadcat_risk,
-
-        # 캔들 품질
-        "upper_tail_ratio": upper_tail_ratio,
+        "drawdown_60d": drawdown_60d,
+        "rebound_from_20d_low": rebound_from_20d_low,
 
         # 점수
         "bottom_buy_score": bottom_buy_score,
 
-        "rebound_from_20d_low": rebound_from_20d_low,
-        "drawdown_flat": drawdown_flat,
-        "gap_pct ": gap_pct,
+        "volume_price_power": volume_price_power,
+        "rebound_strength": rebound_strength,
+        "efficiency": efficiency,
+        "trend_filter": trend_filter,
+        "volume_spike": volume_spike,
     }
 
     # data에 컬럼이 없거나 NaN이면 넣기 (기존 컬럼 있으면 덮어쓸지 말지는 옵션)
