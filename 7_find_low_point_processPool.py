@@ -37,7 +37,7 @@ else:
 
 from utils import get_kor_ticker_dict_list, add_technical_features, plot_candles_weekly, plot_candles_daily, \
     drop_sparse_columns, drop_trading_halt_rows, signal_any_drop, low_weekly_check, extract_numbers_from_filenames, \
-    sort_csv_by_today_desc, safe_read_pickle, safe_rate, to_float
+    sort_csv_by_today_desc, safe_read_pickle, safe_rate, to_float, round_float_features
 
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
 root_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(=루트)
@@ -169,7 +169,6 @@ def process_one(idx, count, ticker, tickers_dict):
     RSI14                = data['RSI14'].iloc[-1]
     RSI_rebound          = RSI14 - data['RSI14'].iloc[-3]
 
-
     # 낙폭 위험
     drawdown_60d         = last['drawdown_60d']
     dist_to_ma20         = last['dist_to_ma20']
@@ -183,11 +182,13 @@ def process_one(idx, count, ticker, tickers_dict):
 
     # 거래 유입
     volume_ratio         = last['volume_ratio']
-    volume_delta         = volume_ratio - data['volume_ratio'].iloc[-3]
+    volume_ratio_3d_avg  = data['volume_ratio'].iloc[-3:].mean()
+
     if mean_prev3 <= 0 or not np.isfinite(mean_prev3):
         tr_value_ratio = 0
     else:
         tr_value_ratio = today_tr_val / mean_prev3
+    tr_value_ratio = np.log1p(np.clip(tr_value_ratio, 0, 8.5))
 
     # 당일 등락률
     today_pct            = round(last['등락률'], 2)
@@ -197,10 +198,6 @@ def process_one(idx, count, ticker, tickers_dict):
     volume_price_power = today_pct * volume_ratio
     # 추세 필터 강화
     trend_filter = dist_to_ma20 * close_pos
-    # 비정상 거래
-    volume_spike = volume_ratio / (abs(volume_delta) + 1)
-    # 변동성 대비 상승
-    efficiency = min((today_pct / (tr_value_ratio + 1e-6)), 10)
 
     # 오늘 반등의 질이 좋은가, 종합점수
     rebound_power = max(today_pct, 0) * close_pos * tr_value_ratio
@@ -209,13 +206,12 @@ def process_one(idx, count, ticker, tickers_dict):
     deadcat_risk = abs(min(drawdown_60d, 0)) / 50 * max(0, -dist_to_ma20)
 
     # 반등은 강한데, 구조적 위험은 낮은 종목을 고르기 위한 점수
-    bottom_buy_score = min((rebound_power / (1 + deadcat_risk)), 100)
+    raw_score = rebound_power / (1 + deadcat_risk)
+    bottom_buy_score = np.clip(raw_score, 0, np.percentile(raw_score, 95))
 
     ############################  deadcat_filter  ###########################
 
     # if RSI_rebound < -15.25:
-    #     return
-    # if volume_delta < -14.52:
     #     return
     # if gap_pct < -0.09: # 성공 최소값
     #     return
@@ -230,6 +226,14 @@ def process_one(idx, count, ticker, tickers_dict):
     m_current = m_closes.iloc[-1]                               # 오늘 종가, 검증 데이터로 잘랐다면 검증 직전까지의 마지막 값 (수익률 분석 용도)
 
     predict_str = ''
+    validation_chg_rate = 0
+    validation_chg_rate1 = 0
+    validation_chg_rate2 = 0
+    validation_chg_rate3 = 0
+    validation_chg_rate4 = 0
+    validation_chg_rate5 = 0
+    validation_chg_rate6 = 0
+    validation_chg_rate7 = 0
 
     # 검증 데이터 (마지막 n일)
     if remaining_data is not None:
@@ -253,28 +257,7 @@ def process_one(idx, count, ticker, tickers_dict):
         if validation_chg_rate < VALIDATION_TARGET_RETURN:
             predict_str = '미달'
 
-    else:
-        validation_chg_rate = 0
-        validation_chg_rate1 = 0
-        validation_chg_rate2 = 0
-        validation_chg_rate3 = 0
-        validation_chg_rate4 = 0
-        validation_chg_rate5 = 0
-        validation_chg_rate6 = 0
-        validation_chg_rate7 = 0
-
     # result = low_weekly_check(m_data)
-
-    ########################################################################
-
-    # 변동 타겟 수익률
-    # VALIDATION_TARGET_RETURN = 1.5 * vol15
-
-    # 시장 필터
-    # market_return_5d > -2%                              # 최근 5일 시장 수익률
-
-    # 변동성 필터 (너무 위험한 종목 제거)
-    # vol15 < 특정값
 
     ########################################################################
 
@@ -288,8 +271,6 @@ def process_one(idx, count, ticker, tickers_dict):
 
         # 거래량
         "volume_ratio": volume_ratio,
-        "volume_delta": volume_delta,
-        "tr_value_ratio": tr_value_ratio,
 
         # 구조 / 리스크
         "dist_to_ma20": dist_to_ma20,
@@ -300,10 +281,9 @@ def process_one(idx, count, ticker, tickers_dict):
         "bottom_buy_score": bottom_buy_score,
 
         "volume_price_power": volume_price_power,
+        "rebound_power": rebound_power,
         "rebound_strength": rebound_strength,
-        "efficiency": efficiency,
         "trend_filter": trend_filter,
-        "volume_spike": volume_spike,
     }
 
     # data에 컬럼이 없거나 NaN이면 넣기 (기존 컬럼 있으면 덮어쓸지 말지는 옵션)
@@ -357,6 +337,7 @@ def process_one(idx, count, ticker, tickers_dict):
         "validation_chg_rate7": validation_chg_rate7,    # 검증 등락률
     }
     row.update(rule_features)
+    row = round_float_features(row)
 
     # 처음으로 수익률 뚫는 날, 조건이 뚫을 수 있는지 확인
     vals = [
