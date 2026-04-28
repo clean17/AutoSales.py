@@ -140,9 +140,6 @@ def process_one(idx, count, ticker, tickers_dict):
     - 오늘 +3% 이상
     - 최근 7일 하락 존재
     - 거래량 증가
-    - 중기 위치 확인
-    - 양봉 비율
-    - 당일 종가 위치
     
     depth5 (점수) >> 수익률 극대화
     - find_low_scan_condition.py 스크립트로 만든 조건
@@ -170,22 +167,22 @@ def process_one(idx, count, ticker, tickers_dict):
     _RSI_rebound         = _RSI14 - data['RSI14'].iloc[-3]
 
     # 낙폭 위험
-    _drawdown_60d         = last['drawdown_60d']
-    _dist_to_ma20         = last['dist_to_ma20']
+    _drawdown_60d        = last['drawdown_60d']
+    _dist_to_ma20        = last['dist_to_ma20']
     # 저점 반등
     rebound_from_20d_low = data['rebound_from_20d_low'].iloc[-1]
     # 저점 대비 위치 정규화
     rebound_strength     = min(rebound_from_20d_low / (abs(_drawdown_60d) + 1e-6), 5)
 
     # 거래 유입
-    _volume_ratio         = last['volume_ratio']
+    _volume_ratio        = last['volume_ratio']
 
     # 오늘 거래대금 변동률
     if mean_prev3 <= 0 or not np.isfinite(mean_prev3):
-        _tr_value_ratio   = 0
+        _tr_value_ratio  = 0
     else:
-        _tr_value_ratio   = today_tr_val / mean_prev3
-    _tr_value_ratio       = np.log1p(np.clip(_tr_value_ratio, 0, 8.5))
+        _tr_value_ratio  = today_tr_val / mean_prev3
+    _tr_value_ratio      = np.log1p(np.clip(_tr_value_ratio, 0, 8.5))
 
     # 당일 등락률
     today_pct            = round(last['등락률'], 2)
@@ -227,6 +224,7 @@ def process_one(idx, count, ticker, tickers_dict):
         "rebound_power": rebound_power,
         "strong_rebound_score": strong_rebound_score,
 
+        # 반등의 질, 보조 지표
         "rebound_strength": rebound_strength,
 
         # 종합
@@ -238,11 +236,41 @@ def process_one(idx, count, ticker, tickers_dict):
 
     ############################  deadcat_filter  ###########################
 
-    # if _RSI_rebound < -15.25:
-    #     return
-    # if _gap_pct < -0.09: # 성공 최소값.. 필터용으로 유지
-    #     return
+    deadcat_penalty = 0
 
+    # 1️⃣ 깊은 낙폭 + 추세 미회복 (핵심)
+    if _drawdown_60d < -35 and _dist_to_ma20 < -5:
+        deadcat_penalty += 1.2
+
+    # 2️⃣ 상승은 했는데 종가가 약함 (윗꼬리)
+    if today_pct > 6 and _close_pos < 0.55:
+        deadcat_penalty += 1.0
+
+    # 3️⃣ 갭으로 뜬 후 힘 빠짐
+    if _gap_pct > 0.04 and _close_pos < 0.6:
+        deadcat_penalty += 0.8
+
+    # 4️⃣ 반등은 했는데 여전히 깊은 위치 (구조 불안)
+    if rebound_from_20d_low > 10 and _dist_to_ma20 < -8:
+        deadcat_penalty += 0.8
+
+    # 5️⃣ 거래 없이 뜬 경우 (fake breakout)
+    if volume_price_power < 5 and today_pct > 6:
+        deadcat_penalty += 0.6
+
+    # 6️⃣ 반등 질이 낮은 경우
+    if rebound_strength < 0.25:
+        deadcat_penalty += 0.6
+
+    final_score1 = bottom_buy_score - deadcat_penalty * 2.0
+    final_score2 = bottom_buy_score * np.exp(-deadcat_penalty * 0.7)
+
+    rule_features['deadcat_penalty'] = deadcat_penalty
+    rule_features['final_score1'] = final_score1
+    rule_features['final_score2'] = final_score2
+
+    # if deadcat_penalty >= 2.0:
+    #     return
     ########################################################################
 
     m_data = data[-60:] # 뒤에서 x개 (3개월 정도)
