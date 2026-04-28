@@ -167,112 +167,78 @@ def process_one(idx, count, ticker, tickers_dict):
 
     # 과매도 전환 지표
     _RSI14               = data['RSI14'].iloc[-1]
-    RSI_rebound          = _RSI14 - data['RSI14'].iloc[-3]
+    _RSI_rebound         = _RSI14 - data['RSI14'].iloc[-3]
 
     # 낙폭 위험
-    drawdown_60d         = last['drawdown_60d']
-    dist_to_ma20         = last['dist_to_ma20']
+    _drawdown_60d         = last['drawdown_60d']
+    _dist_to_ma20         = last['dist_to_ma20']
     # 저점 반등
     rebound_from_20d_low = data['rebound_from_20d_low'].iloc[-1]
     # 저점 대비 위치 정규화
-    rebound_strength     = min(rebound_from_20d_low / (abs(drawdown_60d) + 1e-6), 5)
+    rebound_strength     = min(rebound_from_20d_low / (abs(_drawdown_60d) + 1e-6), 5)
 
     # 거래 유입
-    volume_ratio         = last['volume_ratio']
+    _volume_ratio         = last['volume_ratio']
 
     # 오늘 거래대금 변동률
     if mean_prev3 <= 0 or not np.isfinite(mean_prev3):
-        tr_value_ratio   = 0
+        _tr_value_ratio   = 0
     else:
-        tr_value_ratio   = today_tr_val / mean_prev3
-    tr_value_ratio       = np.log1p(np.clip(tr_value_ratio, 0, 8.5))
+        _tr_value_ratio   = today_tr_val / mean_prev3
+    _tr_value_ratio       = np.log1p(np.clip(_tr_value_ratio, 0, 8.5))
 
     # 당일 등락률
     today_pct            = round(last['등락률'], 2)
     _close_pos           = last['close_pos']
 
     # 비선형 필터 (threshold형)
-    _strong_move         = today_pct > 7
-    _deep_rebound        = rebound_from_20d_low > 12
-    strong_rebound_signal = _strong_move * _deep_rebound
+    strong_rebound_score = max(today_pct - 7, 0) * max(rebound_from_20d_low - 12, 0)
+
     # 상위 구간 강조
     high_momentum        = max(today_pct - 7, 0)
-    # 약한 종목 제거
-    weak_zone            = today_pct < 5
 
     # 갭상승 후 밀림 → 데드캣 가능성 높음
     _gap_pct             = (data['시가'].iloc[-1] - data['종가'].iloc[-2]) / data['종가'].iloc[-2]
-    gap_risk             = max(_gap_pct, 0) * max(today_pct, 0)
 
     # 상승 + 거래량 결합
-    volume_price_power   = today_pct * volume_ratio
-    # 바닥에서 강하게 올라온 상승
-    momentum_quality     = today_pct * rebound_from_20d_low
-
-    # 추세 필터 강화
-    trend_filter         = dist_to_ma20 * _close_pos
-    # 변동성 대비 상승
-    efficiency           = today_pct / (tr_value_ratio + 1e-6)
+    volume_price_power   = today_pct * _volume_ratio
 
     # 오늘 반등의 질이 좋은가, 종합점수
-    rebound_power        = max(today_pct, 0) * _close_pos * tr_value_ratio
-    # 강화된 반등
-    rebound_acceleration = rebound_power * rebound_from_20d_low
+    rebound_power        = max(today_pct, 0) * _close_pos * _tr_value_ratio
 
     # 많이 깨졌고, 아직 20일선 아래 깊게 있으면 위험
-    _deadcat_risk        = abs(min(drawdown_60d, 0)) / 50 * max(0, -dist_to_ma20)
+    _deadcat_risk        = abs(min(_drawdown_60d, 0)) / 50 * max(0, -_dist_to_ma20)
 
     # 반등은 강한데, 구조적 위험은 낮은 종목을 고르기 위한 점수
     _raw_score           = rebound_power / (1 + _deadcat_risk)
     bottom_buy_score     = np.clip(_raw_score, 0, np.percentile(_raw_score, 95))
 
-    deep_drawdown        = abs(min(drawdown_60d, 0))
-    below_ma20           = max(0, -dist_to_ma20)
-
-    risk = np.clip(_deadcat_risk, 0, 2)
-    _raw_score = rebound_power * np.exp(-risk)
-    bottom_buy_score2 = np.clip(_raw_score, 0, np.percentile(_raw_score, 95))
-
 
     # --- build_conditions()가 참조하는 컬럼들을 data에 주입 (스칼라 → 컬럼 브로드캐스트) ---
     rule_features = {
-        # 반등 방향
-        "RSI_rebound": RSI_rebound,
-
-        # 상승 강도
+        # 모멘텀
         "today_pct": today_pct,
+        "high_momentum": high_momentum,
 
-        # 거래량
-        "volume_ratio": volume_ratio,
-        "tr_value_ratio": tr_value_ratio,
-
-        # 구조 / 리스크
-        "dist_to_ma20": dist_to_ma20,
-        "drawdown_60d": drawdown_60d,
+        # 위치
         "rebound_from_20d_low": rebound_from_20d_low,
 
-        # 점수
-        "bottom_buy_score": bottom_buy_score,
-        "bottom_buy_score2": bottom_buy_score2,
-        "deep_drawdown": deep_drawdown,
-        "below_ma20": below_ma20,
-
-        "volume_price_power": volume_price_power,
+        # 조합
         "rebound_power": rebound_power,
+        "strong_rebound_score": strong_rebound_score,
+
         "rebound_strength": rebound_strength,
-        "efficiency": efficiency,
-        "trend_filter": trend_filter,
-        "strong_rebound_signal": strong_rebound_signal,
-        "high_momentum": high_momentum,
-        "weak_zone": weak_zone,
-        "gap_risk": gap_risk,
-        "momentum_quality": momentum_quality,
-        "rebound_acceleration": rebound_acceleration,
+
+        # 종합
+        "bottom_buy_score": bottom_buy_score,
+
+        ## 상승 + 거래량 결합
+        "volume_price_power": volume_price_power,
     }
 
     ############################  deadcat_filter  ###########################
 
-    # if RSI_rebound < -15.25:
+    # if _RSI_rebound < -15.25:
     #     return
     # if _gap_pct < -0.09: # 성공 최소값.. 필터용으로 유지
     #     return
@@ -280,11 +246,7 @@ def process_one(idx, count, ticker, tickers_dict):
     ########################################################################
 
     m_data = data[-60:] # 뒤에서 x개 (3개월 정도)
-
-    m_closes  = m_data['종가']
-    m_max     = m_closes.max()
-    m_min     = m_closes.min()
-    m_current = m_closes.iloc[-1]                               # 오늘 종가, 검증 데이터로 잘랐다면 검증 직전까지의 마지막 값 (수익률 분석 용도)
+    m_current = m_data['종가'].iloc[-1]                               # 오늘 종가, 검증 데이터로 잘랐다면 검증 직전까지의 마지막 값 (수익률 분석 용도)
 
     predict_str = ''
     validation_chg_rate = 0
