@@ -166,8 +166,8 @@ def process_one(idx, count, ticker, tickers_dict):
 
 
     # 과매도 전환 지표
-    RSI14                = data['RSI14'].iloc[-1]
-    RSI_rebound          = RSI14 - data['RSI14'].iloc[-3]
+    _RSI14               = data['RSI14'].iloc[-1]
+    RSI_rebound          = _RSI14 - data['RSI14'].iloc[-3]
 
     # 낙폭 위험
     drawdown_60d         = last['drawdown_60d']
@@ -175,48 +175,106 @@ def process_one(idx, count, ticker, tickers_dict):
     # 저점 반등
     rebound_from_20d_low = data['rebound_from_20d_low'].iloc[-1]
     # 저점 대비 위치 정규화
-    rebound_strength = min(rebound_from_20d_low / (abs(drawdown_60d) + 1e-6), 5)
-
-    # 갭상승 후 밀림 → 데드캣 가능성 높음
-    gap_pct              = (data['시가'].iloc[-1] - data['종가'].iloc[-2]) / data['종가'].iloc[-2]
+    rebound_strength     = min(rebound_from_20d_low / (abs(drawdown_60d) + 1e-6), 5)
 
     # 거래 유입
     volume_ratio         = last['volume_ratio']
 
+    # 오늘 거래대금 변동률
     if mean_prev3 <= 0 or not np.isfinite(mean_prev3):
-        tr_value_ratio = 0
+        tr_value_ratio   = 0
     else:
-        tr_value_ratio = today_tr_val / mean_prev3
-    tr_value_ratio = np.log1p(np.clip(tr_value_ratio, 0, 8.5))
+        tr_value_ratio   = today_tr_val / mean_prev3
+    tr_value_ratio       = np.log1p(np.clip(tr_value_ratio, 0, 8.5))
 
     # 당일 등락률
     today_pct            = round(last['등락률'], 2)
-    close_pos            = last['close_pos']
+    _close_pos           = last['close_pos']
+
+    # 비선형 필터 (threshold형)
+    _strong_move         = today_pct > 7
+    _deep_rebound        = rebound_from_20d_low > 12
+    strong_rebound_signal = _strong_move * _deep_rebound
+    # 상위 구간 강조
+    high_momentum        = max(today_pct - 7, 0)
+    # 약한 종목 제거
+    weak_zone            = today_pct < 5
+
+    # 갭상승 후 밀림 → 데드캣 가능성 높음
+    _gap_pct             = (data['시가'].iloc[-1] - data['종가'].iloc[-2]) / data['종가'].iloc[-2]
+    gap_risk             = max(_gap_pct, 0) * max(today_pct, 0)
 
     # 상승 + 거래량 결합
-    volume_price_power = today_pct * volume_ratio
+    volume_price_power   = today_pct * volume_ratio
+    # 바닥에서 강하게 올라온 상승
+    momentum_quality     = today_pct * rebound_from_20d_low
+
     # 추세 필터 강화
-    trend_filter = dist_to_ma20 * close_pos
+    trend_filter         = dist_to_ma20 * _close_pos
     # 변동성 대비 상승
-    raw_eff = today_pct / (tr_value_ratio + 1e-6)
-    raw_eff = np.clip(raw_eff, 0, np.percentile(raw_eff, 95))
-    efficiency = np.log1p(raw_eff)
+    efficiency           = today_pct / (tr_value_ratio + 1e-6)
 
     # 오늘 반등의 질이 좋은가, 종합점수
-    rebound_power = max(today_pct, 0) * close_pos * tr_value_ratio
+    rebound_power        = max(today_pct, 0) * _close_pos * tr_value_ratio
+    # 강화된 반등
+    rebound_acceleration = rebound_power * rebound_from_20d_low
 
     # 많이 깨졌고, 아직 20일선 아래 깊게 있으면 위험
-    deadcat_risk = abs(min(drawdown_60d, 0)) / 50 * max(0, -dist_to_ma20)
+    _deadcat_risk        = abs(min(drawdown_60d, 0)) / 50 * max(0, -dist_to_ma20)
 
     # 반등은 강한데, 구조적 위험은 낮은 종목을 고르기 위한 점수
-    raw_score = rebound_power / (1 + deadcat_risk)
-    bottom_buy_score = np.clip(raw_score, 0, np.percentile(raw_score, 95))
+    _raw_score           = rebound_power / (1 + _deadcat_risk)
+    bottom_buy_score     = np.clip(_raw_score, 0, np.percentile(_raw_score, 95))
+
+    deep_drawdown        = abs(min(drawdown_60d, 0))
+    below_ma20           = max(0, -dist_to_ma20)
+
+    risk = np.clip(_deadcat_risk, 0, 2)
+    _raw_score = rebound_power * np.exp(-risk)
+    bottom_buy_score2 = np.clip(_raw_score, 0, np.percentile(_raw_score, 95))
+
+
+    # --- build_conditions()가 참조하는 컬럼들을 data에 주입 (스칼라 → 컬럼 브로드캐스트) ---
+    rule_features = {
+        # 반등 방향
+        "RSI_rebound": RSI_rebound,
+
+        # 상승 강도
+        "today_pct": today_pct,
+
+        # 거래량
+        "volume_ratio": volume_ratio,
+        "tr_value_ratio": tr_value_ratio,
+
+        # 구조 / 리스크
+        "dist_to_ma20": dist_to_ma20,
+        "drawdown_60d": drawdown_60d,
+        "rebound_from_20d_low": rebound_from_20d_low,
+
+        # 점수
+        "bottom_buy_score": bottom_buy_score,
+        "bottom_buy_score2": bottom_buy_score2,
+        "deep_drawdown": deep_drawdown,
+        "below_ma20": below_ma20,
+
+        "volume_price_power": volume_price_power,
+        "rebound_power": rebound_power,
+        "rebound_strength": rebound_strength,
+        "efficiency": efficiency,
+        "trend_filter": trend_filter,
+        "strong_rebound_signal": strong_rebound_signal,
+        "high_momentum": high_momentum,
+        "weak_zone": weak_zone,
+        "gap_risk": gap_risk,
+        "momentum_quality": momentum_quality,
+        "rebound_acceleration": rebound_acceleration,
+    }
 
     ############################  deadcat_filter  ###########################
 
     # if RSI_rebound < -15.25:
     #     return
-    # if gap_pct < -0.09: # 성공 최소값
+    # if _gap_pct < -0.09: # 성공 최소값.. 필터용으로 유지
     #     return
 
     ########################################################################
@@ -263,33 +321,6 @@ def process_one(idx, count, ticker, tickers_dict):
     # result = low_weekly_check(m_data)
 
     ########################################################################
-
-    # --- build_conditions()가 참조하는 컬럼들을 data에 주입 (스칼라 → 컬럼 브로드캐스트) ---
-    rule_features = {
-        # 반등 방향
-        "RSI_rebound": RSI_rebound,
-
-        # 상승 강도
-        "today_pct": today_pct,
-
-        # 거래량
-        "volume_ratio": volume_ratio,
-        "tr_value_ratio": tr_value_ratio,
-
-        # 구조 / 리스크
-        "dist_to_ma20": dist_to_ma20,
-        "drawdown_60d": drawdown_60d,
-        "rebound_from_20d_low": rebound_from_20d_low,
-
-        # 점수
-        "bottom_buy_score": bottom_buy_score,
-
-        "volume_price_power": volume_price_power,
-        "rebound_power": rebound_power,
-        "rebound_strength": rebound_strength,
-        "efficiency": efficiency,
-        "trend_filter": trend_filter,
-    }
 
     # data에 컬럼이 없거나 NaN이면 넣기 (기존 컬럼 있으면 덮어쓸지 말지는 옵션)
     data = data.copy()
