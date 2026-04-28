@@ -276,6 +276,19 @@ def compute_roc(close, length=12, pct=True):
     return r * 100 if pct else r
 
 
+def round_float_features(row, decimals=3):
+    rounded_row = {}
+    for key, value in row.items():
+        try:
+            # float 변환 시도
+            fval = float(value)
+            # 변환 성공하면 반올림
+            rounded_row[key] = round(fval, decimals)
+        except (ValueError, TypeError):
+            # float 변환 불가능하면 원래 값 유지
+            rounded_row[key] = value
+    return rounded_row
+
 
 
 # 거래정지/이상치 행 제거
@@ -827,7 +840,7 @@ def add_technical_features(data):
 
     # ★★★ 당일 range 내 종가 위치(0~1)
     # 1 → 종가가 최고가 근처 (강함)
-    data['close_pos'] = (c - l) / (h - l + eps)
+    data['close_pos'] = (c - l) / (h - l + eps) # 무의미
 
     # ★★★ 거래량 급증 신호
     data['volume_ratio'] = v / v.rolling(20).mean()
@@ -839,7 +852,7 @@ def add_technical_features(data):
     # data["dist_to_ma5"]  = safe_rate(c.iloc[-1], data["MA5"].iloc[-1])
     data["dist_to_ma20"] = safe_rate(c.iloc[-1], data["MA20"].iloc[-1])
 
-    data['upper_tail_ratio'] = (h - c) / (h - l + 1e-9)
+    # data['upper_tail_ratio'] = (h - c) / (h - l + 1e-9) # 무의미
 
     ###########################################################
     # === 추가 지표 ===
