@@ -94,6 +94,7 @@ def process_one(idx, count, ticker, tickers_dict):
     trading_value = data['거래량'] * data['종가']
     today_tr_val = round(trading_value.iloc[-1], 2)                  # 마지막 거래일 거래대금
     mean_prev3 = round(trading_value.iloc[:-1].tail(3).mean(), 2)    # 마지막 3일 거래대금 평균
+    mean_prev5 = round(trading_value.iloc[:-1].tail(5).mean(), 2)    # 마지막 3일 거래대금 평균
     mean_prev20 = round(trading_value.iloc[:-1].tail(20).mean(), 2)  # 마지막 20일 거래대금 평균
 
 
@@ -171,8 +172,9 @@ def process_one(idx, count, ticker, tickers_dict):
     _dist_to_ma20        = last['dist_to_ma20']
     # 저점 반등
     rebound_from_20d_low = data['rebound_from_20d_low'].iloc[-1]
-    # 저점 대비 위치 정규화
+    # 저점 대비 위치 정규화 (의미 약함)
     rebound_strength     = min(rebound_from_20d_low / (abs(_drawdown_60d) + 1e-6), 5)
+
 
     # 거래 유입
     _volume_ratio        = last['volume_ratio']
@@ -181,15 +183,26 @@ def process_one(idx, count, ticker, tickers_dict):
     if mean_prev3 <= 0 or not np.isfinite(mean_prev3):
         _tr_value_ratio  = 0
     else:
-        _tr_value_ratio  = today_tr_val / mean_prev3
+        _tr_value_ratio  = (today_tr_val / mean_prev3) * 0.4 + (today_tr_val / mean_prev5) * 0.6
     _tr_value_ratio      = np.log1p(np.clip(_tr_value_ratio, 0, 8.5))
 
     # 당일 등락률
     today_pct            = round(last['등락률'], 2)
     _close_pos           = last['close_pos']
 
+    recovery_quality = np.sqrt(
+        max(today_pct - 7, 0) *
+        max(rebound_from_20d_low - 12, 0)
+    )
+
+    recovery_efficiency = (
+            rebound_from_20d_low *
+            np.tanh(today_pct / 10)
+    )
+
     # 비선형 필터 (threshold형)
-    strong_rebound_score = max(today_pct - 7, 0) * max(rebound_from_20d_low - 12, 0)
+    # strong_rebound_score = max(today_pct - 7, 0) * max(rebound_from_20d_low - 12, 0)
+    strong_rebound_score = np.sqrt(max(today_pct - 7, 0) * max(rebound_from_20d_low - 12, 0))
 
     # 상위 구간 강조
     high_momentum        = max(today_pct - 7, 0)
@@ -197,21 +210,29 @@ def process_one(idx, count, ticker, tickers_dict):
     # 갭상승 후 밀림 → 데드캣 가능성 높음
     _gap_pct             = (data['시가'].iloc[-1] - data['종가'].iloc[-2]) / data['종가'].iloc[-2]
 
-    # 상승 + 거래량 결합
+    # 상승 + 거래량 결합 (가중치 낮게)
     volume_price_power   = today_pct * _volume_ratio
 
     # 오늘 반등의 질이 좋은가, 종합점수
-    rebound_power        = max(today_pct, 0) * _close_pos * _tr_value_ratio
-
-    # 많이 깨졌고, 아직 20일선 아래 깊게 있으면 위험
-    _deadcat_risk        = abs(min(_drawdown_60d, 0)) / 50 * max(0, -_dist_to_ma20)
+    rebound_power2       = max(today_pct, 0) * _close_pos
 
     # 반등은 강한데, 구조적 위험은 낮은 종목을 고르기 위한 점수
-    _raw_score           = rebound_power / (1 + _deadcat_risk)
-    bottom_buy_score     = np.clip(_raw_score, 0, np.percentile(_raw_score, 95))
+    bottom_buy_score2    = np.clip(rebound_power2, 0, np.percentile(rebound_power2, 95))
 
 
     # --- build_conditions()가 참조하는 컬럼들을 data에 주입 (스칼라 → 컬럼 브로드캐스트) ---
+    """
+    핵심
+    rebound_from_20d_low   # 가장 중요
+    today_pct              # 기본 모멘텀
+    strong_rebound_score   # threshold 반영
+    
+    중요
+    high_momentum          # 상위 구간 강조
+    rebound_power2          # 구조 결합
+    bottom_buy_score2
+    final_score2
+    """
     rule_features = {
         # 모멘텀
         "today_pct": today_pct,
@@ -221,14 +242,17 @@ def process_one(idx, count, ticker, tickers_dict):
         "rebound_from_20d_low": rebound_from_20d_low,
 
         # 조합
-        "rebound_power": rebound_power,
+        "rebound_power2": rebound_power2,
         "strong_rebound_score": strong_rebound_score,
 
         # 반등의 질, 보조 지표
         "rebound_strength": rebound_strength,
+        "recovery_quality": recovery_quality,
+        "recovery_efficiency": recovery_efficiency,
+
 
         # 종합
-        "bottom_buy_score": bottom_buy_score,
+        "bottom_buy_score2": bottom_buy_score2,
 
         ## 상승 + 거래량 결합
         "volume_price_power": volume_price_power,
@@ -239,11 +263,10 @@ def process_one(idx, count, ticker, tickers_dict):
     ## 좋은 종목 점수 bottom_buy_score를 기준으로 두고, 데드캣 위험이 있으면 점수를 비율로 깎는 구조
     ## bottom_buy_score를 보정하는 감점 계수
     _deadcat_penalty = 0
-    _deadcat_penalty += max(0, (-_drawdown_60d - 40) / 20) * (_dist_to_ma20 < -5)
+    _deadcat_penalty += max(0, (-_drawdown_60d - 40) / 20) * max(0, (-_dist_to_ma20 - 5) / 5)
     _deadcat_penalty += max(0, (7 - _close_pos * 10)) * (today_pct > 7)
     _deadcat_penalty += max(0, (_gap_pct - 0.05) * 10)
-    _deadcat_penalty += max(0, (12 - rebound_from_20d_low) / 10) * (_dist_to_ma20 < -7)
-    final_score2 = bottom_buy_score * np.exp(-_deadcat_penalty * 0.6)
+    final_score2 = bottom_buy_score2 * np.exp(-_deadcat_penalty * 0.6)
     rule_features['final_score2'] = final_score2
 
     ########################################################################
