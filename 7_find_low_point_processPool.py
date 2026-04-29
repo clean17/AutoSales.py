@@ -236,41 +236,16 @@ def process_one(idx, count, ticker, tickers_dict):
 
     ############################  deadcat_filter  ###########################
 
-    deadcat_penalty = 0
-
-    # 1️⃣ 깊은 낙폭 + 추세 미회복 (핵심)
-    if _drawdown_60d < -35 and _dist_to_ma20 < -5:
-        deadcat_penalty += 1.2
-
-    # 2️⃣ 상승은 했는데 종가가 약함 (윗꼬리)
-    if today_pct > 6 and _close_pos < 0.55:
-        deadcat_penalty += 1.0
-
-    # 3️⃣ 갭으로 뜬 후 힘 빠짐
-    if _gap_pct > 0.04 and _close_pos < 0.6:
-        deadcat_penalty += 0.8
-
-    # 4️⃣ 반등은 했는데 여전히 깊은 위치 (구조 불안)
-    if rebound_from_20d_low > 10 and _dist_to_ma20 < -8:
-        deadcat_penalty += 0.8
-
-    # 5️⃣ 거래 없이 뜬 경우 (fake breakout)
-    if volume_price_power < 5 and today_pct > 6:
-        deadcat_penalty += 0.6
-
-    # 6️⃣ 반등 질이 낮은 경우
-    if rebound_strength < 0.25:
-        deadcat_penalty += 0.6
-
-    final_score1 = bottom_buy_score - deadcat_penalty * 2.0
-    final_score2 = bottom_buy_score * np.exp(-deadcat_penalty * 0.7)
-
-    rule_features['deadcat_penalty'] = deadcat_penalty
-    rule_features['final_score1'] = final_score1
+    ## 좋은 종목 점수 bottom_buy_score를 기준으로 두고, 데드캣 위험이 있으면 점수를 비율로 깎는 구조
+    ## bottom_buy_score를 보정하는 감점 계수
+    _deadcat_penalty = 0
+    _deadcat_penalty += max(0, (-_drawdown_60d - 40) / 20) * (_dist_to_ma20 < -5)
+    _deadcat_penalty += max(0, (7 - _close_pos * 10)) * (today_pct > 7)
+    _deadcat_penalty += max(0, (_gap_pct - 0.05) * 10)
+    _deadcat_penalty += max(0, (12 - rebound_from_20d_low) / 10) * (_dist_to_ma20 < -7)
+    final_score2 = bottom_buy_score * np.exp(-_deadcat_penalty * 0.6)
     rule_features['final_score2'] = final_score2
 
-    # if deadcat_penalty >= 2.0:
-    #     return
     ########################################################################
 
     m_data = data[-60:] # 뒤에서 x개 (3개월 정도)
