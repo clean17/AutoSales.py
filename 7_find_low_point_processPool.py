@@ -157,107 +157,160 @@ def process_one(idx, count, ticker, tickers_dict):
     # feature 만들기
 
     last = data.iloc[-1]
-    last5_ret            = data['등락률'].tail(5)
     last15_ret           = data['등락률'].tail(15)
-    last20_ret           = data['등락률'].tail(20)
     last60_ret           = data['등락률'].tail(60)
+    v15         = last15_ret.std()
+    v60         = last60_ret.std()
 
 
-    # 과매도 전환 지표
-    _RSI14               = data['RSI14'].iloc[-1]
-    _RSI_rebound         = _RSI14 - data['RSI14'].iloc[-3]
+    MACD_hist_delta      = data['MACD_hist'].iloc[-1] - data['MACD_hist'].iloc[-2]
+    rebound_from_20d_low = data['rebound_from_20d_low'].iloc[-1]
+
+    _volume_ratio        = last['volume_ratio']
+    _volume_ratio_3d_avg  = data['volume_ratio'].iloc[-3:].mean()
+
+    # 오늘 거래대금 변동률
+    if mean_prev3 <= 0 or not np.isfinite(mean_prev3):
+        _tr_value_ratio1  = 0
+    else:
+        _tr_value_ratio1  = (today_tr_val / mean_prev3) * 0.4 + (today_tr_val / mean_prev5) * 0.6
+
+    # 당일 등락률
+    today_pct            = round(last['등락률'], 2)
+    recovery_efficiency  = rebound_from_20d_low * np.tanh(today_pct / 7)
+
+    # 상승 + 거래량 결합 (가중치 낮게)
+    volume_price_power   = today_pct * _volume_ratio
+
+    # 이미 많이 오른 종목 제거
+    recent_runup = data['등락률'].iloc[-5:-1].sum()
+
+
+    # -------------------------------
+    # reversal / breakout score
+    # -------------------------------
+
+    # 반등형 스코어 (초입)
+    reversal_score = (
+            np.exp(-rebound_from_20d_low / 15) +          # 초입 선호
+            np.tanh(_tr_value_ratio1) +                   # 거래 유입
+            (1 if MACD_hist_delta > 0 else 0) +           # 모멘텀 전환
+            np.exp(-abs(today_pct - 3) / 2)               # 3~5% 구간
+    )
+
+    # 돌파형 스코어 (불타기)
+    breakout_score = (
+            np.tanh(today_pct / 5) +                      # 강한 상승
+            np.tanh(_tr_value_ratio1) +                   # 거래 유입
+            np.tanh(rebound_from_20d_low / 20) +          # 어느 정도 반등
+            _volume_ratio_3d_avg                           # 거래 지속성
+    )
+
+    score_pattern = max(reversal_score, breakout_score)
+
+    # MACD 반영
+    if MACD_hist_delta < 0:
+        score_pattern *= 0.7
+
+    # -------------------------------
+    # core score (data-driven)
+    # -------------------------------
+
+    core_score = (
+            today_pct * 0.30 +
+            rebound_from_20d_low * 0.30 +
+            volume_price_power * 0.25 +
+            recovery_efficiency * 0.15
+    )
+
+    if MACD_hist_delta < 0:
+        core_score *= 0.75
+    else:
+        core_score *= 1.05
+
+    score_core = core_score
+
+    # -------------------------------
+    # deadcat penalty (공통)
+    # -------------------------------
 
     # 낙폭 위험
     _drawdown_60d        = last['drawdown_60d']
     _dist_to_ma20        = last['dist_to_ma20']
-    # 저점 반등
-    rebound_from_20d_low = data['rebound_from_20d_low'].iloc[-1]
+    deadcat_penalty = (
+            max(0, (-_drawdown_60d - 40) / 20) +
+            max(0, -_dist_to_ma20 / 5)
+    )
+
+    # 최종 점수 (각각)
+    score_pattern_final = score_pattern * np.exp(-deadcat_penalty)
+    score_core_final    = score_core * np.exp(-deadcat_penalty * 0.6)
 
 
-    # 거래 유입
-    _volume_ratio        = last['volume_ratio']
-
-    # 오늘 거래대금 변동률
-    if mean_prev3 <= 0 or not np.isfinite(mean_prev3):
-        _tr_value_ratio  = 0
-    else:
-        _tr_value_ratio  = (today_tr_val / mean_prev3) * 0.4 + (today_tr_val / mean_prev5) * 0.6
-    _tr_value_ratio      = np.log1p(np.clip(_tr_value_ratio, 0, 8.5))
-
-    # 당일 등락률
-    today_pct            = round(last['등락률'], 2)
-    _close_pos           = last['close_pos']
-
-    recovery_quality     = np.sqrt(max(today_pct - 7, 0) * max(rebound_from_20d_low - 12, 0))
-    recovery_efficiency  = rebound_from_20d_low * np.tanh(today_pct / 7)
-
-    # 비선형 필터 (threshold형)
-    # strong_rebound_score = max(today_pct - 7, 0) * max(rebound_from_20d_low - 12, 0)
-    strong_rebound_score = np.sqrt(max(today_pct - 7, 0) * max(rebound_from_20d_low - 12, 0))
-
-    # 상위 구간 강조
-    high_momentum        = max(today_pct - 7, 0)
-
-    # 갭상승 후 밀림 → 데드캣 가능성 높음
-    _gap_pct             = (data['시가'].iloc[-1] - data['종가'].iloc[-2]) / data['종가'].iloc[-2]
-
-    # 상승 + 거래량 결합 (가중치 낮게)
-    _volume_price_power   = today_pct * _volume_ratio
-
-    # 오늘 반등의 질이 좋은가, 종합점수
-    rebound_power2       = today_pct * (0.5 + _close_pos)
-
-    # 반등은 강한데, 구조적 위험은 낮은 종목을 고르기 위한 점수
-    bottom_buy_score    = np.clip(rebound_power2, 0, np.percentile(rebound_power2, 95))
-
-
-    # --- build_conditions()가 참조하는 컬럼들을 data에 주입 (스칼라 → 컬럼 브로드캐스트) ---
     """
     핵심
     rebound_from_20d_low   # 가장 중요
     today_pct              # 기본 모멘텀
-    strong_rebound_score   # threshold 반영
     
-    중요
-    high_momentum          # 상위 구간 강조
-    rebound_power2          # 구조 결합
-    bottom_buy_score
-    final_score2
     """
     rule_features = {
+        "ma5_chg_rate": ma5_chg_rate,                    # 오늘의 5일선 기울기 👍
+        "_tr_value_ratio1": _tr_value_ratio1,
+        "MACD_hist_delta": MACD_hist_delta,
+
         # 모멘텀
         "today_pct": today_pct,
-        "high_momentum": high_momentum,
 
         # 위치
         "rebound_from_20d_low": rebound_from_20d_low,
 
-        # 조합
-        "rebound_power2": rebound_power2,
-        "strong_rebound_score": strong_rebound_score,
 
         # 반등의 질, 보조 지표
-        "recovery_quality": recovery_quality,
         "recovery_efficiency": recovery_efficiency,
 
 
-        # 종합
-        "bottom_buy_score": bottom_buy_score,
 
         ## 상승 + 거래량 결합
-        "volume_price_power": _volume_price_power,
+        "volume_price_power": volume_price_power,
+        "recent_runup": recent_runup,
+
+        "score_pattern": score_pattern_final,
+        "score_core": score_core_final,
+        "deadcat_penalty": deadcat_penalty,
+        "score_mix": 0.7 * score_core_final + 0.3 * score_pattern_final,
+
+        # 데드캣 필터링
+        # "_RSI_rebound": _RSI_rebound,
+        # "_tr_volume_rank_20d": _tr_volume_rank_20d,
+        # "_vol_ratio_15_60": _vol_ratio_15_60,
+        # "_gap_pct": _gap_pct,
     }
+
 
     ############################  deadcat_filter  ###########################
 
-    ## 좋은 종목 점수 bottom_buy_score를 기준으로 두고, 데드캣 위험이 있으면 점수를 비율로 깎는 구조
-    ## bottom_buy_score를 보정하는 감점 계수
-    _deadcat_penalty = 0
-    _deadcat_penalty += max(0, (-_drawdown_60d - 40) / 20) * max(0, (-_dist_to_ma20 - 5) / 5)
-    _deadcat_penalty += max(0, (7 - _close_pos * 10)) * np.tanh(today_pct / 7)
-    _deadcat_penalty += max(0, (_gap_pct - 0.05) * 10)
-    final_score = bottom_buy_score * np.exp(-_deadcat_penalty * 0.6)
-    rule_features['final_score'] = final_score
+    # # 갭상승 후 밀림 → 데드캣 가능성 높음
+    # _gap_pct             = (data['시가'].iloc[-1] - data['종가'].iloc[-2]) / data['종가'].iloc[-2]
+    # if _gap_pct < -0.09:
+    #     return
+    #
+    # _vol_ratio_15_60   = round(v15 / (v60 + 1e-9), 3)                      # 단기 변동성과 장기 변동성을 비교하는 비율
+    # if _vol_ratio_15_60 < 0.24:
+    #     return
+    #
+    # # 과매도 전환 지표
+    # _RSI_rebound         = data['RSI14'].iloc[-1] - data['RSI14'].iloc[-3]
+    # if _RSI_rebound < -15.3:
+    #     return
+    #
+    # _tr_volume_rank_20d = last['tr_volume_rank_20d']                       # 거래량 없는 반등 제거 (최근 20일 평균 거래량과 비교, 평균 0.75)
+    # if _tr_volume_rank_20d < 0.15:
+    #     return
+    #
+    # _close_pos           = last['close_pos']
+    # _rebound_power2       = today_pct * (0.5 + _close_pos)
+    # if _rebound_power2 < 1.66:
+    #     return
 
     ########################################################################
 
