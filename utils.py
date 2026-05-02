@@ -855,7 +855,7 @@ def add_technical_features(data):
 
     # 오늘 거래량이 최근 20일 중 어느 정도 위치냐, (1: 1등, 0.5: 평균)
     # data['volume_rank_20d'] = volume_rank(v, 20)
-    data['tr_volume_rank_20d'] = volume_rank(c * v, 20)
+    # data['tr_volume_rank_20d'] = volume_rank(c * v, 20)
 
     # ★★★ 중기 위치 확인 (추세 필터)
     # data["dist_to_ma5"]  = safe_rate(c.iloc[-1], data["MA5"].iloc[-1])

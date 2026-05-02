@@ -91,7 +91,7 @@ def process_one(idx, count, ticker, tickers_dict):
 
     ########################################################################
 
-    trading_value = data['거래량'] * data['종가']
+    trading_value = data['종가'] * data['거래량']
     today_tr_val = round(trading_value.iloc[-1], 2)                  # 마지막 거래일 거래대금
     mean_prev3 = round(trading_value.iloc[:-1].tail(3).mean(), 2)    # 마지막 3일 거래대금 평균
     mean_prev5 = round(trading_value.iloc[:-1].tail(5).mean(), 2)    # 마지막 3일 거래대금 평균
@@ -186,7 +186,10 @@ def process_one(idx, count, ticker, tickers_dict):
 
     # 거래대금
     tr_value_ratio_tanh  = np.tanh(np.log1p(tr_value_ratio) / 2)
-    tr_volume_rank_20d   = last['tr_volume_rank_20d']
+
+    tr_values_20d = trading_value.iloc[-20:]
+    today_tr_val = tr_values_20d.iloc[-1]
+    tr_volume_rank_20d = (tr_values_20d <= today_tr_val).mean()
 
     # 한달 대비 오늘 거래량.. 변별력 없음
     # _volume_ratio        = last['volume_ratio']
@@ -260,7 +263,6 @@ def process_one(idx, count, ticker, tickers_dict):
     # if _RSI_rebound < -15.3:
     #     return
     #
-    # tr_volume_rank_20d = last['tr_volume_rank_20d']                       # 거래량 없는 반등 제거 (최근 20일 평균 거래량과 비교, 평균 0.75)
     # if tr_volume_rank_20d < 0.15:
     #     return
     #
