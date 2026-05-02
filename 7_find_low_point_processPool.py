@@ -154,19 +154,27 @@ def process_one(idx, count, ticker, tickers_dict):
 
     last = data.iloc[-1]
 
+    ma5_slope_3d  = (ma5_today - data['MA5'].iloc[-4]) / 3
+    ma20_slope_3d = (data['MA20'].iloc[-1] - data['MA20'].iloc[-4]) / 3
+    trend_signal  = ma5_slope_3d - ma20_slope_3d * 0.5
+
     # 최근 7거래일 최대 하락 (오늘 제외, 어제 포함)
     _recent_7_ret     = data['등락률'].iloc[-8:-1]
     max_drop_7d       = _recent_7_ret.min()
     # 하락 일수
-    neg_days_7d       = (_recent_7_ret < 0).sum()
+    # neg_days_7d       = (_recent_7_ret < 0).sum()
 
     # -------------------------------
     # 내부 계산값
     # -------------------------------
     # 하루 변화량 : 빠름, 노이즈 많음, 3일 : 신호는 늦엇지만 안정된 필터용
-    MACD_hist_1d      = data['MACD_hist'].iloc[-1] - data['MACD_hist'].iloc[-2]
-    MACD_hist_3d      = data['MACD_hist'].iloc[-1] - data['MACD_hist'].iloc[-4]
-    MACD_acc          = MACD_hist_1d - (MACD_hist_3d / 3)
+    _MACD_hist_1d      = data['MACD_hist'].iloc[-1] - data['MACD_hist'].iloc[-2]
+    _MACD_hist_3d      = data['MACD_hist'].iloc[-1] - data['MACD_hist'].iloc[-4]
+    _MACD_acc          = _MACD_hist_1d - (_MACD_hist_3d / 3)
+    MACD_rebound_power = (
+            np.tanh(_MACD_acc / 50) * 0.65 +
+            np.tanh(_MACD_hist_3d / 100) * 0.35
+    )
 
     # 오늘 거래대금 변동률 - 내부 계산용
     if mean_prev3 <= 0 or not np.isfinite(mean_prev3) or mean_prev5 <= 0 or not np.isfinite(mean_prev5):
@@ -184,10 +192,21 @@ def process_one(idx, count, ticker, tickers_dict):
     _tr_value_ratio = 20  → score ≈ 0.91
     _tr_value_ratio = 100 → score ≈ 0.98
     """
-    _tr_value_score = np.tanh(np.log1p(_tr_value_ratio) / 2)
+    tr_value_score = np.tanh(np.log1p(_tr_value_ratio) / 2)
 
     # 한달 대비 오늘 거래량.. 변별력 없음
     # _volume_ratio        = last['volume_ratio']
+
+    """
+    days_since_low = 0  → 오늘이 20일 저점
+    days_since_low = 1  → 어제가 20일 저점
+    days_since_low = 5  → 5거래일 전에 저점 찍음
+    days_since_low = 19 → 20거래일 구간 맨 처음이 저점
+    """
+    window = data.iloc[-20:]
+
+    low_idx_pos = window['저가'].values.argmin()   # 최솟값의 인덱스를 반환
+    days_since_low = len(window) - 1 - low_idx_pos
 
     # -------------------------------
     # 핵심 피쳐
@@ -195,6 +214,7 @@ def process_one(idx, count, ticker, tickers_dict):
     today_pct            = round(last['등락률'], 2)
     # 한달 저점대비 얼마나 반등했는지
     rebound_from_20d_low = data['rebound_from_20d_low'].iloc[-1]
+    dist_from_low        = (last['종가'] - rebound_from_20d_low) / rebound_from_20d_low
 
     # 이미 많이 오른 종목 제거.. 변별력 없음
     # _recent_runup = data['등락률'].iloc[-5:-1].sum()
@@ -204,17 +224,6 @@ def process_one(idx, count, ticker, tickers_dict):
     # _dist_to_ma20        = last['dist_to_ma20']
     # _deadcat_penalty     = max(0, (-_drawdown_60d - 40) / 20) + max(0, -_dist_to_ma20 / 5)
 
-    # -------------------------------
-    # 최종 score
-    # -------------------------------
-
-    score = (
-            np.tanh(today_pct / 5) * 0.30 +
-            _tr_value_score * 0.25 +
-            np.tanh(rebound_from_20d_low / 20) * 0.20 +
-            np.tanh(ma5_chg_rate / 4) * 0.15 +
-            np.tanh(MACD_hist_1d / 100) * 0.10
-    )
 
     """
     today_pct                   가장 강력
@@ -224,20 +233,18 @@ def process_one(idx, count, ticker, tickers_dict):
     ma5_chg_rate                추세 전환 신호
     """
     rule_features = {
-        "ma5_chg_rate": ma5_chg_rate,
-        "MACD_hist_1d": MACD_hist_1d,
-        "MACD_hist_3d": MACD_hist_3d,
-        "MACD_acc": MACD_acc,
-
-        "tr_value_ratio ": _tr_value_ratio,
-        "tr_value_score ": _tr_value_score,
-
         "today_pct": today_pct,
-        "max_drop_7d": max_drop_7d,
-        "neg_days_7d": neg_days_7d,
         "rebound_from_20d_low": rebound_from_20d_low,
+        "days_since_low": days_since_low,
+        "dist_from_low": dist_from_low,
+        "tr_value_score ": tr_value_score,
 
-        "score": score,
+        "ma5_chg_rate": ma5_chg_rate,
+        "ma5_slope_3d": ma5_slope_3d,
+        "ma20_slope_3d": ma20_slope_3d,
+        "MACD_rebound_power": MACD_rebound_power,
+
+        "max_drop_7d": max_drop_7d,
 
         # 데드캣 필터링
         # "_RSI_rebound": _RSI_rebound,
@@ -271,6 +278,14 @@ def process_one(idx, count, ticker, tickers_dict):
     # _rebound_power2       = today_pct * (0.5 + _close_pos)
     # if _rebound_power2 < 1.66:
     #     return
+
+    # if score < 0.083:
+    #     return
+
+    if _MACD_hist_1d < -555:
+        return
+    if _MACD_acc < -480:
+        return
 
     ########################################################################
 
