@@ -172,6 +172,7 @@ def process_one(idx, count, ticker, tickers_dict):
     _MACD_hist_1d       = data['MACD_hist'].iloc[-1] - data['MACD_hist'].iloc[-2]
     MACD_hist_3d        = data['MACD_hist'].iloc[-1] - data['MACD_hist'].iloc[-4]
     MACD_acc            = _MACD_hist_1d - (MACD_hist_3d / 3)
+    MACD_hist_3d_rank   = MACD_hist_3d.rank(pct=True)
     # 최소 변별력이 없음
     # MACD_rebound_power = (
     #         np.tanh(MACD_acc / 50) * 0.65 +
@@ -216,10 +217,43 @@ def process_one(idx, count, ticker, tickers_dict):
     # _deadcat_penalty     = max(0, (-_drawdown_60d - 40) / 20) + max(0, -_dist_to_ma20 / 5)
 
     """
-    가격 (today_pct)
-    저점 (dist_from_low)
-    눌림 (max_drop_7d)
-    수급 (tr_value_score)
+    rule_features 설명
+    
+    today_pct
+    - 마지막 날 등락률
+    - 이미 +3.3% 이상 반등한 종목 중에서도 당일 반등 강도를 보기 위한 값
+    
+    trend_signal
+    - 5일선 단기 기울기와 20일선 중기 기울기를 합친 추세 전환 신호
+    - 값이 클수록 단기 반등 힘이 강하고, 저점 반등 초입 가능성이 높음
+    
+    MACD_acc
+    - MACD histogram의 가속도
+    - 단순 상승이 아니라 반등 힘이 빨라지는지를 보기 위한 값
+    - 저점에서 막 튀기 시작하는 순간 포착용
+    
+    MACD_hist_3d
+    - 최근 3거래일 MACD histogram 변화량
+    - 하루짜리 노이즈보다 안정적인 단기 모멘텀 확인용
+    - MACD_acc가 타이밍이면, MACD_hist_3d는 추세 확인 역할
+    
+    dist_from_low
+    - 최근 20일 저가 최저점 대비 현재 종가가 얼마나 올라왔는지
+    - 너무 낮으면 아직 반등 확인 전, 너무 높으면 이미 늦은 구간일 수 있음
+    - 저점 반등 초입 위치 판단용
+    
+    tr_value_ratio
+    - 오늘 거래대금이 최근 3일/5일 평균 대비 얼마나 증가했는지
+    - 단기 수급 유입 강도 확인용
+    
+    tr_volume_rank_20d
+    - 오늘 거래대금이 최근 20거래일 중 어느 정도 위치인지
+    - 오늘 수급이 최근 기준으로 특별한 날인지 확인하는 값
+    
+    max_drop_7d
+    - 오늘 제외 최근 7거래일 중 가장 큰 하락률
+    - 눌림 강도 확인용
+    - 값이 더 작을수록, 예: -3, -5, 더 강한 눌림 후 반등
     """
     rule_features = {
         "today_pct": today_pct,
@@ -227,7 +261,7 @@ def process_one(idx, count, ticker, tickers_dict):
         "trend_signal": trend_signal,
 
         "MACD_acc": MACD_acc,
-        "MACD_hist_3d": MACD_hist_3d,
+        "MACD_hist_3d_rank": MACD_hist_3d_rank,
 
         "dist_from_low": dist_from_low,
 
@@ -261,8 +295,6 @@ def process_one(idx, count, ticker, tickers_dict):
     if _vol_ratio_15_60 < 0.246:
         return
     if _RSI_rebound < -15.247:
-        return
-    if tr_volume_rank_20d < 0.15:
         return
     if _rebound_power < 1.823:
         return
