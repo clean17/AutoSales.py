@@ -51,7 +51,7 @@ render_graph = False
 
 BATCH_SIZE = 20       # 작업 사이즈
 START_OFFSET = 7      # 1이면 어제 기준부터 검증 가능.. 7일 검증을 사용하려면 7사용
-END_OFFSET = 300       # 과거 300거래일까지 생성
+END_OFFSET = 300      # 과거 300거래일까지 생성
 
 
 def process_one(idx, count, ticker, tickers_dict):
@@ -172,7 +172,6 @@ def process_one(idx, count, ticker, tickers_dict):
     _MACD_hist_1d       = data['MACD_hist'].iloc[-1] - data['MACD_hist'].iloc[-2]
     MACD_hist_3d        = data['MACD_hist'].iloc[-1] - data['MACD_hist'].iloc[-4]
     MACD_acc            = _MACD_hist_1d - (MACD_hist_3d / 3)
-    MACD_hist_3d_rank   = MACD_hist_3d.rank(pct=True)
     # 최소 변별력이 없음
     # MACD_rebound_power = (
     #         np.tanh(MACD_acc / 50) * 0.65 +
@@ -261,7 +260,7 @@ def process_one(idx, count, ticker, tickers_dict):
         "trend_signal": trend_signal,
 
         "MACD_acc": MACD_acc,
-        "MACD_hist_3d_rank": MACD_hist_3d_rank,
+        "MACD_hist_3d": MACD_hist_3d,
 
         "dist_from_low": dist_from_low,
 
@@ -547,7 +546,14 @@ if __name__ == "__main__":
         total_up_rate = up_cnt/(shortfall_cnt+up_cnt)*100
 
         # CSV 저장
-        pd.DataFrame(rows).to_csv('csv/low_result_7.csv', index=False) # 인덱스 칼럼 'Unnamed: 0' 생성하지 않음
+        df = pd.DataFrame(rows)
+
+        df["MACD_hist_3d_rank"] = (
+            df.groupby("today")["MACD_hist_3d"]
+            .rank(pct=True)
+        )
+
+        df.to_csv('csv/low_result_7.csv', index=False) # 인덱스 칼럼 'Unnamed: 0' 생성하지 않음
         saved = sort_csv_by_today_desc(
             in_path=r"csv/low_result_7.csv",
             out_path=r"csv/low_result_7_desc.csv",
