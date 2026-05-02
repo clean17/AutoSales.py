@@ -172,6 +172,7 @@ def process_one(idx, count, ticker, tickers_dict):
     _MACD_hist_1d       = data['MACD_hist'].iloc[-1] - data['MACD_hist'].iloc[-2]
     MACD_hist_3d        = data['MACD_hist'].iloc[-1] - data['MACD_hist'].iloc[-4]
     MACD_acc            = _MACD_hist_1d - (MACD_hist_3d / 3)
+    # 최소 변별력이 없음
     # MACD_rebound_power = (
     #         np.tanh(MACD_acc / 50) * 0.65 +
     #         np.tanh(MACD_hist_3d / 100) * 0.35
@@ -221,6 +222,7 @@ def process_one(idx, count, ticker, tickers_dict):
         "today_pct": today_pct,
 
         "trend_signal": trend_signal,
+        "trend_signal_tanh": trend_signal_tanh,
 
         "MACD_acc": MACD_acc,
         "MACD_hist_3d": MACD_hist_3d,
