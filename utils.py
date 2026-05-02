@@ -807,7 +807,9 @@ def add_technical_features(data):
 
     o, h, l, c, v = data[col_o], data[col_h], data[col_l], data[col_c], data[col_v]
 
-    data["등락률"] = (c.pct_change() * 100).replace([np.inf, -np.inf], np.nan).fillna(0)
+    if "등락률" not in data.columns  and "Close" not in data.columns:
+        data["등락률"] = (c.pct_change() * 100).replace([np.inf, -np.inf], np.nan).fillna(0)
+
 
     # 이동평균선
     data['MA5']  = c.rolling(5).mean()
@@ -819,43 +821,48 @@ def add_technical_features(data):
     data['UpperBand'] = data['MA20'] + (2 * data['STD20'])
     data['LowerBand'] = data['MA20'] - (2 * data['STD20'])
     # 볼린저밴드 위치 (0~1)
-    data['BB_perc'] = (c - data['LowerBand']) / (data['UpperBand'] - data['LowerBand'] + 1e-9)
+    # data['BB_perc'] = (c - data['LowerBand']) / (data['UpperBand'] - data['LowerBand'] + 1e-9)
 
     ###########################################################
 
     """
     저점 매수용 지표
     """
-    # ★★★ 저점 대비 회복률
-    rolling_min_20d = c.rolling(20).min()
-    rolling_min_60d = c.rolling(60).min()
-    data['rebound_from_20d_low'] = safe_rate(c.iloc[-1], rolling_min_20d.iloc[-1])
-    data['rebound_from_60d_low'] = safe_rate(c.iloc[-1], rolling_min_60d.iloc[-1])
+    # 60일 최저 종가 대비 상승률
+    # rolling_min_60d = c.rolling(60).min()
+    # data['rebound_from_60d_low'] = safe_rate(c.iloc[-1], rolling_min_60d.iloc[-1])
+
+    # 20일 최저 종가 대비 상승률
+    # rolling_min_20d = c.rolling(20).min()
+    # data['rebound_from_20d_low'] = safe_rate(c.iloc[-1], rolling_min_20d.iloc[-1])
+
+    # 20일 최저 저가 대비 상승률
+    # low_20d = l.iloc[-20:].min()
+    # data['dist_from_low'] = safe_rate(c.iloc[-1], low_20d)
 
     # ★★★ 낙폭 과대 지표
-    rolling_max_20d = c.rolling(20).max()
-    rolling_max_60d = c.rolling(60).max()
-    data['drawdown_20d'] = safe_rate(c.iloc[-1], rolling_max_20d.iloc[-1])
-    data['drawdown_60d'] = safe_rate(c.iloc[-1], rolling_max_60d.iloc[-1])
+    # rolling_max_20d = c.rolling(20).max()
+    # rolling_max_60d = c.rolling(60).max()
+    # data['drawdown_20d'] = safe_rate(c.iloc[-1], rolling_max_20d.iloc[-1])
+    # data['drawdown_60d'] = safe_rate(c.iloc[-1], rolling_max_60d.iloc[-1])
 
     # ★★★ 당일 range 내 종가 위치(0~1)
     # 1 → 종가가 최고가 근처 (강함)
-    data['close_pos'] = (c - l) / (h - l + eps) # 무의미
+    # data['close_pos'] = (c - l) / (h - l + eps) # 무의미
 
     # ★★★ 거래량 급증 신호
-    data['volume_ratio'] = v / v.rolling(20).mean()
+    # data['volume_ratio'] = v / v.rolling(20).mean()
 
     # 오늘 거래량이 최근 20일 중 어느 정도 위치냐, (1: 1등, 0.5: 평균)
-    data['volume_rank_20d'] = volume_rank(v, 20)
-    data['tr_volume_rank_20d'] = volume_rank(c * v, 20)
+    # data['volume_rank_20d'] = volume_rank(v, 20)
+    # data['tr_volume_rank_20d'] = volume_rank(c * v, 20)
 
     # ★★★ 중기 위치 확인 (추세 필터)
     # data["dist_to_ma5"]  = safe_rate(c.iloc[-1], data["MA5"].iloc[-1])
-    data["dist_to_ma20"] = safe_rate(c.iloc[-1], data["MA20"].iloc[-1])
+    # data["dist_to_ma20"] = safe_rate(c.iloc[-1], data["MA20"].iloc[-1])
 
     # data['upper_tail_ratio'] = (h - c) / (h - l + 1e-9) # 무의미
-
-    data['body_ratio'] = abs(c - o) / (h - l + 1e-9)
+    # data['body_ratio'] = abs(c - o) / (h - l + 1e-9)
 
     ###########################################################
     # === 추가 지표 ===

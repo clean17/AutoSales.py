@@ -203,18 +203,22 @@ def process_one(idx, count, ticker, tickers_dict):
     days_since_low = 5  → 5거래일 전에 저점 찍음
     days_since_low = 19 → 20거래일 구간 맨 처음이 저점
     """
-    window = data.iloc[-20:]
-
-    low_idx_pos = window['저가'].values.argmin()   # 최솟값의 인덱스를 반환
+    # 20일 최저점 발생일 대비 몇 일 지났는지
+    window         = data.iloc[-20:]
+    low_idx_pos    = window['저가'].values.argmin()   # 최솟값의 인덱스를 반환
     days_since_low = len(window) - 1 - low_idx_pos
 
-    # -------------------------------
-    # 핵심 피쳐
-    # -------------------------------
+    # 20일 최저점 대비 몇 % 올라왔는지
+    low_20d        = data['저가'].iloc[-20:].min()
+    dist_from_low  = safe_rate(last['종가'], low_20d)
+
+    # 반등 필터
+    early_rebound = (
+            (days_since_low <= 5) &
+            (dist_from_low <= 15)
+    )
+
     today_pct            = round(last['등락률'], 2)
-    # 한달 저점대비 얼마나 반등했는지
-    rebound_from_20d_low = data['rebound_from_20d_low'].iloc[-1]
-    dist_from_low        = (last['종가'] - rebound_from_20d_low) / rebound_from_20d_low
 
     # 이미 많이 오른 종목 제거.. 변별력 없음
     # _recent_runup = data['등락률'].iloc[-5:-1].sum()
@@ -224,25 +228,24 @@ def process_one(idx, count, ticker, tickers_dict):
     # _dist_to_ma20        = last['dist_to_ma20']
     # _deadcat_penalty     = max(0, (-_drawdown_60d - 40) / 20) + max(0, -_dist_to_ma20 / 5)
 
-
     """
     today_pct                   가장 강력
-    rebound_from_20d_low        저점 전략 핵심
     tr_value_score              거래대금
     max_drop_7d                 눌림 조건 핵심
     ma5_chg_rate                추세 전환 신호
     """
     rule_features = {
         "today_pct": today_pct,
-        "rebound_from_20d_low": rebound_from_20d_low,
+        "MACD_rebound_power": MACD_rebound_power,
         "days_since_low": days_since_low,
         "dist_from_low": dist_from_low,
-        "tr_value_score ": tr_value_score,
+        "early_rebound": early_rebound,
+        "tr_value_score": tr_value_score,
 
         "ma5_chg_rate": ma5_chg_rate,
         "ma5_slope_3d": ma5_slope_3d,
         "ma20_slope_3d": ma20_slope_3d,
-        "MACD_rebound_power": MACD_rebound_power,
+        "trend_signal": trend_signal,
 
         "max_drop_7d": max_drop_7d,
 
