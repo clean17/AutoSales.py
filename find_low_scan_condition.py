@@ -9,10 +9,38 @@ import heapq
 from itertools import count
 
 # df = pd.read_csv("csv/low_result_7_desc.csv")
-df = pd.read_csv("csv/low_result_7_desc2.csv")
+df = pd.read_csv("csv/low_result_7_desc.csv")
 # df = pd.read_csv("csv/low_result_us_6_desc.csv")   # 미장
 
-MIN_RATE = 0.74
+"""
+MIN_RATE
+0.75 → 너무 많음 (쓰레기 룰 포함)
+0.80 → 기본선
+0.82~0.85 → 베스트
+
+MIN_CNT
+15 → 과적합 시작
+20 → 최소
+25 → 안정 시작
+30+ → 실전급
+
+MAX_DEPTH
+3 → 너무 단순
+4 → 베스트
+5 → 과적합 증가
+>>
+depth4 → cnt 30
+depth5 → cnt 20 이하
+
+EXPAND_RATIO
+0.40 → 너무 많이 퍼짐
+0.45 → 안정
+0.50 → 공격적 필터
+"""
+MIN_RATE = 0.82
+MIN_CNT  = 25
+MAX_DEPTH = 4
+EXPAND_RATIO = 0.45
 # TARGET_COL = "validation_chg_rate"         # 검증등락률
 # target = (df[TARGET_COL].to_numpy() >= 7)  # 7퍼 이상 검증 통과
 
@@ -36,6 +64,16 @@ exclude = {
     "validation_chg_rate7",
 
     "hit_day", "is_success", "target",
+
+    "_gap_pct",
+    "_vol_ratio_15_60",
+    "_RSI_rebound",
+    "_rebound_power",
+    "_MACD_hist_1d",
+    "MACD_hist_3d",
+    # "trend_signal_tanh",
+    # "dist_from_low_tanh",
+    # "tr_value_ratio_tanh",
 }
 
 features = [c for c in df.columns if c not in exclude]
@@ -80,19 +118,34 @@ for f in features:
 
 
 feature_groups = {
-    "ma5_chg_rate": "MOMENTUM",
-    "vol_ratio": "VOLATILITY",
-    "volume_rank_20d": "VOLUME",
-    "three_m_max_cur": "POSITION",
-    "close_pos": "CANDLE",
+    # 가격 / 당일 반등 강도
+    "today_pct": "PRICE",
+
+    # 추세 전환
+    "trend_signal": "TREND",
+
+    # MACD 모멘텀
+    "MACD_acc": "MACD",
+    "MACD_hist_3d_rank": "MACD",
+
+    # 저점 위치
+    "dist_from_low": "POSITION",
+
+    # 수급
+    "tr_value_ratio": "VOLUME",
+    "tr_volume_rank_20d": "VOLUME",
+
+    # 눌림 강도
+    "max_drop_7d": "DROP",
 }
 
 group_limits = {
-    "MOMENTUM": 1,
-    "VOLATILITY": 1,
-    "VOLUME": 1,
+    "PRICE": 1,
+    "TREND": 1,
+    "MACD": 2,
     "POSITION": 1,
-    "CANDLE": 1,
+    "VOLUME": 2,
+    "DROP": 1,
 }
 
 
@@ -111,7 +164,7 @@ def mine_rules(
         beam=400,
         expand_ratio=0.45,
         cnt_priority_ratio=0.85,   # <-- 여기부터 cnt를 더 중요하게 볼 임계치
-        top_n=None,                # 원하면 최종 결과 상위 N개만 리턴
+        top_n=500,                # 원하면 최종 결과 상위 N개만 리턴
         #  그룹 제약 추가
         feature_groups=None,     # dict: feature_name -> group_name
         group_limits=None,       # dict: group_name -> max_allowed_in_rule
@@ -193,7 +246,7 @@ def mine_rules(
 
                 m = base_mask & lmask
                 cnt = int(m.sum())
-                if cnt < min_count:
+                if cnt < MIN_CNT:
                     continue
 
                 up = int((m & target).sum())
@@ -231,7 +284,7 @@ def mine_rules(
             break
 
         tail = new[-1]
-        print("tail ratio,cnt:", tail[4], tail[5], "conds:", tail[3])
+        print("tail ratio:", round(tail[4],3), "cnt:", tail[5], "conds:", tail[3])
 
         beams = [(m, conds) for _, _, m, conds, _, _ in new]
 
@@ -281,7 +334,7 @@ def test_condition(name, cond, df, verbose=False):
     if ratio < MIN_RATE:
         return False
 
-    if len(sub) < 19:
+    if len(sub) < MIN_CNT:
         return False
 
     if verbose:
@@ -313,12 +366,12 @@ def rule_to_code(name, conds, thr_round=3):
 # 국장
 rules = mine_rules(
     min_ratio=MIN_RATE,
-    min_count=20,
-    max_depth=4,
+    min_count=MIN_CNT,
+    max_depth=MAX_DEPTH,
     beam=30000,
-    expand_ratio=0.40,
+    expand_ratio=EXPAND_RATIO,
     cnt_priority_ratio=MIN_RATE,
-    top_n=1000,
+    top_n=500,
     feature_groups=feature_groups,
     group_limits=group_limits,
 )
@@ -338,6 +391,19 @@ selected = []  # (name, conds)만 저장해두고 파일로 씀
 # for i, (cnt, ratio, up, conds) in enumerate(rules[:top_n], start=1):
     # name = f"rule_{i:03d}__n{cnt}__r{ratio:.3f}"
 for i, (cnt, ratio, up, conds, score) in enumerate(rules[:top_n], start=1):
+
+    # 후처리 1: 너무 작은 표본 제거
+    if cnt < MIN_CNT:
+        continue
+
+    # 후처리 2: 성공률 낮은 룰 제거
+    if ratio < MIN_RATE:
+        continue
+
+    # 후처리 3: 너무 깊은 룰 제거
+    if len(conds) > MAX_DEPTH:
+        continue
+
     name = f"rule_{i:03d}__n{cnt}__r{ratio:.3f}__s{score:.2f}"
 
     # df로 mask 생성
