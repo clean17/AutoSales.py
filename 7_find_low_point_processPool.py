@@ -66,8 +66,8 @@ def process_one(idx, count, ticker, tickers_dict):
     df = safe_read_pickle(filepath)
 
     # 데이터가 부족하면 패스
-    if df.empty or len(df) < 70:
-        return
+    if df is None or df.empty or len(df) < 70:
+        return None
 
     # 과거 데이터(data)와 / 검증 데이터(remaining_data)로 분리
     # [0:150](0~149), idx = 10 >> [0:140](0~139) / [140:](140~149)
@@ -132,10 +132,6 @@ def process_one(idx, count, ticker, tickers_dict):
     ma5_yesterday = data['MA5'].iloc[-2]
     ma5_chg_rate = round(safe_rate(ma5_today, ma5_yesterday), 3)
 
-    # 데드캣 바운드 제거
-    # if ma5_chg_rate <= 0:
-    #     return
-
     """
     depth4 (진입 gate) >> 실패 줄이기
     - 오늘 +3% 이상
@@ -146,8 +142,8 @@ def process_one(idx, count, ticker, tickers_dict):
     - find_low_scan_condition.py 스크립트로 만든 조건
     """
 
-    # 최근 12일 5일선이 20일선보다 낮은데 3% 하락이 있으면서 오늘 4% 상승 ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-    signal = signal_any_drop(data, 7, 3.0, -2.5)
+    # 오늘 제외 최근 7일 5일선이 20일선보다 계속 낮은데 -2.5% 하락이 있으면서 오늘 3.3% 상승 ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+    signal = signal_any_drop(data, 7, 3.3, -2.5)
     # signal = signal_any_drop(data, 8, 3.5, -3.0)
     if not signal:
         return
@@ -157,127 +153,91 @@ def process_one(idx, count, ticker, tickers_dict):
     # feature 만들기
 
     last = data.iloc[-1]
-    last15_ret           = data['등락률'].tail(15)
-    last60_ret           = data['등락률'].tail(60)
-    v15         = last15_ret.std()
-    v60         = last60_ret.std()
 
+    # 최근 7거래일 최대 하락 (오늘 제외, 어제 포함)
+    _recent_7_ret     = data['등락률'].iloc[-8:-1]
+    max_drop_7d       = _recent_7_ret.min()
+    # 하락 일수
+    neg_days_7d       = (_recent_7_ret < 0).sum()
 
-    MACD_hist_delta      = data['MACD_hist'].iloc[-1] - data['MACD_hist'].iloc[-2]
+    # -------------------------------
+    # 내부 계산값
+    # -------------------------------
+    # 하루 변화량 : 빠름, 노이즈 많음, 3일 : 신호는 늦엇지만 안정된 필터용
+    MACD_hist_1d      = data['MACD_hist'].iloc[-1] - data['MACD_hist'].iloc[-2]
+    MACD_hist_3d      = data['MACD_hist'].iloc[-1] - data['MACD_hist'].iloc[-4]
+    MACD_acc          = MACD_hist_1d - (MACD_hist_3d / 3)
+
+    # 오늘 거래대금 변동률 - 내부 계산용
+    if mean_prev3 <= 0 or not np.isfinite(mean_prev3) or mean_prev5 <= 0 or not np.isfinite(mean_prev5):
+        _tr_value_ratio  = 0
+    else:
+        _tr_value_ratio  = (today_tr_val / mean_prev3) * 0.4 + (today_tr_val / mean_prev5) * 0.6
+
+    """
+    거래대금 폭증 값을 안정적인 점수로 바꾸기 위함
+    일정 이상이면 "충분히 강한 돈이 들어왔다"로 본다
+    _tr_value_ratio = 1   → score ≈ 0.33
+    _tr_value_ratio = 2   → score ≈ 0.50
+    _tr_value_ratio = 5   → score ≈ 0.71
+    _tr_value_ratio = 10  → score ≈ 0.83
+    _tr_value_ratio = 20  → score ≈ 0.91
+    _tr_value_ratio = 100 → score ≈ 0.98
+    """
+    _tr_value_score = np.tanh(np.log1p(_tr_value_ratio) / 2)
+
+    # 한달 대비 오늘 거래량.. 변별력 없음
+    # _volume_ratio        = last['volume_ratio']
+
+    # -------------------------------
+    # 핵심 피쳐
+    # -------------------------------
+    today_pct            = round(last['등락률'], 2)
+    # 한달 저점대비 얼마나 반등했는지
     rebound_from_20d_low = data['rebound_from_20d_low'].iloc[-1]
 
-    _volume_ratio        = last['volume_ratio']
-    _volume_ratio_3d_avg  = data['volume_ratio'].iloc[-3:].mean()
+    # 이미 많이 오른 종목 제거.. 변별력 없음
+    # _recent_runup = data['등락률'].iloc[-5:-1].sum()
 
-    # 오늘 거래대금 변동률
-    if mean_prev3 <= 0 or not np.isfinite(mean_prev3):
-        _tr_value_ratio1  = 0
-    else:
-        _tr_value_ratio1  = (today_tr_val / mean_prev3) * 0.4 + (today_tr_val / mean_prev5) * 0.6
-
-    # 당일 등락률
-    today_pct            = round(last['등락률'], 2)
-    recovery_efficiency  = rebound_from_20d_low * np.tanh(today_pct / 7)
-
-    # 상승 + 거래량 결합 (가중치 낮게)
-    volume_price_power   = today_pct * _volume_ratio
-
-    # 이미 많이 오른 종목 제거
-    recent_runup = data['등락률'].iloc[-5:-1].sum()
-
+    # 데드캣 패널티.. 변별력 없음
+    # _drawdown_60d        = last['drawdown_60d']
+    # _dist_to_ma20        = last['dist_to_ma20']
+    # _deadcat_penalty     = max(0, (-_drawdown_60d - 40) / 20) + max(0, -_dist_to_ma20 / 5)
 
     # -------------------------------
-    # reversal / breakout score
+    # 최종 score
     # -------------------------------
 
-    # 반등형 스코어 (초입)
-    reversal_score = (
-            np.exp(-rebound_from_20d_low / 15) +          # 초입 선호
-            np.tanh(_tr_value_ratio1) +                   # 거래 유입
-            (1 if MACD_hist_delta > 0 else 0) +           # 모멘텀 전환
-            np.exp(-abs(today_pct - 3) / 2)               # 3~5% 구간
+    score = (
+            np.tanh(today_pct / 5) * 0.30 +
+            _tr_value_score * 0.25 +
+            np.tanh(rebound_from_20d_low / 20) * 0.20 +
+            np.tanh(ma5_chg_rate / 4) * 0.15 +
+            np.tanh(MACD_hist_1d / 100) * 0.10
     )
-
-    # 돌파형 스코어 (불타기)
-    breakout_score = (
-            np.tanh(today_pct / 5) +                      # 강한 상승
-            np.tanh(_tr_value_ratio1) +                   # 거래 유입
-            np.tanh(rebound_from_20d_low / 20) +          # 어느 정도 반등
-            _volume_ratio_3d_avg                           # 거래 지속성
-    )
-
-    score_pattern = max(reversal_score, breakout_score)
-
-    # MACD 반영
-    if MACD_hist_delta < 0:
-        score_pattern *= 0.7
-
-    # -------------------------------
-    # core score (data-driven)
-    # -------------------------------
-
-    core_score = (
-            today_pct * 0.30 +
-            rebound_from_20d_low * 0.30 +
-            volume_price_power * 0.25 +
-            recovery_efficiency * 0.15
-    )
-
-    if MACD_hist_delta < 0:
-        core_score *= 0.75
-    else:
-        core_score *= 1.05
-
-    score_core = core_score
-
-    # -------------------------------
-    # deadcat penalty (공통)
-    # -------------------------------
-
-    # 낙폭 위험
-    _drawdown_60d        = last['drawdown_60d']
-    _dist_to_ma20        = last['dist_to_ma20']
-    deadcat_penalty = (
-            max(0, (-_drawdown_60d - 40) / 20) +
-            max(0, -_dist_to_ma20 / 5)
-    )
-
-    # 최종 점수 (각각)
-    score_pattern_final = score_pattern * np.exp(-deadcat_penalty)
-    score_core_final    = score_core * np.exp(-deadcat_penalty * 0.6)
-
 
     """
-    핵심
-    rebound_from_20d_low   # 가장 중요
-    today_pct              # 기본 모멘텀
-    
+    today_pct                   가장 강력
+    rebound_from_20d_low        저점 전략 핵심
+    tr_value_score              거래대금
+    max_drop_7d                 눌림 조건 핵심
+    ma5_chg_rate                추세 전환 신호
     """
     rule_features = {
-        "ma5_chg_rate": ma5_chg_rate,                    # 오늘의 5일선 기울기 👍
-        "_tr_value_ratio1": _tr_value_ratio1,
-        "MACD_hist_delta": MACD_hist_delta,
+        "ma5_chg_rate": ma5_chg_rate,
+        "MACD_hist_1d": MACD_hist_1d,
+        "MACD_hist_3d": MACD_hist_3d,
+        "MACD_acc": MACD_acc,
 
-        # 모멘텀
+        "tr_value_ratio ": _tr_value_ratio,
+        "tr_value_score ": _tr_value_score,
+
         "today_pct": today_pct,
-
-        # 위치
+        "max_drop_7d": max_drop_7d,
+        "neg_days_7d": neg_days_7d,
         "rebound_from_20d_low": rebound_from_20d_low,
 
-
-        # 반등의 질, 보조 지표
-        "recovery_efficiency": recovery_efficiency,
-
-
-
-        ## 상승 + 거래량 결합
-        "volume_price_power": volume_price_power,
-        "recent_runup": recent_runup,
-
-        "score_pattern": score_pattern_final,
-        "score_core": score_core_final,
-        "deadcat_penalty": deadcat_penalty,
-        "score_mix": 0.7 * score_core_final + 0.3 * score_pattern_final,
+        "score": score,
 
         # 데드캣 필터링
         # "_RSI_rebound": _RSI_rebound,
@@ -294,7 +254,7 @@ def process_one(idx, count, ticker, tickers_dict):
     # if _gap_pct < -0.09:
     #     return
     #
-    # _vol_ratio_15_60   = round(v15 / (v60 + 1e-9), 3)                      # 단기 변동성과 장기 변동성을 비교하는 비율
+    # _vol_ratio_15_60   = round(data['등락률'].tail(15).std() / (data['등락률'].tail(60).std() + 1e-9), 3)                      # 단기 변동성과 장기 변동성을 비교하는 비율
     # if _vol_ratio_15_60 < 0.24:
     #     return
     #
