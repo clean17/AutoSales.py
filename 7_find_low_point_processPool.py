@@ -157,7 +157,7 @@ def process_one(idx, count, ticker, tickers_dict):
     _ma5_slope_3d       = (ma5_today - data['MA5'].iloc[-4]) / 3
     _ma20_slope_3d      = (data['MA20'].iloc[-1] - data['MA20'].iloc[-4]) / 3
     trend_signal        = _ma5_slope_3d - _ma20_slope_3d * 0.5
-    trend_signal_tanh   = np.tanh(trend_signal / 50)
+    # trend_signal_tanh   = np.tanh(trend_signal / 50)
 
     # 최근 7거래일 최대 하락 (오늘 제외, 어제 포함)
     _recent_7_ret       = data['등락률'].iloc[-8:-1]
@@ -185,7 +185,7 @@ def process_one(idx, count, ticker, tickers_dict):
         tr_value_ratio = (today_tr_val / mean_prev3) * 0.4 + (today_tr_val / mean_prev5) * 0.6
 
     # 거래대금
-    tr_value_ratio_tanh  = np.tanh(np.log1p(tr_value_ratio) / 2)
+    # tr_value_ratio_tanh  = np.tanh(np.log1p(tr_value_ratio) / 2)
 
     tr_values_20d = trading_value.iloc[-20:]
     today_tr_val = tr_values_20d.iloc[-1]
@@ -203,7 +203,7 @@ def process_one(idx, count, ticker, tickers_dict):
     # 20일 최저점 대비 몇 % 올라왔는지
     low_20d              = data['저가'].iloc[-20:].min()
     dist_from_low        = safe_rate(last['종가'], low_20d)
-    dist_from_low_tanh   = np.tanh(dist_from_low / 20)
+    # dist_from_low_tanh   = np.tanh(dist_from_low / 20)
 
     today_pct            = round(last['등락률'], 2)
 
@@ -225,52 +225,46 @@ def process_one(idx, count, ticker, tickers_dict):
         "today_pct": today_pct,
 
         "trend_signal": trend_signal,
-        "trend_signal_tanh": trend_signal_tanh,
 
         "MACD_acc": MACD_acc,
         "MACD_hist_3d": MACD_hist_3d,
 
         "dist_from_low": dist_from_low,
-        "dist_from_low_tanh": dist_from_low_tanh,
 
         "tr_value_ratio": tr_value_ratio,
-        "tr_value_ratio_tanh": tr_value_ratio_tanh,
         "tr_volume_rank_20d": tr_volume_rank_20d,
 
         "max_drop_7d": max_drop_7d,
-
-        # 데드캣 필터링
-        # "_RSI_rebound": _RSI_rebound,
-        # "tr_volume_rank_20d": tr_volume_rank_20d,
-        # "_vol_ratio_15_60": _vol_ratio_15_60,
-        # "_gap_pct": _gap_pct,
     }
 
 
     ############################  deadcat_filter  ###########################
 
-    # # 갭상승 후 밀림 → 데드캣 가능성 높음
-    # _gap_pct             = (data['시가'].iloc[-1] - data['종가'].iloc[-2]) / data['종가'].iloc[-2]
+    _gap_pct              = (data['시가'].iloc[-1] - data['종가'].iloc[-2]) / data['종가'].iloc[-2]
+    _vol_ratio_15_60      = round(data['등락률'].tail(15).std() / (data['등락률'].tail(60).std() + 1e-9), 3)   # 단기 변동성과 장기 변동성을 비교하는 비율
+    _RSI_rebound          = data['RSI14'].iloc[-1] - data['RSI14'].iloc[-3]
+    _close_pos            = last['close_pos']
+    _rebound_power        = today_pct * (0.5 + _close_pos)
+
+    other_rule_features = {
+        "_gap_pct": _gap_pct,
+        "_vol_ratio_15_60": _vol_ratio_15_60,
+        "_RSI_rebound": _RSI_rebound,
+        "_rebound_power": _rebound_power,
+    }
+
+    rule_features.update(other_rule_features)
+
     # if _gap_pct < -0.09:
     #     return
-    #
-    # _vol_ratio_15_60   = round(data['등락률'].tail(15).std() / (data['등락률'].tail(60).std() + 1e-9), 3)                      # 단기 변동성과 장기 변동성을 비교하는 비율
     # if _vol_ratio_15_60 < 0.24:
     #     return
-    #
-    # # 과매도 전환 지표
-    # _RSI_rebound         = data['RSI14'].iloc[-1] - data['RSI14'].iloc[-3]
     # if _RSI_rebound < -15.3:
     #     return
-    #
     # if tr_volume_rank_20d < 0.15:
     #     return
-    #
-    # _close_pos           = last['close_pos']
-    # _rebound_power2       = today_pct * (0.5 + _close_pos)
-    # if _rebound_power2 < 1.66:
+    # if _rebound_power < 1.66:
     #     return
-
     # if _MACD_hist_1d < -555:
     #     return
     # if MACD_acc < -480:
