@@ -848,7 +848,7 @@ def add_technical_features(data):
 
     # ★★★ 당일 range 내 종가 위치(0~1)
     # 1 → 종가가 최고가 근처 (강함)
-    # data['close_pos'] = (c - l) / (h - l + eps) # 무의미
+    data['close_pos'] = (c - l) / (h - l + eps) # 무의미
 
     # ★★★ 거래량 급증 신호
     # data['volume_ratio'] = v / v.rolling(20).mean()

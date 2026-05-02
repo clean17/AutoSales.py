@@ -251,24 +251,25 @@ def process_one(idx, count, ticker, tickers_dict):
         "_vol_ratio_15_60": _vol_ratio_15_60,
         "_RSI_rebound": _RSI_rebound,
         "_rebound_power": _rebound_power,
+        "_MACD_hist_1d": _MACD_hist_1d,
     }
 
     rule_features.update(other_rule_features)
 
-    # if _gap_pct < -0.09:
-    #     return
-    # if _vol_ratio_15_60 < 0.24:
-    #     return
-    # if _RSI_rebound < -15.3:
-    #     return
-    # if tr_volume_rank_20d < 0.15:
-    #     return
-    # if _rebound_power < 1.66:
-    #     return
-    # if _MACD_hist_1d < -555:
-    #     return
-    # if MACD_acc < -480:
-    #     return
+    if _gap_pct < -0.092:
+        return
+    if _vol_ratio_15_60 < 0.246:
+        return
+    if _RSI_rebound < -15.247:
+        return
+    if tr_volume_rank_20d < 0.15:
+        return
+    if _rebound_power < 1.823:
+        return
+    if _MACD_hist_1d < -553.4:
+        return
+    if MACD_acc < -479.478:
+        return
 
     ########################################################################
 
