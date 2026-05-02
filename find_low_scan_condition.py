@@ -37,7 +37,7 @@ EXPAND_RATIO
 0.45 → 안정
 0.50 → 공격적 필터
 """
-MIN_RATE = 0.82
+MIN_RATE = 0.80
 MIN_CNT  = 25
 MAX_DEPTH = 4
 EXPAND_RATIO = 0.45
@@ -331,10 +331,10 @@ def test_condition(name, cond, df, verbose=False):
     up_cnt = (sub["is_success"] == 1).sum()            # 동적 검증등락률
     ratio = up_cnt / len(sub)
 
-    if ratio < MIN_RATE:
+    if ratio < 0.70:
         return False
 
-    if len(sub) < MIN_CNT:
+    if len(sub) < 15:
         return False
 
     if verbose:
@@ -371,7 +371,7 @@ rules = mine_rules(
     beam=30000,
     expand_ratio=EXPAND_RATIO,
     cnt_priority_ratio=MIN_RATE,
-    top_n=500,
+    top_n=1000,
     feature_groups=feature_groups,
     group_limits=group_limits,
 )
@@ -391,19 +391,6 @@ selected = []  # (name, conds)만 저장해두고 파일로 씀
 # for i, (cnt, ratio, up, conds) in enumerate(rules[:top_n], start=1):
     # name = f"rule_{i:03d}__n{cnt}__r{ratio:.3f}"
 for i, (cnt, ratio, up, conds, score) in enumerate(rules[:top_n], start=1):
-
-    # 후처리 1: 너무 작은 표본 제거
-    if cnt < MIN_CNT:
-        continue
-
-    # 후처리 2: 성공률 낮은 룰 제거
-    if ratio < MIN_RATE:
-        continue
-
-    # 후처리 3: 너무 깊은 룰 제거
-    if len(conds) > MAX_DEPTH:
-        continue
-
     name = f"rule_{i:03d}__n{cnt}__r{ratio:.3f}__s{score:.2f}"
 
     # df로 mask 생성
