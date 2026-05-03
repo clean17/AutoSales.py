@@ -47,11 +47,11 @@ output_dir = 'F:\\5below20_test'
 
 # 목표 검증 수익률
 VALIDATION_TARGET_RETURN = 7
-render_graph = False
+render_graph = True
 
 BATCH_SIZE = 20       # 작업 사이즈
-START_OFFSET = 7      # 1이면 어제 기준부터 검증 가능.. 7일 검증을 사용하려면 7사용
-END_OFFSET = 300      # 과거 300거래일까지 생성
+START_OFFSET = 15      # 1이면 어제 기준부터 검증 가능.. 7일 검증을 사용하려면 7사용
+END_OFFSET = 30      # 과거 300거래일까지 생성
 
 
 def process_one(idx, count, ticker, tickers_dict):
@@ -348,31 +348,33 @@ def process_one(idx, count, ticker, tickers_dict):
     for k, v in rule_features.items():
         data[k] = v
 
+    if "MACD_hist_3d_rank" not in data.columns:
+        data["MACD_hist_3d_rank"] = np.nan
 
     # 여러 모듈(modules)에서 조건(rule)을 검사해서, 하나라도 만족하면 해당 모듈/룰을 선택하는 로직
-    # for mod in modules:
-    #     try:
-    #         rule_masks = mod.build_conditions(data)   # dict: rule_name -> Series[bool]
-    #     except KeyError as e:
-    #         print(f"[{ticker}] rule build_conditions KeyError in {mod.__name__}: {e} (missing column in data)")
-    #         return
-    #
-    #     RULE_NAMES = mod.RULE_NAMES
-    #
-    #     true_conds = [
-    #         name for name in RULE_NAMES
-    #         if name in rule_masks and bool(rule_masks[name].iloc[-1])
-    #     ]
-    #
-    #     # 이 모듈에서 하나라도 True면 통과 → 다음 로직 진행
-    #     if true_conds:
-    #         # 필요하면 어떤 모듈/룰이었는지 저장
-    #         matched_module = mod.__name__
-    #         matched_rules = true_conds
-    #         break
-    # else:
-    #     # 모든 모듈을 다 봤는데도 True가 하나도 없으면 pass
-    #     return
+    for mod in modules:
+        try:
+            rule_masks = mod.build_conditions(data)   # dict: rule_name -> Series[bool]
+        except KeyError as e:
+            print(f"[{ticker}] rule build_conditions KeyError in {mod.__name__}: {e} (missing column in data)")
+            return
+
+        RULE_NAMES = mod.RULE_NAMES
+
+        true_conds = [
+            name for name in RULE_NAMES
+            if name in rule_masks and bool(rule_masks[name].iloc[-1])
+        ]
+
+        # 이 모듈에서 하나라도 True면 통과 → 다음 로직 진행
+        if true_conds:
+            # 필요하면 어떤 모듈/룰이었는지 저장
+            matched_module = mod.__name__
+            matched_rules = true_conds
+            break
+    else:
+        # 모든 모듈을 다 봤는데도 True가 하나도 없으면 pass
+        return
 
 
     ########################################################################
@@ -456,7 +458,7 @@ if __name__ == "__main__":
     start = time.time()   # 시작 시간(초)
     nowTime = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
     print(f'{nowTime} - 🕒 running 7_find_low_point.py...')
-    print(' x일 이상 5일선이 20일선 보다 아래에 있으면서 최근 -x%이 존재 + 오늘 x% 이상 상승')
+    print('=== 7일 이상 5일선이 20일선 보다 아래에 있으면서 최근 -2.5%이 존재 + 오늘 3.3% 이상 상승 ===')
 
     tickers_dict = get_kor_ticker_dict_list()
     tickers = list(tickers_dict.keys())
@@ -538,29 +540,30 @@ if __name__ == "__main__":
         # print(f"  검증 등락률7       : {row['validation_chg_rate7']}%")
 
 
-    print('shortfall_cnt', shortfall_cnt)
-    print('up_cnt', up_cnt)
-    if shortfall_cnt+up_cnt==0:
-        total_up_rate=0
-    else:
-        total_up_rate = up_cnt/(shortfall_cnt+up_cnt)*100
+    if len(rows) > 0:
+        if shortfall_cnt + up_cnt == 0:
+            total_up_rate = 0
+        else:
+            total_up_rate = up_cnt / (shortfall_cnt + up_cnt) * 100
 
-        # CSV 저장
-        df = pd.DataFrame(rows)
+            if render_graph is False:
+                # CSV 저장
+                df = pd.DataFrame(rows)
 
-        df["MACD_hist_3d_rank"] = (
-            df.groupby("today")["MACD_hist_3d"]
-            .rank(pct=True)
-        )
+                df["MACD_hist_3d_rank"] = (
+                    df.groupby("today")["MACD_hist_3d"]
+                    .rank(pct=True)
+                    .round(4)
+                )
 
-        df.to_csv('csv/low_result_7.csv', index=False) # 인덱스 칼럼 'Unnamed: 0' 생성하지 않음
-        saved = sort_csv_by_today_desc(
-            in_path=r"csv/low_result_7.csv",
-            out_path=r"csv/low_result_7_desc.csv",
-        )
-        print("saved:", saved)
+                df.to_csv('csv/low_result_7.csv', index=False)  # 인덱스 칼럼 'Unnamed: 0' 생성하지 않음
+                saved = sort_csv_by_today_desc(
+                    in_path=r"csv/low_result_7.csv",
+                    out_path=r"csv/low_result_7_desc.csv",
+                )
+                print("saved:", saved)
 
-    print(f"저점 매수 스크립트 결과 : {total_up_rate:.2f}%")
+        print(f"저점 매수 스크립트 결과 : {total_up_rate:.2f}% ({up_cnt} / {shortfall_cnt + up_cnt})")
 
 
 
