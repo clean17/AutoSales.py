@@ -225,7 +225,8 @@ def mine_rules(
                 up = int((m & target).sum())
                 ratio = up / cnt
                 # score = ratio * np.log1p(cnt)
-                score = (ratio ** 2) * np.log1p(cnt)  # ratio에 더 강하게 보상
+                # score = (ratio ** 2) * np.log1p(cnt)  # ratio에 더 강하게 보상
+                score = (ratio ** 3) * np.log1p(cnt)  # ratio에 더 강하게 보상
 
                 # good 저장
                 if ratio >= min_ratio:
@@ -328,7 +329,7 @@ def test_condition(name, cond, df, verbose=False):
     confidence = ratio - (1 / np.sqrt(len(sub)))
 
     # if confidence < (MIN_RATE - 0.2):
-    if confidence < 0.50:
+    if confidence < 0.55:
         return False
 
     # if ratio < (MIN_RATE - 0.2):
