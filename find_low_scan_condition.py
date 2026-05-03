@@ -17,7 +17,7 @@ df = pd.read_csv("csv/low_result_7_desc.csv")
 MIN_RATE     = 0.80
 MIN_CNT      = 25
 MAX_DEPTH    = 4
-EXPAND_RATIO = [0.32, 0.38, 0.53, 0.7, 0.8]
+EXPAND_RATIO = [0.32, 0.39, 0.54, 0.7, 0.8]
 # TARGET_COL = "validation_chg_rate"         # 검증등락률
 # target = (df[TARGET_COL].to_numpy() >= 7)  # 7퍼 이상 검증 통과
 TARGET_COL = "is_success"                  # 동적 검증등락률 통과
@@ -55,8 +55,8 @@ exclude = {
 
 features = [c for c in df.columns if c not in exclude]
 
-for i in range(11):
-    for_cnt = MIN_CNT + i
+for i in range(6):
+    for_cnt = MIN_CNT + (i*2)
 
     for j in range(6):
         for_rate = MIN_RATE + (0.01*j)
@@ -482,13 +482,18 @@ for i in range(11):
         from utils import sort_csv_by_today_desc
 
         # 각 조건 정의
-        from lowscan_rules import build_conditions
-        conditions = build_conditions(df)
+
+        import importlib
+        import lowscan_rules
+
+        importlib.reload(lowscan_rules)
+
+        conditions = lowscan_rules.build_conditions(df)
 
         rows = []
 
         # 조건을 만족하는 행등만 골라서(sub) 확인
-        def test_condition(name, cond):
+        def test_condition2(name, cond):
             """
             param cond: 조건식 결과
             """
@@ -514,7 +519,7 @@ for i in range(11):
 
         # 모든 조건 테스트
         for name, cond in conditions.items():
-            test_condition(name, cond)
+            test_condition2(name, cond)
 
         base_result = pd.DataFrame(rows)
 
