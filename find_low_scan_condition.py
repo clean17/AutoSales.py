@@ -8,49 +8,22 @@ from pathlib import Path
 import heapq
 from itertools import count
 
-# df = pd.read_csv("csv/low_result_7_desc.csv")
 df = pd.read_csv("csv/low_result_7_desc.csv")
 # df = pd.read_csv("csv/low_result_us_6_desc.csv")   # 미장
 
-"""
-MIN_RATE
-0.75 → 너무 많음 (쓰레기 룰 포함)
-0.80 → 기본선
-0.82~0.85 → 베스트
-
-MIN_CNT
-15 → 과적합 시작
-20 → 최소
-25 → 안정 시작
-30+ → 실전급
-
-MAX_DEPTH
-3 → 너무 단순
-4 → 베스트
-5 → 과적합 증가
->>
-depth4 → cnt 30
-depth5 → cnt 20 이하
-
-EXPAND_RATIO
-0.40 → 너무 많이 퍼짐
-0.45 → 안정
-0.50 → 공격적 필터
-"""
-MIN_RATE = 0.80
-MIN_CNT  = 25
-MAX_DEPTH = 4
-EXPAND_RATIO = 0.45
+MIN_RATE     = 0.77
+MIN_CNT      = 40
+MAX_DEPTH    = 4
+EXPAND_RATIO = [0.32, 0.38, 0.53, 0.7, 0.8]
 # TARGET_COL = "validation_chg_rate"         # 검증등락률
 # target = (df[TARGET_COL].to_numpy() >= 7)  # 7퍼 이상 검증 통과
-
 TARGET_COL = "is_success"                  # 동적 검증등락률 통과
 target = df[TARGET_COL].to_numpy() == 1
 
 out_path = Path("lowscan_rules.py")
 # out_path = Path("lowscan_rules_us.py")   # 미장
 
-# 숫자 피처들(원하면 더/덜 제외 가능)
+# 제외할 피쳐
 exclude = {
     "ticker", "stock_name", "predict_str", "today",
 
@@ -71,6 +44,7 @@ exclude = {
     "_rebound_power",
     "_MACD_hist_1d",
     "MACD_hist_3d",
+    "tr_volume_rank_20d"
     # "trend_signal_tanh",
     # "dist_from_low_tanh",
     # "tr_value_ratio_tanh",
@@ -78,44 +52,46 @@ exclude = {
 
 features = [c for c in df.columns if c not in exclude]
 
-N = len(df)
-
 # --- literal(원자 조건) 만들기: feature <= q or feature > q ---
 literals = []
 literal_masks = []
 
+"""
+0.05, 0.10, 0.15, 0.20, ... 0.95 → 총 19개 threshold
+0.1, 0.2, 0.3, ... 0.9           → 총 9개 threshold
+
+depth4에서 데드캣을 이미 거른 뒤 depth5를 만들 거면 np.linspace(0.2, 0.8, 7) 괜찮음
+0.05~0.95, 19개	많음	세밀하지만 과적합 위험 큼
+0.1~0.9, 9개	중간	균형
+0.2~0.8, 7개	적음	안정적, 룰 적음, 과적합 감소
+"""
 for f in features:
-    print(f)
-    col = df[f].astype(float).to_numpy()
-    col_nonan = col[~np.isnan(col)]
-    # 분위수 촘촘하게(원하면 0.05~0.95를 더 촘촘히)
-    """
-    0.05, 0.10, 0.15, 0.20, ... 0.95
-      → 총 19개 threshold
-      
-    0.1, 0.2, 0.3, ... 0.9
-      → 총 9개 threshold
-      
-    덜 촘촘하게 = 과적합 방지하면서 빠르게
-    
-    depth4에서 데드캣을 이미 거른 뒤 depth5를 만들 거면 np.linspace(0.2, 0.8, 7) 괜찮음
-    
-    0.05~0.95, 19개	많음	세밀하지만 과적합 위험 큼
-    0.1~0.9, 9개	중간	균형
-    0.2~0.8, 7개	적음	안정적, 룰 적음, 과적합 감소
-    """
-    # qs = np.unique(np.quantile(col_nonan, np.linspace(0.05, 0.95, 19)))
-    qs = np.unique(np.quantile(col_nonan, np.linspace(0.1, 0.9, 9)))
-    # qs = np.unique(np.quantile(col_nonan, np.linspace(0.2, 0.8, 7)))
+    # print(f)
+    col = df[f].astype(float).to_numpy()  # flaat 형변환 >  Series > Numpy 배열
+    col_nonan = col[~np.isnan(col)]       # ~np.isnan() 으로 True 값만 남는다 > NaN 제거
+    print(f, len(col_nonan), len(np.unique(col_nonan)))
+
+    # 분위수(percentile) 배열 생성 (덜 촘촘하게 = 과적합 방지하면서 빠르게)
+    unique_vals = np.unique(col_nonan)
+    if len(unique_vals) < 50:
+        qs = unique_vals  # quantile 안씀
+    else:
+        # n_bins = min(19, len(unique_vals) - 1)
+        # qs = np.unique(np.quantile(col_nonan, np.linspace(0.05, 0.95, n_bins)))
+
+        qs = np.unique(np.quantile(col_nonan, np.linspace(0.05, 0.95, 19)))
+        # qs = np.unique(np.quantile(col_nonan, np.linspace(0.1, 0.9, 9)))
+        # qs = np.unique(np.quantile(col_nonan, np.linspace(0.2, 0.8, 7)))
 
     for thr in qs:
-        thr = float(thr)
+        thr = round(float(thr), 4)
         literals.append((f, "<=", thr))
         literal_masks.append(col <= thr)
 
         literals.append((f, ">", thr))
         literal_masks.append(col > thr)
 
+# print(literals)
 
 feature_groups = {
     # 가격 / 당일 반등 강도
@@ -133,7 +109,6 @@ feature_groups = {
 
     # 수급
     "tr_value_ratio": "VOLUME",
-    "tr_volume_rank_20d": "VOLUME",
 
     # 눌림 강도
     "max_drop_7d": "DROP",
@@ -144,30 +119,28 @@ group_limits = {
     "TREND": 1,
     "MACD": 2,
     "POSITION": 1,
-    "VOLUME": 2,
+    "VOLUME": 1,
     "DROP": 1,
 }
 
 
 """
-expand_ratio = 0.45 → beam 5k~10k도 그럭저럭
-expand_ratio = 0.40 → beam 10k~30k 권장
-expand_ratio = 0.35 → beam 30k~ 아니면 빔 컷이 너무 심해질 가능성 큼
-
-beam : 단계별 상위 수량만 다음 뎁스로 가져간다, 안정성 목표(결과 흔들림 줄이기) 최소 5000 가능하면 10000~30000 쪽이 훨씬 안정적
-expand_ratio : 각 후보의 성능이 이 값보다 커야 다음 뎁스로 진행
+beam : 단계별 상위 수량만 다음 뎁스로 가져간다, 한 depth에서 유지할 후보 개수
+expand_ratio : 각 후보의 성능이 이 값보다 커야 다음 뎁스로 진행, 다음 depth로 확장할 최소 기준
+min_ratio : “좋은 룰”로 저장할 기준
+cnt_priority_ratio : 넘기면 ratio 보다 cnt 를 더 중요시
 """
 def mine_rules(
         min_ratio=0.7,
         min_count=20,
         max_depth=4,
         beam=400,
-        expand_ratio=0.45,
-        cnt_priority_ratio=0.85,   # <-- 여기부터 cnt를 더 중요하게 볼 임계치
-        top_n=500,                # 원하면 최종 결과 상위 N개만 리턴
+        expand_ratio=0.50,
+        cnt_priority_ratio=0.85,   # <-- 여기부터 cnt를 더 중요하게 볼 임계치 (고정)
+        top_n=500,                 # 원하면 최종 결과 상위 N개만 리턴
         #  그룹 제약 추가
-        feature_groups=None,     # dict: feature_name -> group_name
-        group_limits=None,       # dict: group_name -> max_allowed_in_rule
+        feature_groups=None,       # dict: feature_name -> group_name
+        group_limits=None,         # dict: group_name -> max_allowed_in_rule
 ):
     """
     (count, ratio, up_cnt, conds) 리스트 반환
@@ -184,12 +157,11 @@ def mine_rules(
     - feature_groups에 매핑된 피쳐들은 같은 그룹에서 group_limits 개수 이상 못 씀
     """
 
-    beams = [(np.ones(N, dtype=bool), [])]
+    beams = [(np.ones(len(df), dtype=bool), [])]  # df 길이 만큼의 True 배열(불리언 마스크), 빈 배열의 튜플 리스트 > "데이터프레임의 모든 행을 선택한다"는 상태
     good = {}
 
-    print('\nbeam', beam)
-    print("min_ratio", min_ratio, "min_count", min_count, "max_depth", max_depth, "expand_ratio", expand_ratio, "top_n", top_n)
-    print("cnt_priority_ratio", cnt_priority_ratio)
+    print("\nbeam", beam, "min_ratio", min_ratio, "min_count", min_count, "max_depth", max_depth, "expand_ratio", EXPAND_RATIO, "top_n", top_n)
+    print("cnt_priority_ratio", cnt_priority_ratio, '\n')
 
     if feature_groups is None:
         feature_groups = {}
@@ -216,10 +188,10 @@ def mine_rules(
         # heap item: (key, uid, mask, conds, ratio, cnt)
         # heap[0] = 가장 "나쁜" 후보 (key가 가장 작음)
         heap = []
-        uid = count()
+        uid = count()  # 카운트 제네레이터 (itertools 모듈)
 
         for base_mask, conds in beams:
-            used_feats = {c[0] for c in conds}
+            used_feats = {c[0] for c in conds}  # c[0]: 피쳐 명, set comprehension
 
             # 현재 rule에서 그룹 사용량 계산
             group_used = {}
@@ -229,7 +201,7 @@ def mine_rules(
                     continue
                 group_used[g] = group_used.get(g, 0) + 1
 
-            for (lit, lmask) in zip(literals, literal_masks):
+            for (lit, lmask) in zip(literals, literal_masks):  # zip() 이용한 동시 순회
                 feat = lit[0]
 
                 # 동일 feature 중복 금지 (기존)
@@ -244,6 +216,7 @@ def mine_rules(
                         if group_used.get(g, 0) >= limit:
                             continue
 
+                # 새로운 subset
                 m = base_mask & lmask
                 cnt = int(m.sum())
                 if cnt < MIN_CNT:
@@ -252,7 +225,7 @@ def mine_rules(
                 up = int((m & target).sum())
                 ratio = up / cnt
                 # score = ratio * np.log1p(cnt)
-                score = (ratio ** 2) * np.log1p(cnt)
+                score = (ratio ** 2) * np.log1p(cnt)  # ratio에 더 강하게 보상
 
                 # good 저장
                 if ratio >= min_ratio:
@@ -261,8 +234,15 @@ def mine_rules(
                     if (prev is None) or (score > prev[4]):
                         good[key2] = (cnt, ratio, up, conds + [lit], score)
 
+                """
+                new ≈ beam의 30~70%가 되도록 expand_ratio 조절 필요
+
+                depth 0 >> new가 beam의 1~20%여도 괜찮음
+                depth 1 >> beam의 20~70%
+                depth 2+ > beam의 30~70%
+                """
                 # 확장 후보
-                if ratio >= expand_ratio:
+                if ratio >= EXPAND_RATIO[depth]:
                     k = beam_key(ratio, cnt)
                     item = (k, next(uid), m, conds + [lit], ratio, cnt)
 
@@ -276,7 +256,7 @@ def mine_rules(
 
         # 다음 depth로 넘길 후보들(좋은 순): key 내림차순
         # key는 (group, primary, secondary)인데 primary/secondary는 큰 게 좋게 만들어 둠
-        new = sorted(heap, key=lambda x: x[0], reverse=True)
+        new = sorted(heap, key=lambda x: x[0], reverse=True)  # 좋은 순으로 정렬
         print("new", len(new))
 
         if not new:
@@ -284,7 +264,7 @@ def mine_rules(
             break
 
         tail = new[-1]
-        print("tail ratio:", round(tail[4],3), "cnt:", tail[5], "conds:", tail[3])
+        print("tail ratio:", round(tail[4],3), "cnt:", tail[5], "conds:", tail[3])  # 최악 후보 출력 (디버깅용)
 
         beams = [(m, conds) for _, _, m, conds, _, _ in new]
 
@@ -316,9 +296,10 @@ def mine_rules(
 
 def test_condition(name, cond, df, verbose=False):
     """
-    param cond: 조건식 결과 (bool mask)
+    param cond: 조건식 결과, 각 행마다 True / False가 들어 있는 bool mask
     return: 저장할 가치가 있으면 True, 아니면 False
     """
+    # 조건을 만족한 종목/날짜만
     sub = df[cond]
 
     if len(sub) == 0:
@@ -331,9 +312,29 @@ def test_condition(name, cond, df, verbose=False):
     up_cnt = (sub["is_success"] == 1).sum()            # 동적 검증등락률
     ratio = up_cnt / len(sub)
 
-    if ratio < 0.70:
+    """
+    confidence: 성공률에 “표본 수 신뢰도 할인”을 적용한 값
+    ratio = 0.70 일 때
+    # 표본 20개
+    confidence = 0.70 - (1 / sqrt(20))
+               = 0.70 - 0.224
+               = 0.476
+    
+    # 표본 200개
+    confidence = 0.70 - (1 / sqrt(200))
+               = 0.70 - 0.071
+               = 0.629
+    """
+    confidence = ratio - (1 / np.sqrt(len(sub)))
+
+    # if confidence < (MIN_RATE - 0.2):
+    if confidence < 0.50:
         return False
 
+    # if ratio < (MIN_RATE - 0.2):
+    #     return False
+
+    # 표본이 너무 적으면 과적합 가능성이 큼
     if len(sub) < 15:
         return False
 
@@ -369,8 +370,6 @@ rules = mine_rules(
     min_count=MIN_CNT,
     max_depth=MAX_DEPTH,
     beam=30000,
-    expand_ratio=EXPAND_RATIO,
-    cnt_priority_ratio=MIN_RATE,
     top_n=1000,
     feature_groups=feature_groups,
     group_limits=group_limits,
@@ -383,9 +382,7 @@ rules = mine_rules(
 # 미장
 # rules = mine_rules(min_ratio=MIN_RATE, min_count=50, max_depth=6, beam=30000, expand_ratio=0.45, top_n=10000)
 
-top_n = min(10000, len(rules))
-conditions = {}
-
+top_n = min(1000, len(rules))
 selected = []  # (name, conds)만 저장해두고 파일로 씀
 
 # for i, (cnt, ratio, up, conds) in enumerate(rules[:top_n], start=1):
@@ -402,11 +399,11 @@ for i, (cnt, ratio, up, conds, score) in enumerate(rules[:top_n], start=1):
             # rule_to_code가 >=를 찍고 있으니 검증도 >=로 맞추기
             mask &= (df[f] >= thr)
 
-    # ✅ 통과한 룰만 담기
+    # 통과한 룰만 담기
     if test_condition(name, mask, df, verbose=False):
         selected.append((name, conds))
 
-print(f"통과 룰 개수: {len(selected)} / {min(len(rules), top_n)}")
+print(f"\n통과 룰 개수: {len(selected)} / {min(len(rules), top_n)}")
 
 
 # dict 자료구조 >> 값: 불리언(boolean) 마스크
