@@ -11,8 +11,8 @@ from itertools import count
 df = pd.read_csv("csv/low_result_7_desc.csv")
 # df = pd.read_csv("csv/low_result_us_6_desc.csv")   # 미장
 
-MIN_RATE     = 0.77
-MIN_CNT      = 40
+MIN_RATE     = 0.82
+MIN_CNT      = 30
 MAX_DEPTH    = 4
 EXPAND_RATIO = [0.32, 0.38, 0.53, 0.7, 0.8]
 # TARGET_COL = "validation_chg_rate"         # 검증등락률
@@ -289,7 +289,7 @@ def mine_rules(
     #     print(cnt, ratio, len(conds))
 
     for cnt, ratio, up, conds, score in out[:20]:
-        print(cnt, round(ratio, 2), round(score, 3), len(conds))
+        print(cnt, round(ratio, 2), round(score, 2), len(conds))
 
     return out
 
@@ -336,7 +336,7 @@ def test_condition(name, cond, df, verbose=False):
     #     return False
 
     # 표본이 너무 적으면 과적합 가능성이 큼
-    if len(sub) < 15:
+    if len(sub) < 20:
         return False
 
     if verbose:
