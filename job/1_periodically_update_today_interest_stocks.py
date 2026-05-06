@@ -138,15 +138,17 @@ for count, ticker in enumerate(tickers):
     plt.close()
 
 
-
+    today_val = trading_value.iloc[-1]
     avg5 = trading_value.iloc[-6:-1].mean()
     # 최근 5일 거래대금이 없으면 한달 평균
-    if avg5 == 0.0:
+    if avg5 <= 0 or not np.isfinite(avg5):
         avg5 = trading_value.iloc[-21:-1].mean()
-    today_val = trading_value.iloc[-1]
+    if avg5 <= 0 or not np.isfinite(avg5):
+        trading_value_change_pct = 100
+    else:
+        trading_value_change_pct = today_val / avg5 * 100
+        trading_value_change_pct = round(trading_value_change_pct, 2)
 
-    trading_value_change_pct = today_val / avg5 * 100
-    trading_value_change_pct = round(trading_value_change_pct, 2)
 
     try:
         res = requests.post(
