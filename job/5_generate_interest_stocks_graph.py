@@ -177,5 +177,5 @@ if __name__ == "__main__":
     minutes, seconds = divmod(remainder, 60)
 
     if elapsed > 20:
-        print(f"총 소요 시간: {hours}시간 {minutes}분 {seconds}초")
+        print(f"5_generate_interest_stocks_graph.py 총 소요 시간: {hours}시간 {minutes}분 {seconds}초")
 
