@@ -844,51 +844,12 @@ def add_technical_features(data):
     data['UpperBand'] = data['MA20'] + (2 * data['STD20'])
     data['LowerBand'] = data['MA20'] - (2 * data['STD20'])
     # 볼린저밴드 위치 (0~1)
-    # data['BB_perc'] = (c - data['LowerBand']) / (data['UpperBand'] - data['LowerBand'] + 1e-9)
+    data['BB_perc'] = (c - data['LowerBand']) / (data['UpperBand'] - data['LowerBand'] + 1e-9)
 
-    ###########################################################
-
-    """
-    저점 매수용 지표
-    """
-    # 60일 최저 종가 대비 상승률
-    # rolling_min_60d = c.rolling(60).min()
-    # data['rebound_from_60d_low'] = safe_rate(c.iloc[-1], rolling_min_60d.iloc[-1])
-
-    # 20일 최저 종가 대비 상승률
-    # rolling_min_20d = c.rolling(20).min()
-    # data['rebound_from_20d_low'] = safe_rate(c.iloc[-1], rolling_min_20d.iloc[-1])
-
-    # 20일 최저 저가 대비 상승률
-    # low_20d = l.iloc[-20:].min()
-    # data['dist_from_low'] = safe_rate(c.iloc[-1], low_20d)
-
-    # ★★★ 낙폭 과대 지표
-    # rolling_max_20d = c.rolling(20).max()
-    # rolling_max_60d = c.rolling(60).max()
-    # data['drawdown_20d'] = safe_rate(c.iloc[-1], rolling_max_20d.iloc[-1])
-    # data['drawdown_60d'] = safe_rate(c.iloc[-1], rolling_max_60d.iloc[-1])
-
-    # ★★★ 당일 range 내 종가 위치(0~1)
-    # 1 → 종가가 최고가 근처 (강함)
-    data['close_pos'] = (c - l) / (h - l + eps) # 무의미
-
-    # ★★★ 거래량 급증 신호
-    # data['volume_ratio'] = v / v.rolling(20).mean()
-
-    # 오늘 거래량이 최근 20일 중 어느 정도 위치냐, (1: 1등, 0.5: 평균)
-    # data['volume_rank_20d'] = volume_rank(v, 20)
-    # data['tr_volume_rank_20d'] = volume_rank(c * v, 20)
-
-    # ★★★ 중기 위치 확인 (추세 필터)
-    # data["dist_to_ma5"]  = safe_rate(c.iloc[-1], data["MA5"].iloc[-1])
-    # data["dist_to_ma20"] = safe_rate(c.iloc[-1], data["MA20"].iloc[-1])
-
-    # data['upper_tail_ratio'] = (h - c) / (h - l + 1e-9) # 무의미
-    # data['body_ratio'] = abs(c - o) / (h - l + 1e-9)
 
     ###########################################################
     # === 추가 지표 ===
+
     """
     RSI(14) — 상대강도지수 (Relative Strength Index)
     70 이상이면 과매수, 30 이하이면 과매도
@@ -926,15 +887,16 @@ def add_technical_features(data):
     # data['PlusDI'] = plus_di
     # data['MinusDI'] = minus_di
     # 하락 추세가 너무 강한 종목 제거
-    # data['ADX14'] = adx
+    data['ADX14'] = adx
 
     # ATR
     """
     ATR(14) — 평균진폭범위 (Average True Range)
     변동성 지표. 값이 높을수록 변동성이 큼
     """
-    # data['ATR14'] = compute_atr(h, l, c, 14)
+    data['ATR14'] = compute_atr(h, l, c, 14)
 
+    # CCI
     """
     CCI(14) — 상품채널지수 (Commodity Channel Index)
     100 이상이면 과매수, 강세장 지속
@@ -942,18 +904,18 @@ def add_technical_features(data):
     
     단기 모멘텀 변화를 잘 포착하지만, 노이즈가 많음
     """
-    # data['CCI14'] = compute_cci(h, l, c, 14)
+    data['CCI14'] = compute_cci(h, l, c, 14)
 
+    # UltimateOsc
     """
     Ultimate Oscillator
-    
     단기·중기·장기 모멘텀을 종합한 지표. RSI/스토캐스틱보다 안정적.
     50 이상 → 매수 우위 
     50 이하 → 매도 고려
     70 이상 → 과매수 가능
     30 이하 → 과매도 가능
     """
-    # data['UltimateOsc'] = compute_ultimate_osc(h, l, c, 7, 14, 28)
+    data['UltimateOsc'] = compute_ultimate_osc(h, l, c, 7, 14, 28)
 
     # ROC (percent)
     """
@@ -961,7 +923,7 @@ def add_technical_features(data):
     매수세(황소)와 매도세(곰) 힘을 비교. 양수면 매수세 우위
     추세의 속도 확인
     """
-    # data['ROC12_pct'] = compute_roc(c, 12, pct=True)
+    data['ROC12_pct'] = compute_roc(c, 12, pct=True)
 
     ###########################################################
 
