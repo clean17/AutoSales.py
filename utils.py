@@ -24,6 +24,8 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score, r
 import warnings
 import pandas_market_calendars as mcal
 from pandas.api.types import is_numeric_dtype
+import unicodedata
+
 
 # 시드 고정
 import numpy as np, tensorflow as tf, random
@@ -41,6 +43,27 @@ GRAY2 = '#9AA0A6'
 today = datetime.today().strftime('%Y%m%d')
 
 # ----- 공통 유틸 -----
+
+def display_width(text):
+    text = str(text)
+
+    width = 0
+    for ch in text:
+        if unicodedata.east_asian_width(ch) in ("F", "W"):
+            width += 2
+        else:
+            width += 1
+    return width
+
+
+def pad_text(text, total_width):
+    text = str(text)
+
+    current_width = display_width(text)
+    padding = total_width - current_width
+
+    return text + " " * max(0, padding)
+
 def _col(df, ko: str, en: str):
     """한국/영문 칼럼 자동매핑: ko가 있으면 ko, 없으면 en을 반환"""
     if ko in df.columns: return ko
