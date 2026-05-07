@@ -12,12 +12,11 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
-import lowscan_rules as rule0
-modules = [rule0]
-
-# import lowscan_rules_80_25_4_42 as rule1
-# import lowscan_rules_77_25_5_42 as rule2
-# modules = [rule1]
+import lowscan_rules_83_25_260504 as rule0
+import lowscan_rules as rule00
+# import lowscan_rules_77_25_5_42 as rule1
+# import lowscan_rules_80_25_4_42 as rule2
+modules = [rule00]
 
 # log_file = open("csv/output.log", "w", encoding="utf-8")
 # sys.stdout = log_file
@@ -37,7 +36,7 @@ else:
 
 from utils import get_kor_ticker_dict_list, add_technical_features, plot_candles_weekly, plot_candles_daily, \
     drop_sparse_columns, drop_trading_halt_rows, signal_any_drop, low_weekly_check, extract_numbers_from_filenames, \
-    sort_csv_by_today_desc, safe_read_pickle, safe_rate, to_float, round_float_features
+    sort_csv_by_today_desc, safe_read_pickle, safe_rate, to_float, round_float_features, pad_text
 
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
 root_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(=루트)
@@ -47,27 +46,60 @@ output_dir = 'F:\\5below20_test'
 
 # 목표 검증 수익률
 VALIDATION_TARGET_RETURN = 7
-render_graph = True
+render_graph = False
 
-BATCH_SIZE = 20       # 작업 사이즈
-START_OFFSET = 15      # 1이면 어제 기준부터 검증 가능.. 7일 검증을 사용하려면 7사용
-END_OFFSET = 30      # 과거 300거래일까지 생성
+START_OFFSET = 7      # 1이면 어제 기준부터 검증 가능.. 7일 검증을 사용하려면 7사용
+END_OFFSET = 300      # 과거 300거래일까지 생성
 
+def process_ticker(ticker, tickers_dict, i):
+    results = []
 
-def process_one(idx, count, ticker, tickers_dict):
     stock_name = tickers_dict.get(ticker, 'Unknown Stock')
-
     filepath = os.path.join(pickle_dir, f'{ticker}.pkl')
     if not os.path.exists(filepath):
-        print(f"[idx={idx}] {ticker} 파일 없음")
-        return
+        print(f"[process_ticker] {stock_name} ({ticker}) 파일 없음")
+        return results
 
-    # df = pd.read_pickle(filepath)
     df = safe_read_pickle(filepath)
+
+    if render_graph is False:
+        df = df[:-100]  # 검증 데이터 분리 테스트
 
     # 데이터가 부족하면 패스
     if df is None or df.empty or len(df) < 70:
         return None
+
+    # 2차 생성 feature
+    df = add_technical_features(df)
+
+    # 결측 제거
+    df, _ = drop_sparse_columns(df, threshold=0.10, check_inf=True, inplace=True)
+
+    # 거래정지/이상치 행 제거
+    df, _ = drop_trading_halt_rows(df)
+
+    # drop 이후 3차 생성
+    df = add_technical_features(df)
+
+    # 데이터가 부족하면 패스
+    if df.empty or len(df) < 70:
+        return
+
+    df["trading_value"] = df["종가"] * df["거래량"]
+
+    # print(f"[idx={i}] {stock_name:<15} ({ticker})")  #  문자열을 왼쪽 정렬하고, 전체 너비를 15칸
+    print(f"{pad_text(i, 4)} | {ticker} | {pad_text(stock_name, 26)}")  #  문자열을 왼쪽 정렬하고, 전체 너비를 15칸
+
+
+    for idx in range(START_OFFSET, END_OFFSET + 1):
+        res = process_one_with_df(df, idx, ticker, tickers_dict)
+        if res is not None:
+            results.append(res)
+
+    return results
+
+def process_one_with_df(df, idx, ticker, tickers_dict):
+    stock_name = tickers_dict.get(ticker, 'Unknown Stock')
 
     # 과거 데이터(data)와 / 검증 데이터(remaining_data)로 분리
     # [0:150](0~149), idx = 10 >> [0:140](0~139) / [140:](140~149)
@@ -82,42 +114,18 @@ def process_one(idx, count, ticker, tickers_dict):
     if data.empty or len(data) < 70:
         return
 
-    today = data.index[-1].strftime("%Y%m%d") # 마지막 인덱스
-    if count == 0:
-        # print('─────────────────────────────────────────────────────────────')
-        print(data.index[-1].date())
-        # print('─────────────────────────────────────────────────────────────')
-
-
     ########################################################################
 
-    trading_value = data['종가'] * data['거래량']
+    closes = data['종가'].values
+    trading_value = data['trading_value']
     today_tr_val = round(trading_value.iloc[-1], 2)                  # 마지막 거래일 거래대금
     mean_prev3 = round(trading_value.iloc[:-1].tail(3).mean(), 2)    # 마지막 3일 거래대금 평균
     mean_prev5 = round(trading_value.iloc[:-1].tail(5).mean(), 2)    # 마지막 3일 거래대금 평균
     mean_prev20 = round(trading_value.iloc[:-1].tail(20).mean(), 2)  # 마지막 20일 거래대금 평균
 
 
-    # ★★★★★ x거래일 평균 거래대금 3억보다 작으면 패스 ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-    # if mean_prev3 / 100_000_000 < 3:
+    # ★★★★★ 20거래일 평균 거래대금 3억보다 작으면 패스 ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
     if mean_prev20 / 100_000_000 < 3:
-        return
-
-
-    # 2차 생성 feature
-    data = add_technical_features(data)
-
-    # 결측 제거
-    data, cols_to_drop = drop_sparse_columns(data, threshold=0.10, check_inf=True, inplace=True)
-
-    # 거래정지/이상치 행 제거
-    data, removed_idx = drop_trading_halt_rows(data)
-
-    # drop 이후 3차 생성
-    data = add_technical_features(data)
-
-    # 데이터가 부족하면 패스
-    if data.empty or len(data) < 70:
         return
 
     # 5일, 20일 이동평균선 없으면 패스
@@ -144,10 +152,10 @@ def process_one(idx, count, ticker, tickers_dict):
 
     # 오늘 제외 최근 7일 5일선이 20일선보다 계속 낮은데 -2.5% 하락이 있으면서 오늘 3.3% 상승 ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
     signal = signal_any_drop(data, 7, 3.3, -2.5)
+    # signal = signal_any_drop(data, 7, 2, -2.5)
     # signal = signal_any_drop(data, 8, 3.5, -3.0)
     if not signal:
         return
-
 
     ########################################################################
     # feature 만들기
@@ -265,7 +273,7 @@ def process_one(idx, count, ticker, tickers_dict):
         "dist_from_low": dist_from_low,
 
         "tr_value_ratio": tr_value_ratio,
-        "tr_volume_rank_20d": tr_volume_rank_20d,
+        # "tr_volume_rank_20d": tr_volume_rank_20d,
 
         "max_drop_7d": max_drop_7d,
     }
@@ -341,50 +349,14 @@ def process_one(idx, count, ticker, tickers_dict):
 
     # result = low_weekly_check(m_data)
 
-    ########################################################################
-
-    # data에 컬럼이 없거나 NaN이면 넣기 (기존 컬럼 있으면 덮어쓸지 말지는 옵션)
-    data = data.copy()
-    for k, v in rule_features.items():
-        data[k] = v
-
-    if "MACD_hist_3d_rank" not in data.columns:
-        data["MACD_hist_3d_rank"] = np.nan
-
-    # 여러 모듈(modules)에서 조건(rule)을 검사해서, 하나라도 만족하면 해당 모듈/룰을 선택하는 로직
-    for mod in modules:
-        try:
-            rule_masks = mod.build_conditions(data)   # dict: rule_name -> Series[bool]
-        except KeyError as e:
-            print(f"[{ticker}] rule build_conditions KeyError in {mod.__name__}: {e} (missing column in data)")
-            return
-
-        RULE_NAMES = mod.RULE_NAMES
-
-        true_conds = [
-            name for name in RULE_NAMES
-            if name in rule_masks and bool(rule_masks[name].iloc[-1])
-        ]
-
-        # 이 모듈에서 하나라도 True면 통과 → 다음 로직 진행
-        if true_conds:
-            # 필요하면 어떤 모듈/룰이었는지 저장
-            matched_module = mod.__name__
-            matched_rules = true_conds
-            break
-    else:
-        # 모든 모듈을 다 봤는데도 True가 하나도 없으면 pass
-        return
-
 
     ########################################################################
-
 
     row = {
-        "ticker": ticker,
         "stock_name": stock_name,
         "today" : str(data.index[-1].date()),
         "predict_str": predict_str,                      # 상승/미달
+        "idx": idx,
 
         "validation_chg_rate": validation_chg_rate,      # 검증 등락률
         "validation_chg_rate1": validation_chg_rate1,    # 검증 등락률
@@ -397,6 +369,7 @@ def process_one(idx, count, ticker, tickers_dict):
     }
     row.update(rule_features)
     row = round_float_features(row)
+    row["ticker"] = ticker  # 종목코드 숫자 float 처리 되어서 밖으로 뺌
 
     # 처음으로 수익률 뚫는 날, 조건이 뚫을 수 있는지 확인
     vals = [
@@ -421,35 +394,8 @@ def process_one(idx, count, ticker, tickers_dict):
     row["target"] = VALIDATION_TARGET_RETURN
 
 
-    origin = []
-    plot_job = {}
-
-    if render_graph:
-        origin = df.copy()
-        #연산하는 시간 걸리니 그래프 안그리면 패스
-        # 2차 생성 feature
-        origin = add_technical_features(origin)
-        # 결측 제거
-        o_cleaned, o_cols_to_drop = drop_sparse_columns(origin, threshold=0.10, check_inf=True, inplace=True)
-        origin = o_cleaned
-        # 거래정지/이상치 행 제거
-        origin, o_removed_idx = drop_trading_halt_rows(origin)
-
-        today_str = str(today)
-        title = f"{today_str} {stock_name} [{ticker}] {round(data.iloc[-1]['등락률'], 2)}% Daily Chart - {predict_str} {validation_chg_rate}%"
-        final_file_name = f"{today} {stock_name} [{ticker}] {round(data.iloc[-1]['등락률'], 2)}%_{predict_str}.webp"
-        os.makedirs(output_dir, exist_ok=True)
-        final_file_path = os.path.join(output_dir, final_file_name)
-
-        plot_job['origin'] = origin
-        plot_job['today'] = today_str
-        plot_job['title'] = title
-        plot_job['save_path'] = final_file_path
-
-
     return {
         "row": row,
-        "plot_job": plot_job,
     }
 
 
@@ -465,97 +411,79 @@ if __name__ == "__main__":
     # tickers = extract_numbers_from_filenames(directory = r'D:\5below20_test\4퍼', isToday=False)
 
 
-    shortfall_cnt = 0    # 미달 수량
-    up_cnt = 0           # 성공 수량
     rows = []            # 결과 종목 데이터 저장
-    plot_jobs = []       # 그래프 생성용 데이터 저장
+
+    try:
+        with ProcessPoolExecutor(max_workers=os.cpu_count() - 2) as executor:
+            futures = [
+                executor.submit(process_ticker, ticker, tickers_dict, i)
+                for i, ticker in enumerate(tickers, start=1)
+            ]
+
+            for f in as_completed(futures):
+                try:
+                    results = f.result()
+                    if results is None:
+                        continue
+                except Exception as e:
+                    print("worker error:", e)
+                    continue
 
 
-    with ProcessPoolExecutor(max_workers=os.cpu_count() - 2) as executor:
-        futures = []  # 작업 저장 리스트
+                for res in results:
+                    row = res["row"]
+                    rows.append(row)
 
-        # 전체 작업을 BATCH_SIZE 단위로 나눠서 반복 처리
-        for batch_start in range(START_OFFSET, END_OFFSET + 1, BATCH_SIZE):
-            batch_end = min(batch_start + BATCH_SIZE - 1, END_OFFSET)
 
-            print(f"processing offset {batch_start} ~ {batch_end}")
-            # cur_idx 만큼 데이터셋을 뒤에서부터 자른다 >> 잘라낸 마지막 리스트가 검증 리스트
-            """
-              cur_idx: 며칠 전 기준으로 검증할 것인가
-              cur_idx = 1   → 오늘 기준 하루 전까지 data, 이후 7일 검증
-              cur_idx = 7   → 7거래일 전까지 data, 이후 7일 검증
-              cur_idx = 100 → 100거래일 전까지 data, 이후 7일 검증
-              cur_idx가 7부터 올라가면서 검증 데이터셋을 만든다
-            """
-            for cur_idx in range(batch_start, batch_end + 1):
-                # print('cur_idx', cur_idx)
-                for count, ticker in enumerate(tickers):
-                    # 작업 제출: process_one 함수를 병렬 실행 >> 제출된 작업을 futures 리스트에 저장
-                    futures.append(executor.submit(process_one, cur_idx, count, ticker, tickers_dict))
+        rows_sorted = sorted(rows, key=lambda row: row['today'])
 
-            # 제출된 작업이 끝날 때까지 대기
-            for fut in as_completed(futures):
-                fut.result()   # 예외 발생 시 여기서 터져서 디버깅 쉬움
 
-            # 다음 배치로 idx 이동
-            idx = batch_end
+        if len(rows) > 0:
+            df = pd.DataFrame(rows)
 
-        # 모든 작업이 완료되면 하나씩 꺼내서 집계
-        for f in as_completed(futures):
-            try:
-                res = f.result()
-            except Exception as e:
-                print("worker error:", e)
-                continue
+            df["MACD_hist_3d_rank"] = (
+                df.groupby("today")["MACD_hist_3d"]
+                .rank(pct=True)
+                .round(4)
+            )
 
-            if res is None:
-                continue
-
-            row = res["row"]
-            plot_job = res["plot_job"]
-
-            rows.append(row)
             if render_graph:
-                plot_jobs.append(plot_job)   # 그래프 생성하지 않으려면 주석
+                mask = pd.Series(False, index=df.index)
+                matched_rule_map = {idx: [] for idx in df.index}
 
-            if row["predict_str"] == "미달":
-                shortfall_cnt += 1
-            else:
-                up_cnt += 1
+                for mod in modules:
+                    conditions = mod.build_conditions(df)
 
+                    for name in mod.RULE_NAMES:
+                        if name not in conditions:
+                            continue
 
-    rows_sorted = sorted(rows, key=lambda row: row['today'])
+                        cond = conditions[name].fillna(False)
 
-    # 🔥 여기서 한 번에, 깔끔하게 출력
-    # for row in rows_sorted:
-        # print(f"\n {row['today']}   {row['stock_name']} [{row['ticker']}] {row['predict_str']}")
-        # print(f"  오늘 등락률        : {row['today_pct']}%")
-        # print(f"  검증 등락률(max)   : {row['validation_chg_rate']}%")
-        # print(f"  검증 등락률1       : {row['validation_chg_rate1']}%")
-        # print(f"  검증 등락률2       : {row['validation_chg_rate2']}%")
-        # print(f"  검증 등락률3       : {row['validation_chg_rate3']}%")
-        # print(f"  검증 등락률4       : {row['validation_chg_rate4']}%")
-        # print(f"  검증 등락률5       : {row['validation_chg_rate5']}%")
-        # print(f"  검증 등락률6       : {row['validation_chg_rate6']}%")
-        # print(f"  검증 등락률7       : {row['validation_chg_rate7']}%")
+                        # 하나라도 만족하면 통과
+                        mask |= cond
 
+                        # 어떤 룰에 걸렸는지 기록
+                        for idx in df.index[cond]:
+                            matched_rule_map[idx].append(name)
 
-    if len(rows) > 0:
-        if shortfall_cnt + up_cnt == 0:
-            total_up_rate = 0
-        else:
-            total_up_rate = up_cnt / (shortfall_cnt + up_cnt) * 100
-
-            if render_graph is False:
-                # CSV 저장
-                df = pd.DataFrame(rows)
-
-                df["MACD_hist_3d_rank"] = (
-                    df.groupby("today")["MACD_hist_3d"]
-                    .rank(pct=True)
-                    .round(4)
+                df["matched_rules"] = df.index.map(
+                    lambda idx: ",".join(matched_rule_map[idx])
                 )
 
+                selected = df[mask].copy()
+
+                total_cnt = len(selected)
+                up_cnt = int(selected["is_success"].sum())
+                shortfall_cnt = total_cnt - up_cnt
+                total_up_rate = up_cnt / total_cnt * 100 if total_cnt else 0
+
+                print(f"\n룰 통과 수: {total_cnt}")
+                print(f"룰 통과 후 성공률: {total_up_rate:.2f}% ({up_cnt} / {total_cnt})")
+
+            if render_graph is False:
+
+                # CSV 저장
                 df.to_csv('csv/low_result_7.csv', index=False)  # 인덱스 칼럼 'Unnamed: 0' 생성하지 않음
                 saved = sort_csv_by_today_desc(
                     in_path=r"csv/low_result_7.csv",
@@ -563,45 +491,117 @@ if __name__ == "__main__":
                 )
                 print("saved:", saved)
 
-        print(f"저점 매수 스크립트 결과 : {total_up_rate:.2f}% ({up_cnt} / {shortfall_cnt + up_cnt})")
+
+        if render_graph:
+            plot_jobs = []
+
+            for _, row in selected.iterrows():
+                ticker = row["ticker"]
+                stock_name = row["stock_name"]
+                idx = int(row["idx"])
+
+                filepath = os.path.join(pickle_dir, f"{ticker}.pkl")
+                origin = safe_read_pickle(filepath)
+
+                if origin is None or origin.empty:
+                    continue
+
+                origin = add_technical_features(origin)
+                origin, _ = drop_sparse_columns(
+                    origin,
+                    threshold=0.10,
+                    check_inf=True,
+                    inplace=True
+                )
+                origin, _ = drop_trading_halt_rows(origin)
+                origin = add_technical_features(origin)
+
+                if idx != 0:
+                    chart_data = origin[:-idx].copy()
+                else:
+                    chart_data = origin.copy()
+
+                if chart_data.empty or len(chart_data) < 70:
+                    continue
+
+                today = chart_data.index[-1].strftime("%Y%m%d")
+
+                title = (
+                    f"{today} {stock_name} [{ticker}] "
+                    f"{row['today_pct']}% Daily Chart - "
+                    f"{row['predict_str']} {row['validation_chg_rate']}% "
+                    f"rules={row['matched_rules'][:80]}"
+                )
+
+                final_file_name = (
+                    f"{today} {stock_name} [{ticker}] "
+                    f"{row['today_pct']}%_{row['predict_str']}.webp"
+                )
+
+                save_path = os.path.join(output_dir, final_file_name)
+
+                plot_jobs.append({
+                    "origin": chart_data,
+                    "today": today,
+                    "title": title,
+                    "save_path": save_path,
+                })
 
 
+            for job in plot_jobs:
+                fig = plt.figure(figsize=(14, 16), dpi=150)
+                gs = fig.add_gridspec(nrows=4, ncols=1, height_ratios=[3, 1, 3, 1])
 
-    # 싱글 스레드로 그래프 처리
-    for job in plot_jobs:
-        # 그래프 생성
-        fig = plt.figure(figsize=(14, 16), dpi=150)
-        gs = fig.add_gridspec(nrows=4, ncols=1, height_ratios=[3, 1, 3, 1])
+                ax_d_price = fig.add_subplot(gs[0, 0])
+                ax_d_vol   = fig.add_subplot(gs[1, 0], sharex=ax_d_price)
+                ax_w_price = fig.add_subplot(gs[2, 0])
+                ax_w_vol   = fig.add_subplot(gs[3, 0], sharex=ax_w_price)
 
-        ax_d_price = fig.add_subplot(gs[0, 0])
-        ax_d_vol   = fig.add_subplot(gs[1, 0], sharex=ax_d_price)
-        ax_w_price = fig.add_subplot(gs[2, 0])
-        ax_w_vol   = fig.add_subplot(gs[3, 0], sharex=ax_w_price)
+                plot_candles_daily(
+                    job["origin"],
+                    show_months=4,
+                    title=job["title"],
+                    ax_price=ax_d_price,
+                    ax_volume=ax_d_vol,
+                    date_tick=5,
+                    today=job["today"],
+                )
 
-        plot_candles_daily(job["origin"], show_months=4, title=f'{job["title"]}',
-                            ax_price=ax_d_price, ax_volume=ax_d_vol, date_tick=5, today=job["today"])
+                plot_candles_weekly(
+                    job["origin"],
+                    show_months=12,
+                    title="Weekly Chart",
+                    ax_price=ax_w_price,
+                    ax_volume=ax_w_vol,
+                    date_tick=5,
+                )
 
-        plot_candles_weekly(job["origin"], show_months=12, title="Weekly Chart",
-                            ax_price=ax_w_price, ax_volume=ax_w_vol, date_tick=5)
-
-        plt.tight_layout()
-        # plt.show()
-
-        # 파일 저장 (옵션)
-        plt.savefig(job["save_path"], format="webp", dpi=100, bbox_inches="tight", pad_inches=0.1)
-        plt.close()
-    if len(plot_jobs) > 0:
-        print('\n그래프 생성 완료')
+                plt.tight_layout()
+                plt.savefig(
+                    job["save_path"],
+                    format="webp",
+                    dpi=100,
+                    bbox_inches="tight",
+                    pad_inches=0.1
+                )
+                plt.close()
 
 
+            if len(selected) > 0 and render_graph:
+                print("\n그래프 생성 완료")
 
-    end = time.time()     # 끝 시간(초)
-    elapsed = end - start
 
-    hours, remainder = divmod(int(elapsed), 3600)
-    minutes, seconds = divmod(remainder, 60)
+        end = time.time()     # 끝 시간(초)
+        elapsed = end - start
 
-    print(f"총 소요 시간: {hours}시간 {minutes}분 {seconds}초")
-    # log_file.close()
-    # print(f"총 소요 시간: {hours}시간 {minutes}분 {seconds}초")
+        hours, remainder = divmod(int(elapsed), 3600)
+        minutes, seconds = divmod(remainder, 60)
 
+        print(f"총 소요 시간: {hours}시간 {minutes}분 {seconds}초")
+        # log_file.close()
+        # print(f"총 소요 시간: {hours}시간 {minutes}분 {seconds}초")
+
+    except KeyboardInterrupt:
+        print("\n사용자 중지 요청 감지. 작업을 종료합니다.")
+        executor.shutdown(wait=False, cancel_futures=True)
+        raise
