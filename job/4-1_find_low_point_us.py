@@ -165,13 +165,6 @@ def process_one(idx, count, ticker, exchangeRate):
     today_chg_rate=(m_current-m_max)/m_max*100      # 최근 3개월 최고 대비 오늘 등락률 계산
 
 
-    result = low_weekly_check(m_data)
-    if result["ok"]:
-        # ★★★★★ 저번주 대비 이번주 증감률 -1%보다 낮으면 패스 (아직 하락 추세) ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-        if result["is_drop_more_than_minus1pct"]:
-            # return
-            pass
-
 
     ########################################################################
 

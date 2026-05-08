@@ -530,5 +530,5 @@ if __name__ == "__main__":
     hours, remainder = divmod(int(elapsed), 3600)
     minutes, seconds = divmod(remainder, 60)
 
-    print(f"총 소요 시간: {hours}시간 {minutes}분 {seconds}초")
+    print(f"7-1_find_low_point_us.py 총 소요 시간: {hours}시간 {minutes}분 {seconds}초")
 

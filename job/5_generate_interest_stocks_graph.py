@@ -168,7 +168,7 @@ if __name__ == "__main__":
         # 파일 저장 (옵션)
         plt.savefig(job["save_path"], format="webp", dpi=100, bbox_inches="tight", pad_inches=0.1)
         plt.close()
-    print('\n그래프 갱신 완료')
+    print('\n5_generate_interest_stocks_graph - 그래프 갱신 완료')
 
     end = time.time()     # 끝 시간(초)
     elapsed = end - start
