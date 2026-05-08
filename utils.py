@@ -923,7 +923,7 @@ def add_technical_features(data):
     매수세(황소)와 매도세(곰) 힘을 비교. 양수면 매수세 우위
     추세의 속도 확인
     """
-    data['ROC12_pct'] = compute_roc(c, 12, pct=True)
+    # data['ROC12_pct'] = compute_roc(c, 12, pct=True)
 
     ###########################################################
 
