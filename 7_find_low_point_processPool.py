@@ -3,9 +3,10 @@
 signal_any_drop 를 통해서 5일선이 20일선보다 아래에 있으면서 최근 -3%이 존재 + 오늘 4% 이상 상승
 
 2025-02-02 되면 멈추는 조건 필요
+데드캣 공통 필터 개선 필요
 '''
 import matplotlib
-matplotlib.use("Agg")  # ✅ 비인터랙티브 백엔드 (창 안 띄움)
+matplotlib.use("Agg")  # 비인터랙티브 백엔드 (창 안 띄움)
 import os, sys
 import numpy as np
 import pandas as pd
@@ -48,6 +49,11 @@ output_dir = 'F:\\5below20_test'
 
 # 목표 검증 수익률
 VALIDATION_TARGET_RETURN = 7
+EXECUTION_RATIO = 1
+# 최고가 판매는 힘드니까 보수적으로
+REQUIRED_HIGH_RETURN = VALIDATION_TARGET_RETURN * EXECUTION_RATIO
+VALIDATION_DAYS = 7
+STOP_LOSS = -2
 render_graph = 0
 
 TEST_OFFSET = 60
@@ -136,6 +142,8 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
     mean_prev3 = round(trading_value.iloc[:-1].tail(3).mean(), 2)    # 마지막 3일 거래대금 평균
     mean_prev5 = round(trading_value.iloc[:-1].tail(5).mean(), 2)    # 마지막 3일 거래대금 평균
     mean_prev20 = round(trading_value.iloc[:-1].tail(20).mean(), 2)  # 마지막 20일 거래대금 평균
+    _mean_prev5_eok = mean_prev5 / 100_000_000
+    _mean_prev20_eok = mean_prev20 / 100_000_000
 
 
     # ★★★★★ 20거래일 평균 거래대금 4억보다 작으면 패스 ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
@@ -156,7 +164,7 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
     - 거래량 증가
     """
     # 오늘 제외 최근 7일 5일선이 20일선보다 계속 낮은데 -2.5% 하락이 있으면서 오늘 3.3% 상승 ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-    signal = signal_any_drop(data, 7, 3.3, -2)
+    signal = signal_any_drop(data, 7, 3.3, -2.5)
     # signal = signal_any_drop(data, 7, 2, -2.5)
     # signal = signal_any_drop(data, 8, 3.5, -3.0)
     if not signal:
@@ -165,7 +173,7 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
     ########################################################################
     # feature 만들기
     last = data.iloc[-1]
-    
+
     # 오늘의 5일션 변동율
     _ma5_today          = data['MA5'].iloc[-1]
     _ma5_yesterday      = data['MA5'].iloc[-2]
@@ -179,7 +187,7 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
     tr_value_ratio_3d = 0
     _tr_value_ratio_5d = 0
     tr_value_ratio_20d = 0
-    
+
     if mean_prev3 > 0 and np.isfinite(mean_prev3):
         tr_value_ratio_3d = today_tr_val / (mean_prev3 + 1e-9)
 
@@ -225,7 +233,7 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
     # ma5_ma20_gap_chg_3d   = _ma5_ma20_gap - _ma5_ma20_gap_3d_ago  # 중복
 
     # 20일 저가~고가 구간에서 현재 종가가 어디쯤 있는지를 보는 값 (dist_to_ma20 상관 0.882)
-    close_pos_20d        = (last["종가"] - _low_20d) / (_high_20d - _low_20d + 1e-9)
+    _close_pos_20d        = (last["종가"] - _low_20d) / (_high_20d - _low_20d + 1e-9)
 
     # -------------------------------
     # 지표
@@ -307,63 +315,66 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
         "max_drop_7d": max_drop_7d,
 
         "dist_from_low_20d": dist_from_low_20d,
-        "dist_from_low_60d": dist_from_low_60d,
         "dist_to_ma5": dist_to_ma5,
-        # "dist_to_ma20": dist_to_ma20,  # close_pos_20d가 조합에 더 좋음 (AUC 0.524)
-        "close_pos_20d": close_pos_20d,
         "ma5_ma20_gap_chg_1d": ma5_ma20_gap_chg_1d,
-        # "ma5_recovery_rate_3d": ma5_recovery_rate_3d,  # ma5_ma20_gap_chg_1d, dist_to_ma20 겹침 (AUC 0.525)
-        # "ma5_chg_rate": ma5_chg_rate,  # ma5_ma20_gap_chg_1d 상관 0.930
 
         "today_tr_val_eok": today_tr_val_eok,
         "tr_val_rank_20d": tr_val_rank_20d,
 
         "MACD_hist_3d": MACD_hist_3d,
         "ATR_pct": ATR_pct,
+
+
+        # "_mean_prev20_eok": _mean_prev20_eok,  # 거래대금 확인용
+        # "dist_from_low_60d": dist_from_low_60d,  # 약함
+        # "dist_to_ma20": dist_to_ma20,  # _close_pos_20d가 조합에 더 좋음 (AUC 0.524)
+        # "_close_pos_20d": _close_pos_20d,  # dist_from_low_20d, dist_to_ma5 에서도 반영됨
+        # "ma5_recovery_rate_3d": ma5_recovery_rate_3d,  # ma5_ma20_gap_chg_1d, dist_to_ma20 겹침 (AUC 0.525)
+        # "ma5_chg_rate": ma5_chg_rate,  # ma5_ma20_gap_chg_1d 상관 0.930
     }
 
 
     ############################  deadcat_filter  ###########################
 
     # 성공 최저 확인용
-    other_rule_features = {
-        "_tr_value_ratio": _tr_value_ratio,
-        "_tr_value_ratio_5d": _tr_value_ratio_5d,
-        "_dist_to_high_20d": _dist_to_high_20d,
-        "_BB_perc": _BB_perc,
-        "_UltimateOsc": _UltimateOsc,
-        "_CCI14": _CCI14,
-        "_ADX14": _ADX14,
-        "_gap_pct": _gap_pct,
-        "_vol_ratio_15_60": _vol_ratio_15_60,
-        "_RSI_rebound": _RSI_rebound,
-        "_rebound_power": _rebound_power,
-        "_MACD_hist_1d": _MACD_hist_1d,
-        "_MACD_acc": _MACD_acc,
-        "_MACD_hist_3d_close_norm": _MACD_hist_3d_close_norm,
-    }
-
-    rule_features.update(other_rule_features)
-
+    # risk_rule_features  = {
+    #     "_tr_value_ratio": _tr_value_ratio,
+    #     "_tr_value_ratio_5d": _tr_value_ratio_5d,
+    #     "_dist_to_high_20d": _dist_to_high_20d,
+    #     "_BB_perc": _BB_perc,
+    #     "_UltimateOsc": _UltimateOsc,
+    #     "_CCI14": _CCI14,
+    #     "_ADX14": _ADX14,
+    #     "_gap_pct": _gap_pct,
+    #     "_vol_ratio_15_60": _vol_ratio_15_60,
+    #     "_RSI_rebound": _RSI_rebound,
+    #     "_rebound_power": _rebound_power,
+    #     "_MACD_hist_1d": _MACD_hist_1d,
+    #     "_MACD_acc": _MACD_acc,
+    #     "_MACD_hist_3d_close_norm": _MACD_hist_3d_close_norm,
+    # }
+    #
+    # rule_features.update(risk_rule_features )
+    #
     # if ATR_pct < 2.463:
     #     return
     # if today_tr_val_eok < 0.594:
     #     return
-    # if close_pos_20d < 0.043:
+    # if _close_pos_20d < 0.043:
     #     return
     # if dist_to_ma5 < -16.293:
     #     return
-    # if dist_from_low_20d < 3.302:
+    # if dist_from_low_20d < 3.311:
     #     return
     # if ma5_ma20_gap_chg_1d < -5.933:
     #     return
     # if today_tr_val_eok < 0.594:
     #     return
-    # if _MACD_hist_3d_close_norm < -5.386:
+    # if _MACD_hist_3d_close_norm < -5.386:  # -4.045
     #     return
-    # if _BB_perc < -0.117:
+    # if _BB_perc < -0.117:  # -0.073
     #     return
-    # if _dist_to_high_20d < -72.546:
+    # if _dist_to_high_20d < -72.546:  # -63.590
     #     return
     # if _UltimateOsc < 12.458:
     #     return
@@ -381,7 +392,7 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
     #     return
     # if _RSI_rebound < -15.247:
     #     return
-    # if _rebound_power < 1.823:
+    # if _rebound_power < 1.823:  # 1.890
     #     return
     # if _MACD_hist_1d < -553.4:
     #     return
@@ -390,90 +401,237 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
 
     ########################################################################
 
+    row = {
+        "stock_name": stock_name,
+        "today" : str(data.index[-1].date()),
+        "idx": idx,
+    }
+
     m_data = data[-60:] # 뒤에서 x개 (3개월 정도)
     m_current = m_data['종가'].iloc[-1]                               # 오늘 종가, 검증 데이터로 잘랐다면 검증 직전까지의 마지막 값 (수익률 분석 용도)
 
-    predict_str = ''
-    validation_chg_rate = 0
-    validation_chg_rate1 = 0
-    validation_chg_rate2 = 0
-    validation_chg_rate3 = 0
-    validation_chg_rate4 = 0
-    validation_chg_rate5 = 0
-    validation_chg_rate6 = 0
-    validation_chg_rate7 = 0
-    validation_chg_rate_min = 0
+    # result = low_weekly_check(m_data)
 
     # 검증 데이터 (마지막 n일)
     if remaining_data is not None:
-        r_closes = remaining_data['종가'].iloc[:7].reset_index(drop=True)  # Series 인덱스 새로
-        r_closes = r_closes.reindex(range(7))      # 0~6 없으면 NaN으로 채움
-        r_max = r_closes.max(skipna=True)          # 결측치(NaN)를 무시하고 계산
-        r_min = r_closes.max(skipna=True)          # 결측치(NaN)를 무시하고 계산
+        r_closes = remaining_data['종가'].iloc[:VALIDATION_DAYS].reset_index(drop=True)  # Series 인덱스 새로
+        r_highs  = remaining_data["고가"].iloc[:VALIDATION_DAYS].reset_index(drop=True)
+        r_lows   = remaining_data["저가"].iloc[:VALIDATION_DAYS].reset_index(drop=True)
+        r_opens  = remaining_data["시가"].iloc[:VALIDATION_DAYS].reset_index(drop=True)
 
-        r1, r2, r3, r4, r5, r6, r7 = (r_closes.iloc[i] for i in range(7))
+        r_closes = r_closes.reindex(range(VALIDATION_DAYS))      # 0~6 없으면 NaN으로 채움
+        r_highs  = r_highs.reindex(range(VALIDATION_DAYS))
+        r_lows   = r_lows.reindex(range(VALIDATION_DAYS))
+        r_opens  = r_opens.reindex(range(VALIDATION_DAYS))
 
-        # 마지막 종가로부터 n일차 동안의 수익률
-        validation_chg_rate  = round(safe_rate(r_max, m_current), 2)
-        validation_chg_rate1 = round(safe_rate(r1, m_current), 2)
-        validation_chg_rate2 = round(safe_rate(r2, m_current), 2)
-        validation_chg_rate3 = round(safe_rate(r3, m_current), 2)
-        validation_chg_rate4 = round(safe_rate(r4, m_current), 2)
-        validation_chg_rate5 = round(safe_rate(r5, m_current), 2)
-        validation_chg_rate6 = round(safe_rate(r6, m_current), 2)
-        validation_chg_rate7 = round(safe_rate(r7, m_current), 2)
-        validation_chg_rate_min = round(safe_rate(r_min, m_current), 2)
+        # 익절 가능 최대 수익률: 고가 기준
+        validation_high_rate_max     = safe_rate(r_highs.max(skipna=True), m_current)  # 결측치(NaN)를 무시하고 계산
+        validation_close_rate_max    = safe_rate(r_closes.max(skipna=True), m_current) # 익절 기준: 종가
 
-        predict_str = '상승'
-        if validation_chg_rate < VALIDATION_TARGET_RETURN:
-            predict_str = '미달'
+        # 손절 위험 최소 수익률: 저가 기준
+        validation_low_rate_min      = safe_rate(r_lows.min(skipna=True), m_current)
 
-    # result = low_weekly_check(m_data)
+        # 일별 종가 수익률: 참고용
+        close_rates = [
+            safe_rate(r_closes.iloc[i], m_current)
+            for i in range(VALIDATION_DAYS)
+        ]
+
+        # 일별 고가 수익률: 익절 판정용
+        high_rates = [
+            safe_rate(r_highs.iloc[i], m_current)
+            for i in range(VALIDATION_DAYS)
+        ]
+
+        # 일별 저가 수익률: 손절 판정용
+        low_rates = [
+            safe_rate(r_lows.iloc[i], m_current)
+            for i in range(VALIDATION_DAYS)
+        ]
+
+        # 시가
+        open_rates = [
+            safe_rate(r_opens.iloc[i], m_current)
+            for i in range(VALIDATION_DAYS)
+        ]
+
+        # +7% 닿으면 매도
+        profit_day5 = next(
+            (i for i, r in enumerate(high_rates, start=1)  # 익절 기준: 고가
+            # (i for i, r in enumerate(close_rates, start=1)  # 익절 기준: 종가
+             if r >= 5),
+            None
+        )
+
+        profit_day7 = next(
+            (i for i, r in enumerate(high_rates, start=1)  # 익절 기준: 고가
+             if r >= 7),
+            None
+        )
+
+        profit_day10 = next(
+            (i for i, r in enumerate(high_rates, start=1)  # 익절 기준: 고가
+             if r >= 10),
+            None
+        )
+
+        stop_day = next(
+            (i for i, r in enumerate(low_rates, start=1)
+             if r <= STOP_LOSS),
+            None
+        )
+
+        max_high_7d = validation_high_rate_max
+
+        if max_high_7d < 5:
+            target_class = 0
+        elif max_high_7d < 7:
+            target_class = 1
+        elif max_high_7d < 10:
+            target_class = 2
+        else:
+            target_class = 3
+
+
+        validation_row = {
+            # 고가 기준 최대 수익률
+            "validation_high_rate_max": validation_high_rate_max,
+            "validation_high_rate_max_adj": validation_high_rate_max * EXECUTION_RATIO,
+
+            # 저가 기준 최저 수익률
+            "validation_low_rate_min": validation_low_rate_min,
+
+            # 종가 기준 일별 수익률
+            "validation_close_rate1": close_rates[0],
+            "validation_close_rate2": close_rates[1],
+            "validation_close_rate3": close_rates[2],
+            "validation_close_rate4": close_rates[3],
+            "validation_close_rate5": close_rates[4],
+            "validation_close_rate6": close_rates[5],
+            "validation_close_rate7": close_rates[6],
+
+            # 고가 기준 일별 수익률
+            "validation_high_rate1": high_rates[0],
+            "validation_high_rate2": high_rates[1],
+            "validation_high_rate3": high_rates[2],
+            "validation_high_rate4": high_rates[3],
+            "validation_high_rate5": high_rates[4],
+            "validation_high_rate6": high_rates[5],
+            "validation_high_rate7": high_rates[6],
+
+            # 저가 기준 일별 수익률
+            "validation_low_rate1": low_rates[0],
+            "validation_low_rate2": low_rates[1],
+            "validation_low_rate3": low_rates[2],
+            "validation_low_rate4": low_rates[3],
+            "validation_low_rate5": low_rates[4],
+            "validation_low_rate6": low_rates[5],
+            "validation_low_rate7": low_rates[6],
+
+            # 시가 기준 일별 수익률
+            "validation_open_rate1": open_rates[0],
+            "validation_open_rate2": open_rates[1],
+            "validation_open_rate3": open_rates[2],
+            "validation_open_rate4": open_rates[3],
+            "validation_open_rate5": open_rates[4],
+            "validation_open_rate6": open_rates[5],
+            "validation_open_rate7": open_rates[6],
+        }
+
+        row.update(validation_row)
+
+        """
+        stop_loss 라벨은 백테스트 매매 결과 계산용으로 좋다
+        룰 마이닝 전에 하면 정보가 줄어든다
+    
+        profit_first:      익절 먼저
+        stop_first:        손절 먼저
+        no_hit:            익절/손절 둘 다 없음
+        same_day_or_edge:  경계 케이스 (고가 뚫고 저가 내려가면 여기)
+        
+        1. 손절 방어 룰:
+          stop_first vs 나머지
+        
+        2. 성공 룰:
+          profit_first vs 나머지
+        
+        3. 무반응 제거 룰:
+          no_hit vs 나머지
+        
+        4. same_day_or_edge
+          4-1) profit_day와 stop_day가 같은 날 (찍고 내려오나 이탈한 뒤 성공, 보수적으로 실패)
+          4-2) 둘 다 존재하지만 어느 분기에도 명확히 안 들어가는 경계 케이스
+          trailing_stop 사용으로 도달 못하게 해야함
+        """
+        # if profit_day is not None and stop_day is not None:
+        #     if profit_day < stop_day:
+        #         result_type = "profit_first"  # 성공 먼저
+        #         is_success = 1
+        #
+        #     elif stop_day < profit_day:
+        #         result_type = "stop_first"  # 이탈 먼저
+        #         is_success = 0
+        #
+        #     else:
+        #         open_rate = open_rates[profit_day - 1]
+        #
+        #         if open_rate >= REQUIRED_HIGH_RETURN:
+        #             result_type = "profit_at_open"  # 시가 성공
+        #             is_success = 1
+        #
+        #         elif open_rate <= STOP_LOSS:
+        #             result_type = "stop_at_open"  # 시가 스탑로스
+        #             is_success = 0
+        #
+        #         elif close_rates[profit_day - 1] >= REQUIRED_HIGH_RETURN:
+        #             result_type = "profit_at_close"  # 종가 성공
+        #             is_success = 1
+        #
+        #         else:
+        #             result_type = "same_day_unknown_order"
+        #             is_success = 0
+        #
+        # elif profit_day is not None:
+        #     result_type = "profit_only"
+        #     is_success = 1
+        #
+        # elif stop_day is not None:
+        #     result_type = "stop_only"
+        #     is_success = 0
+        #
+        # else:
+        #     result_type = "no_hit"
+        #     is_success = 0
+
+
+        """
+        class_0~3 구간 분류
+          1. class_0 제거 룰을 먼저 만든다.
+          2. class_1은 부분익절 또는 짧은 매도 후보로 본다.
+          3. class_2는 기존 7% target 후보로 본다.
+          4. class_3은 트레일링 스탑으로 더 끌고 갈 후보로 본다.
+          
+        1~3일 안에 고가 +3% 이상을 한 번도 못 찍고
+        저가가 -2% 이하로 밀리고
+        종가가 계속 음수면
+        데드캣 가능성이 높다.
+        """
+        # row["is_success"]  = is_success
+        row["is_success5"]  = 1 if profit_day5 is not None else 0
+        row["is_success7"]  = 1 if profit_day7 is not None else 0
+        row["is_success10"]  = 1 if profit_day10 is not None else 0
+        row["target_pct"]    = REQUIRED_HIGH_RETURN
+        row["target_class"] = target_class
+        row["stop_loss"]   = STOP_LOSS
+        # row["predict_str"] = "상승" if row["is_success"] else "미달"
+
 
 
     ########################################################################
 
-    row = {
-        "stock_name": stock_name,
-        "today" : str(data.index[-1].date()),
-        "predict_str": predict_str,                      # 상승/미달
-        "idx": idx,
-
-        "validation_chg_rate": validation_chg_rate,      # 검증 등락률
-        "validation_chg_rate1": validation_chg_rate1,    # 검증 등락률
-        "validation_chg_rate2": validation_chg_rate2,    # 검증 등락률
-        "validation_chg_rate3": validation_chg_rate3,    # 검증 등락률
-        "validation_chg_rate4": validation_chg_rate4,    # 검증 등락률
-        "validation_chg_rate5": validation_chg_rate5,    # 검증 등락률
-        "validation_chg_rate6": validation_chg_rate6,    # 검증 등락률
-        "validation_chg_rate7": validation_chg_rate7,    # 검증 등락률
-    }
     row.update(rule_features)
     row = round_float_features(row)
     row["ticker"] = ticker  # 종목코드 숫자 float 처리 되어서 밖으로 뺌
-
-    # 처음으로 수익률 뚫는 날, 조건이 뚫을 수 있는지 확인
-    vals = [
-        validation_chg_rate1,
-        validation_chg_rate2,
-        validation_chg_rate3,
-        validation_chg_rate4,
-        validation_chg_rate5,
-        validation_chg_rate6,
-        validation_chg_rate7,
-    ]
-
-    hit_day = None
-
-    for i, v in enumerate(vals, start=1):
-        if v >= VALIDATION_TARGET_RETURN:
-            hit_day = i
-            break
-
-    row["hit_day"] = hit_day if hit_day is not None else 0
-    row["is_success"] = 1 if hit_day is not None else 0
-    row["target"] = VALIDATION_TARGET_RETURN
-
 
     return {
         "row": row,
@@ -511,7 +669,6 @@ if __name__ == "__main__":
                     print("worker error:", e)
                     raise
 
-
                 for res in results:
                     row = res["row"]
                     rows.append(row)
@@ -522,14 +679,6 @@ if __name__ == "__main__":
 
         if len(rows) > 0:
             df = pd.DataFrame(rows)
-
-            # df["MACD_hist_3d_rank"] = (
-            #     df.groupby("today")["MACD_hist_3d"]
-            #     .rank(pct=True)
-            #     .round(4)
-            # )
-            # MACD_hist_3d_rank 생성 후 제거
-            # df.drop(columns=["MACD_hist_3d"], inplace=True)
 
             if render_graph == 1:
                 mask = pd.Series(False, index=df.index)
@@ -557,13 +706,13 @@ if __name__ == "__main__":
 
                 selected = df[mask].copy()
 
-                total_cnt = len(selected)
-                up_cnt = int(selected["is_success"].sum())
-                shortfall_cnt = total_cnt - up_cnt
-                total_up_rate = up_cnt / total_cnt * 100 if total_cnt else 0
-
-                print(f"\n룰 통과 수: {total_cnt}")
-                print(f"룰 통과 후 성공률: {total_up_rate:.2f}% ({up_cnt} / {total_cnt})")
+                # total_cnt = len(selected)
+                # up_cnt = int(selected["is_success"].sum())
+                # shortfall_cnt = total_cnt - up_cnt
+                # total_up_rate = up_cnt / total_cnt * 100 if total_cnt else 0
+                #
+                # print(f"\n룰 통과 수: {total_cnt}")
+                # print(f"룰 통과 후 성공률: {total_up_rate:.2f}% ({up_cnt} / {total_cnt})")
 
             if render_graph == 0:
                 # CSV 저장
@@ -623,13 +772,13 @@ if __name__ == "__main__":
                 title = (
                     f"{today} {stock_name} [{ticker}] "
                     f"{row['today_pct']}% Daily Chart - "
-                    f"{row['predict_str']} {row['validation_chg_rate']}% "
+                    f"{row['today_pct']}%_{row['validation_high_rate_max_adj']}% "
                     f"rules={row['matched_rules'][:80]}"
                 )
 
                 final_file_name = (
                     f"{today} {stock_name} [{ticker}] "
-                    f"{row['today_pct']}%_{row['predict_str']}.webp"
+                    f"{row['today_pct']}%_{row['validation_high_rate_max_adj']}%.webp"
                 )
 
                 save_path = os.path.join(output_dir, final_file_name)
@@ -691,9 +840,8 @@ if __name__ == "__main__":
         hours, remainder = divmod(int(elapsed), 3600)
         minutes, seconds = divmod(remainder, 60)
 
-        print(f"총 소요 시간: {hours}시간 {minutes}분 {seconds}초")
+        print(f"7_find_low_point_processPool.py 총 소요 시간: {hours}시간 {minutes}분 {seconds}초")
         # log_file.close()
-        # print(f"총 소요 시간: {hours}시간 {minutes}분 {seconds}초")
 
     except KeyboardInterrupt:
         print("\n사용자 중지 요청 감지. 작업을 종료합니다.")
