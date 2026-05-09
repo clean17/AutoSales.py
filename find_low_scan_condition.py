@@ -39,16 +39,22 @@ GOOD_EXPAND_RATIO = [0.27, 0.38, 0.60, 0.76, 0.8]
 MIN_BAD_RATE = 0.50      # 룰에 걸린 종목 중 class_0이 최소 55% 이상이어야 저장
 MAX_PROTECT_RATE = 0.40  # 룰에 걸린 종목 중 class_2+3이 35% 이하여야 저장
 MAX_STRONG_RATE = 0.20   # 룰에 걸린 종목 중 class_3이 25% 이하여야 저장
+AVOID_EXPAND_BAD_RATIO   # 해당 룰에 걸린 종목 중 class0 비율이 최소 몇 % 이상이어야 다음 단계로 확장할지
+AVOID_EXPAND_MAX_STRONG_RATE # 해당 룰에 걸린 종목 중 class3 비율이 최대 몇 % 이하여야 다음 단계로 확장할지
 """
-CLASS_3_LOSS_LIMIT = 0.025
+CLASS_3_LOSS_LIMIT = 0.013
 AVOID_TOP_N = 5000
 
-MIN_BAD_RATE = 0.45
-MAX_PROTECT_RATE = 0.48
+MIN_BAD_RATE = 0.60
+MAX_PROTECT_RATE = 0.25
 MAX_STRONG_RATE = 0.20
 
 AVOID_EXPAND_BAD_RATIO = [0.33, 0.45, 0.58, 0.68, 0.78]
 AVOID_EXPAND_MAX_STRONG_RATE = [0.50, 0.40, 0.30, 0.20, 0.12]
+
+CLASS_2_SCORE = 2.0
+CLASS_3_SCORE = 2.5
+
 
 GOOD_OUT_PATH = Path("lowscan_rules.py")
 GOOD_EVAL_PATH = Path("csv/good_rule_eval.csv")
@@ -211,7 +217,7 @@ def build_literals(df, features):
         if len(col_nonan) == 0:
             continue
 
-        print(f, len(col_nonan), len(np.unique(col_nonan)))
+        # print(f, len(col_nonan), len(np.unique(col_nonan)))
 
         # 분위수(percentile) 배열 생성 (덜 촘촘하게 = 과적합 방지하면서 빠르게)
         unique_vals = np.unique(col_nonan)
@@ -277,7 +283,6 @@ def mine_good_rules(
     |     2 | 1,000 ~ 10,000 | 3개 조건 조합      |
     |     3 | 1,000 ~ 10,000 | 4개 조건 조합      |
     |     4 |    100 ~ 3,000 | 5개 조건 최종 후보 |
-
 
     :returns (count, ratio, up_cnt, conds) 리스트 반환
     """
@@ -446,6 +451,8 @@ def mine_avoid_rules(
         "\nmax_protect_rate", MAX_PROTECT_RATE,
         "\nmax_strong_rate", MAX_STRONG_RATE,
         "\nclass_3_loss_limit", CLASS_3_LOSS_LIMIT,
+        "\nclass_2_score", CLASS_2_SCORE,
+        "\nclass_3_score", CLASS_3_SCORE,
         "\n"
     )
 
@@ -959,34 +966,6 @@ def find_avoid_rule():
         group_limits=group_limits,
     )
 
-    # selected = []
-    #
-    # for i, (
-    #         cnt,
-    #         bad_cnt,
-    #         bad_rate,
-    #         protect_cnt,
-    #         protect_rate,
-    #         strong_cnt,
-    #         strong_rate,
-    #         conds,
-    #         score,
-    # ) in enumerate(rules, start=1):
-    #
-    #     name = (
-    #         f"avoid_{i:03d}"
-    #         f"_s{score:.2f}"
-    #         f"_n{cnt}"
-    #         f"_bad{bad_rate:.3f}"
-    #         f"_p{protect_rate:.3f}"
-    #         f"_strong{strong_rate:.3f}"
-    #     )
-    #
-    #     mask = make_mask_from_conds(df, conds)
-    #
-    #     if test_avoid_condition(name, mask, df, verbose=False):
-    #         selected.append((name, conds))
-
     selected, avoid_mask = select_avoid_rules_max_class0_under_class3_limit(
         df=df,
         rules=rules,
@@ -1097,8 +1076,8 @@ def select_avoid_rules_max_class0_under_class3_limit(
             # class2도 보호해야 하므로 약하게 패널티
             efficiency = (
                     added_class0
-                    - 2.5 * added_class3
-                    - 0.8 * added_class2
+                    - CLASS_3_SCORE * added_class3
+                    - CLASS_2_SCORE * added_class2
             )
 
             # 너무 작은 추가 효과는 제외
@@ -1175,3 +1154,9 @@ if __name__ == "__main__":
             if MODE in ("avoid", "both"):
                 # class_0 제거용 데드캣 제외 룰 생성
                 find_avoid_rule()
+
+    import winsound
+
+    winsound.Beep(1500, 500)  # 1000Hz, 0.5초
+    winsound.Beep(1000, 500)  # 1000Hz, 0.5초
+
