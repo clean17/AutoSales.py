@@ -23,30 +23,29 @@ from pathlib import Path
 import heapq
 from itertools import count
 
-# 컬럼 전체 출력
-pd.set_option("display.max_columns", None)
-# 행 전체 출력
-pd.set_option("display.max_rows", None)
-# 컬럼 너비 제한 해제
-pd.set_option("display.max_colwidth", None)
-
 
 CSV_PATH = "csv/low_result_7_desc.csv"
 
 MIN_RATE     = 0.83
 MIN_CNT      = 25
-MIN_CNT_AVOID = 40
+MIN_CNT_AVOID = 30
 MAX_DEPTH    = 4
 MAX_DEPTH_AVOID = 5
 
 # GOOD_EXPAND_RATIO = [0.32, 0.39, 0.54, 0.7, 0.8] # 28, 6000, 16000
 GOOD_EXPAND_RATIO = [0.27, 0.38, 0.60, 0.76, 0.8]
 
+"""
 MIN_BAD_RATE = 0.50      # 룰에 걸린 종목 중 class_0이 최소 55% 이상이어야 저장
 MAX_PROTECT_RATE = 0.40  # 룰에 걸린 종목 중 class_2+3이 35% 이하여야 저장
 MAX_STRONG_RATE = 0.20   # 룰에 걸린 종목 중 class_3이 25% 이하여야 저장
-# AVOID_EXPAND_BAD_RATIO = [0.35, 0.50, 0.68, 0.78, 0.88]
-# AVOID_EXPAND_MAX_STRONG_RATE = [0.40, 0.28, 0.18, 0.08, 0.02]
+"""
+AVOID_TOP_N = 1000
+
+MIN_BAD_RATE = 0.48
+MAX_PROTECT_RATE = 0.45
+MAX_STRONG_RATE = 0.20
+
 AVOID_EXPAND_BAD_RATIO = [0.33, 0.45, 0.58, 0.68, 0.78]
 AVOID_EXPAND_MAX_STRONG_RATE = [0.50, 0.40, 0.30, 0.20, 0.12]
 
@@ -873,7 +872,7 @@ def save_combined_avoid_eval(df, selected, out_csv="combined_avoid_eval.csv"):
     }])
 
     summary.to_csv(out_csv, index=False, encoding="utf-8-sig")
-    print(summary)
+    print(summary.T)
 
 
 def find_good_rule(m_ratio, m_count):
@@ -953,7 +952,7 @@ def find_avoid_rule():
         min_count=MIN_CNT_AVOID,
         max_depth=MAX_DEPTH_AVOID,
         beam=30000,
-        top_n=300,
+        top_n=AVOID_TOP_N,
         feature_groups=feature_groups,
         group_limits=group_limits,
     )
