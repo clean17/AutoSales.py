@@ -40,10 +40,11 @@ MIN_BAD_RATE = 0.50      # 룰에 걸린 종목 중 class_0이 최소 55% 이상
 MAX_PROTECT_RATE = 0.40  # 룰에 걸린 종목 중 class_2+3이 35% 이하여야 저장
 MAX_STRONG_RATE = 0.20   # 룰에 걸린 종목 중 class_3이 25% 이하여야 저장
 """
-AVOID_TOP_N = 1000
+CLASS_3_LOSS_LIMIT = 0.025
+AVOID_TOP_N = 5000
 
-MIN_BAD_RATE = 0.48
-MAX_PROTECT_RATE = 0.45
+MIN_BAD_RATE = 0.45
+MAX_PROTECT_RATE = 0.48
 MAX_STRONG_RATE = 0.20
 
 AVOID_EXPAND_BAD_RATIO = [0.33, 0.45, 0.58, 0.68, 0.78]
@@ -441,9 +442,10 @@ def mine_avoid_rules(
         "\nexpand_bad_ratio", AVOID_EXPAND_BAD_RATIO,
         "\nexpand_max_strong_rate", AVOID_EXPAND_MAX_STRONG_RATE,
         "\ntop_n", top_n,
-        "\nMIN_BAD_RATE", MIN_BAD_RATE,
-        "\nMAX_PROTECT_RATE", MAX_PROTECT_RATE,
-        "\nMAX_STRONG_RATE", MAX_STRONG_RATE,
+        "\nmin_bad_rate", MIN_BAD_RATE,
+        "\nmax_protect_rate", MAX_PROTECT_RATE,
+        "\nmax_strong_rate", MAX_STRONG_RATE,
+        "\nclass_3_loss_limit", CLASS_3_LOSS_LIMIT,
         "\n"
     )
 
@@ -957,7 +959,79 @@ def find_avoid_rule():
         group_limits=group_limits,
     )
 
+    # selected = []
+    #
+    # for i, (
+    #         cnt,
+    #         bad_cnt,
+    #         bad_rate,
+    #         protect_cnt,
+    #         protect_rate,
+    #         strong_cnt,
+    #         strong_rate,
+    #         conds,
+    #         score,
+    # ) in enumerate(rules, start=1):
+    #
+    #     name = (
+    #         f"avoid_{i:03d}"
+    #         f"_s{score:.2f}"
+    #         f"_n{cnt}"
+    #         f"_bad{bad_rate:.3f}"
+    #         f"_p{protect_rate:.3f}"
+    #         f"_strong{strong_rate:.3f}"
+    #     )
+    #
+    #     mask = make_mask_from_conds(df, conds)
+    #
+    #     if test_avoid_condition(name, mask, df, verbose=False):
+    #         selected.append((name, conds))
+
+    selected, avoid_mask = select_avoid_rules_max_class0_under_class3_limit(
+        df=df,
+        rules=rules,
+        class3_loss_limit=CLASS_3_LOSS_LIMIT,  # 2.5%
+        min_count=MIN_CNT_AVOID,
+        max_rules=None,
+        verbose=True,
+    )
+
+    print(f"[AVOID] 통과 룰 개수: {len(selected)} / {len(rules)}")
+
+    write_rule_file(
+        AVOID_OUT_PATH,
+        selected,
+        header_comment=(
+            "# auto-generated: lowscan avoid rules for class_0\n"
+            "# usage:\n"
+            "#   from lowscan_avoid_rules import build_conditions, RULE_NAMES\n"
+            "#   avoid_conditions = build_conditions(df)\n"
+            "#   final_buy_mask = base_buy_mask & ~avoid_mask"
+        )
+    )
+
+    # save_avoid_rule_eval(df, selected)
+    save_combined_avoid_eval(df, selected)
+
+
+def select_avoid_rules_max_class0_under_class3_limit(
+        df,
+        rules,
+        class3_loss_limit=0.025,
+        min_count=40,
+        max_rules=None,
+        verbose=True,
+):
+    total_class3 = int((df["target_class"] == 3).sum())
+    class3_limit_count = int(total_class3 * class3_loss_limit)
+
+    avoid_mask = np.zeros(len(df), dtype=bool)
     selected = []
+
+    used_class3 = 0
+
+    # 후보 룰을 먼저 만들어둠
+    candidates = []
 
     for i, (
             cnt,
@@ -980,27 +1054,107 @@ def find_avoid_rule():
             f"_strong{strong_rate:.3f}"
         )
 
-        mask = make_mask_from_conds(df, conds)
+        rule_mask = make_mask_from_conds(df, conds)
 
-        if test_avoid_condition(name, mask, df, verbose=False):
-            selected.append((name, conds))
+        if not test_avoid_condition(name, rule_mask, df, min_count=min_count, verbose=False):
+            continue
 
-    print(f"[AVOID] 통과 룰 개수: {len(selected)} / {len(rules)}")
+        candidates.append({
+            "name": name,
+            "conds": conds,
+            "rule_mask": rule_mask,
+            "score": score,
+            "bad_rate": bad_rate,
+            "protect_rate": protect_rate,
+            "strong_rate": strong_rate,
+        })
 
-    write_rule_file(
-        AVOID_OUT_PATH,
-        selected,
-        header_comment=(
-            "# auto-generated: lowscan avoid rules for class_0\n"
-            "# usage:\n"
-            "#   from lowscan_avoid_rules import build_conditions, RULE_NAMES\n"
-            "#   avoid_conditions = build_conditions(df)\n"
-            "#   final_buy_mask = base_buy_mask & ~avoid_mask"
+    # 매번 "현재 avoid_mask 기준으로" 추가 효율이 가장 좋은 룰을 고름
+    while True:
+        best = None
+
+        for cand in candidates:
+            rule_mask = cand["rule_mask"]
+            new_remove = rule_mask & ~avoid_mask
+
+            if not new_remove.any():
+                continue
+
+            added_class0 = int(((df["target_class"] == 0) & new_remove).sum())
+            added_class2 = int(((df["target_class"] == 2) & new_remove).sum())
+            added_class3 = int(((df["target_class"] == 3) & new_remove).sum())
+            added_total = int(new_remove.sum())
+
+            if added_class0 <= 0:
+                continue
+
+            if used_class3 + added_class3 > class3_limit_count:
+                continue
+
+            # 핵심 점수:
+            # class0 추가 제거를 크게 보상
+            # class3 추가 제거를 강하게 패널티
+            # class2도 보호해야 하므로 약하게 패널티
+            efficiency = (
+                    added_class0
+                    - 2.5 * added_class3
+                    - 0.8 * added_class2
+            )
+
+            # 너무 작은 추가 효과는 제외
+            if added_total < 5:
+                continue
+
+            # 동률이면 class0 순도 높은 것 우대
+            added_class0_rate = added_class0 / added_total
+
+            key = (
+                efficiency,
+                added_class0,
+                added_class0_rate,
+                -added_class3,
+                cand["score"],
+            )
+
+            if best is None or key > best["key"]:
+                best = {
+                    "key": key,
+                    "cand": cand,
+                    "added_class0": added_class0,
+                    "added_class2": added_class2,
+                    "added_class3": added_class3,
+                    "added_total": added_total,
+                }
+
+        if best is None:
+            break
+
+        cand = best["cand"]
+        avoid_mask |= cand["rule_mask"]
+        selected.append((cand["name"], cand["conds"]))
+        used_class3 += best["added_class3"]
+
+        if max_rules is not None and len(selected) >= max_rules:
+            break
+
+    if verbose:
+        removed = df[avoid_mask]
+        total0 = int((df["target_class"] == 0).sum())
+        total2 = int((df["target_class"] == 2).sum())
+
+        c0 = int((removed["target_class"] == 0).sum())
+        c2 = int((removed["target_class"] == 2).sum())
+        c3 = int((removed["target_class"] == 3).sum())
+
+        print(
+            f"[CLASS3_LIMIT] selected={len(selected)}, "
+            f"class0_remove_rate={c0 / total0 * 100:.2f}%, "
+            f"class2_loss_rate={c2 / total2 * 100:.2f}%, "
+            f"class3_loss_rate={c3 / total_class3 * 100:.2f}% "
+            f"({c3}/{class3_limit_count})"
         )
-    )
 
-    # save_avoid_rule_eval(df, selected)
-    save_combined_avoid_eval(df, selected)
+    return selected, avoid_mask
 
 
 
