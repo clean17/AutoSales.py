@@ -16,10 +16,11 @@ import matplotlib.pyplot as plt
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import lowscan_rules_83_25_260504 as rule0
-import lowscan_rules as rule00
+# import lowscan_rules as rule00
 # import lowscan_rules_77_25_5_42 as rule1
 # import lowscan_rules_80_25_4_42 as rule2
-modules = [rule00]
+import lowscan_avoid_rules
+# modules = [rule00]
 
 # log_file = open("csv/output.log", "w", encoding="utf-8")
 # sys.stdout = log_file
@@ -337,67 +338,68 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
     ############################  deadcat_filter  ###########################
 
     # 성공 최저 확인용
-    # risk_rule_features  = {
-    #     "_tr_value_ratio": _tr_value_ratio,
-    #     "_tr_value_ratio_5d": _tr_value_ratio_5d,
-    #     "_dist_to_high_20d": _dist_to_high_20d,
-    #     "_BB_perc": _BB_perc,
-    #     "_UltimateOsc": _UltimateOsc,
-    #     "_CCI14": _CCI14,
-    #     "_ADX14": _ADX14,
-    #     "_gap_pct": _gap_pct,
-    #     "_vol_ratio_15_60": _vol_ratio_15_60,
-    #     "_RSI_rebound": _RSI_rebound,
-    #     "_rebound_power": _rebound_power,
-    #     "_MACD_hist_1d": _MACD_hist_1d,
-    #     "_MACD_acc": _MACD_acc,
-    #     "_MACD_hist_3d_close_norm": _MACD_hist_3d_close_norm,
-    # }
-    #
-    # rule_features.update(risk_rule_features )
-    #
-    # if ATR_pct < 2.463:
-    #     return
-    # if today_tr_val_eok < 0.594:
-    #     return
-    # if _close_pos_20d < 0.043:
-    #     return
-    # if dist_to_ma5 < -16.293:
-    #     return
-    # if dist_from_low_20d < 3.311:
-    #     return
-    # if ma5_ma20_gap_chg_1d < -5.933:
-    #     return
-    # if today_tr_val_eok < 0.594:
-    #     return
-    # if _MACD_hist_3d_close_norm < -5.386:  # -4.045
-    #     return
-    # if _BB_perc < -0.117:  # -0.073
-    #     return
-    # if _dist_to_high_20d < -72.546:  # -63.590
-    #     return
-    # if _UltimateOsc < 12.458:
-    #     return
-    # if _tr_value_ratio_5d < 0.073:
-    #     return
-    # if _tr_value_ratio < 0.066:
-    #     return
-    # if _CCI14 < -261.263:
-    #     return
-    # if _ADX14 < 7.555:
-    #     return
-    # if _gap_pct < -9.187:
-    #     return
-    # if _vol_ratio_15_60 < 0.246:
-    #     return
-    # if _RSI_rebound < -15.247:
-    #     return
-    # if _rebound_power < 1.823:  # 1.890
-    #     return
-    # if _MACD_hist_1d < -553.4:
-    #     return
-    # if _MACD_acc < -479.478:
-    #     return
+    risk_rule_features  = {
+        "_close_pos_20d": _close_pos_20d,
+        "_tr_value_ratio": _tr_value_ratio,
+        "_tr_value_ratio_5d": _tr_value_ratio_5d,
+        "_dist_to_high_20d": _dist_to_high_20d,
+        "_BB_perc": _BB_perc,
+        "_UltimateOsc": _UltimateOsc,
+        "_CCI14": _CCI14,
+        "_ADX14": _ADX14,
+        "_gap_pct": _gap_pct,
+        "_vol_ratio_15_60": _vol_ratio_15_60,
+        "_RSI_rebound": _RSI_rebound,
+        "_rebound_power": _rebound_power,
+        "_MACD_hist_1d": _MACD_hist_1d,
+        "_MACD_acc": _MACD_acc,
+        "_MACD_hist_3d_close_norm": _MACD_hist_3d_close_norm,
+    }
+
+    rule_features.update(risk_rule_features)
+
+    if ATR_pct < 2.463:
+        return
+    if today_tr_val_eok < 0.594:
+        return
+    if _close_pos_20d < 0.043:
+        return
+    if dist_to_ma5 < -16.293:
+        return
+    if dist_from_low_20d < 3.311:
+        return
+    if ma5_ma20_gap_chg_1d < -5.933:
+        return
+    if today_tr_val_eok < 0.594:
+        return
+    if _MACD_hist_3d_close_norm < -5.386:  # -4.045
+        return
+    if _BB_perc < -0.117:  # -0.073
+        return
+    if _dist_to_high_20d < -72.546:  # -63.590
+        return
+    if _UltimateOsc < 12.458:
+        return
+    if _tr_value_ratio_5d < 0.073:
+        return
+    if _tr_value_ratio < 0.066:
+        return
+    if _CCI14 < -261.263:
+        return
+    if _ADX14 < 7.555:
+        return
+    if _gap_pct < -9.187:
+        return
+    if _vol_ratio_15_60 < 0.246:
+        return
+    if _RSI_rebound < -15.247:
+        return
+    if _rebound_power < 1.823:  # 1.890
+        return
+    if _MACD_hist_1d < -553.4:
+        return
+    if _MACD_acc < -479.478:
+        return
 
     ########################################################################
 
@@ -619,10 +621,10 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
         # row["is_success"]  = is_success
         row["is_success5"]  = 1 if profit_day5 is not None else 0
         row["is_success7"]  = 1 if profit_day7 is not None else 0
-        row["is_success10"]  = 1 if profit_day10 is not None else 0
-        row["target_pct"]    = REQUIRED_HIGH_RETURN
+        row["is_success10"] = 1 if profit_day10 is not None else 0
+        row["target_pct"]   = REQUIRED_HIGH_RETURN
         row["target_class"] = target_class
-        row["stop_loss"]   = STOP_LOSS
+        row["stop_loss"]    = STOP_LOSS
         # row["predict_str"] = "상승" if row["is_success"] else "미달"
 
 
@@ -684,35 +686,45 @@ if __name__ == "__main__":
                 mask = pd.Series(False, index=df.index)
                 matched_rule_map = {idx: [] for idx in df.index}
 
-                for mod in modules:
-                    conditions = mod.build_conditions(df)
-
-                    for name in mod.RULE_NAMES:
-                        if name not in conditions:
-                            continue
-
-                        cond = conditions[name].fillna(False)
-
-                        # 하나라도 만족하면 통과
-                        mask |= cond
-
-                        # 어떤 룰에 걸렸는지 기록
-                        for idx in df.index[cond]:
-                            matched_rule_map[idx].append(name)
-
-                df["matched_rules"] = df.index.map(
-                    lambda idx: ",".join(matched_rule_map[idx])
-                )
-
-                selected = df[mask].copy()
-
-                # total_cnt = len(selected)
-                # up_cnt = int(selected["is_success"].sum())
-                # shortfall_cnt = total_cnt - up_cnt
-                # total_up_rate = up_cnt / total_cnt * 100 if total_cnt else 0
+                # for mod in modules:
+                #     conditions = mod.build_conditions(df)
                 #
-                # print(f"\n룰 통과 수: {total_cnt}")
-                # print(f"룰 통과 후 성공률: {total_up_rate:.2f}% ({up_cnt} / {total_cnt})")
+                #     for name in mod.RULE_NAMES:
+                #         if name not in conditions:
+                #             continue
+                #
+                #         cond = conditions[name].fillna(False)
+                #
+                #         # 하나라도 만족하면 통과
+                #         mask |= cond
+                #
+                #         # 어떤 룰에 걸렸는지 기록
+                #         for idx in df.index[cond]:
+                #             matched_rule_map[idx].append(name)
+                #
+                # df["matched_rules"] = df.index.map(
+                #     lambda idx: ",".join(matched_rule_map[idx])
+                # )
+                #
+                # selected = df[mask].copy()
+
+
+                avoid_conditions = lowscan_avoid_rules.build_conditions(df)
+
+                avoid_mask = np.zeros(len(df), dtype=bool)
+                for cond in avoid_conditions.values():
+                    avoid_mask |= cond
+
+                selected = df[~avoid_mask].copy()
+
+
+                total_cnt = len(selected)
+                up_cnt = int(selected["is_success"].sum())
+                shortfall_cnt = total_cnt - up_cnt
+                total_up_rate = up_cnt / total_cnt * 100 if total_cnt else 0
+
+                print(f"\n룰 통과 수: {total_cnt}")
+                print(f"룰 통과 후 성공률: {total_up_rate:.2f}% ({up_cnt} / {total_cnt})")
 
             if render_graph == 0:
                 # CSV 저장
