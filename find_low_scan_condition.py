@@ -33,6 +33,9 @@ MAX_DEPTH       = 4
 MAX_DEPTH_AVOID = 5
 
 GOOD_EXPAND_RATIO = [0.45, 0.65, 0.85, 0.90]
+VALID_MIN_RATE = 0.80
+VALID_MIN_CNT = 18
+VALID_RATIO = 0.10
 
 """
 MIN_BAD_RATE = 0.50      # 룰에 걸린 종목 중 class_0이 최소 55% 이상이어야 저장
@@ -298,6 +301,8 @@ def mine_good_rules(
         "\nmax_depth", max_depth,
         "\nexpand_ratio", GOOD_EXPAND_RATIO,
         "\ntop_n", top_n,
+        "\nvalie_min_rate", VALID_MIN_RATE,
+        "\nvalie_min_cnt", VALID_MIN_CNT,
         "\n"
     )
 
@@ -743,38 +748,6 @@ def write_rule_file(out_path, selected, header_comment):
     print(f"saved to: {out_path.resolve()}")
 
 
-def save_good_rule_eval(df, selected, out_csv=GOOD_EVAL_PATH):
-    rows = []
-
-    for name, conds in selected:
-        mask = make_mask_from_conds(df, conds)
-        sub = df[mask]
-
-        if len(sub) == 0:
-            continue
-
-        up_cnt = int((sub["is_success7"] == 1).sum())
-        ratio = up_cnt / len(sub)
-
-        rows.append({
-            "rule": name,
-            "count": len(sub),
-            "success_cnt": up_cnt,
-            "success_rate": round(ratio * 100, 1),
-        })
-
-    result = pd.DataFrame(rows)
-
-    if len(result):
-        result = result.sort_values(
-            ["success_rate", "count"],
-            ascending=[False, False]
-        )
-
-    result.to_csv(out_csv, index=False, encoding="utf-8-sig")
-    print(f"saved eval to: {out_csv.resolve()}")
-
-
 def save_avoid_rule_eval(df, selected, out_csv=AVOID_EVAL_PATH):
     rows = []
 
@@ -888,23 +861,23 @@ def find_good_rule(m_ratio, m_count):
     # df = pd.read_csv(CSV_PATH)
     df = pd.read_csv(CSV_PATH, low_memory=False)
 
-    df["today"] = pd.to_datetime(df["today"])
+    df["today"] = pd.to_datetime(df["today"], errors="coerce")
+    df = df.dropna(subset=["today"])
 
-    train = df[df["today"] < "2026-04-01"].copy()
-    valid = df[df["today"] >= "2026-04-01"].copy()
+    train, valid, split_date = split_train_valid_by_date_ratio(
+        df,
+        valid_ratio=VALID_RATIO,
+    )
 
-    features = get_features(df)
-    literals, literal_masks = build_literals(df, features)
+    # 룰 생성은 train으로만 한다
+    features = get_features(train)
+    literals, literal_masks = build_literals(train, features)
+
     feature_groups, group_limits = get_feature_groups()
-    target = df["is_success7"].to_numpy() == 1
-
-    # features = get_features(train)
-    # literals, literal_masks = build_literals(train, features)
-    # feature_groups, group_limits = get_feature_groups()
-    # target = train["is_success7"].to_numpy() == 1
+    target = train["is_success7"].to_numpy() == 1
 
     rules = mine_good_rules(
-        df=df,
+        df=train,
         literals=literals,
         literal_masks=literal_masks,
         target=target,
@@ -919,33 +892,66 @@ def find_good_rule(m_ratio, m_count):
 
     selected = []
 
+    eval_rows = []
+
     for i, (cnt, ratio, up, conds, score) in enumerate(rules, start=1):
-        name = f"rule_{i:03d}_s{score:.2f}_n{cnt}_r{ratio:.3f}"
+        train_mask = make_mask_from_conds(train, conds)
+        valid_mask = make_mask_from_conds(valid, conds)
 
-        mask = make_mask_from_conds(df, conds)
+        train_sub = train[train_mask]
+        valid_sub = valid[valid_mask]
 
-        # 테스트 통과만
-        if test_good_condition(name, mask, df, verbose=False):
-            selected.append((name, conds))
+        if len(train_sub) < m_count:
+            continue
 
-        # train_mask = make_mask_from_conds(train, conds)
-        # valid_mask = make_mask_from_conds(valid, conds)
-        #
-        # if not test_good_condition(name, train_mask, train, min_count=MIN_CNT):
-        #     continue
-        #
-        # if not test_good_condition(name, valid_mask, valid, min_count=10):
-        #     continue
-        #
-        # selected.append((name, conds))
+        train_up = int((train_sub["is_success7"] == 1).sum())
+        train_ratio = train_up / len(train_sub)
 
-    print(f"[GOOD] 통과 룰 개수: {len(selected)} / {len(rules)}")
+        if train_ratio < m_ratio:
+            continue
+
+        if len(valid_sub) < VALID_MIN_CNT:
+            continue
+
+        valid_up = int((valid_sub["is_success7"] == 1).sum())
+        valid_ratio = valid_up / len(valid_sub)
+
+        if valid_ratio < VALID_MIN_RATE:
+            continue
+
+        name = (
+            f"{len(selected) + 1:03d}"
+            # f"_trn{len(train_sub)}_trr{train_ratio:.3f}"
+            # f"_van{len(valid_sub)}_var{valid_ratio:.3f}"
+        )
+
+        selected.append((name, conds))
+
+        eval_rows.append({
+            "rule": name,
+            "train_count": len(train_sub),
+            "train_success_cnt": train_up,
+            "train_success_rate": round(train_ratio * 100, 1),
+            "valid_count": len(valid_sub),
+            "valid_success_cnt": valid_up,
+            "valid_success_rate": round(valid_ratio * 100, 1),
+            "split_date": pd.to_datetime(split_date).date(),
+            "conds": str(conds),
+        })
+
+    print(f"[GOOD] valid 통과 룰 개수: {len(selected)} / {len(rules)}")
 
     write_rule_file(
         GOOD_OUT_PATH,
         selected,
         header_comment=(
             "# auto-generated: lowscan good buy rules\n"
+            "# train/valid split applied\n"
+            f"# split_date: {pd.to_datetime(split_date).date()}\n"
+            f"# train_min_rate: {m_ratio}\n"
+            f"# train_min_count: {m_count}\n"
+            f"# valid_min_rate: {VALID_MIN_RATE}\n"
+            f"# valid_min_count: {VALID_MIN_CNT}\n"
             "# usage:\n"
             "#    import lowscan_rules\n"
             "#    buy_conditions = lowscan_rules.build_conditions(df)\n"
@@ -958,7 +964,16 @@ def find_good_rule(m_ratio, m_count):
         )
     )
 
-    save_good_rule_eval(df, selected)
+    eval_df = pd.DataFrame(eval_rows)
+
+    if len(eval_df):
+        eval_df = eval_df.sort_values(
+            ["valid_success_rate", "valid_count", "train_success_rate"],
+            ascending=[False, False, False],
+        )
+
+    eval_df.to_csv(GOOD_EVAL_PATH, index=False, encoding="utf-8-sig")
+    print(f"saved eval to: {GOOD_EVAL_PATH.resolve()}")
 
 
 def find_avoid_rule():
@@ -1167,6 +1182,34 @@ def select_avoid_rules_max_class0_under_class3_limit(
 
     return selected, avoid_mask
 
+
+def split_train_valid_by_date_ratio(df, valid_ratio=0.10):
+    """
+    날짜 기준 train/valid 분리.
+    과거 90%, 최근 10%를 valid로 사용.
+    """
+    df = df.copy()
+    df["today"] = pd.to_datetime(df["today"], errors="coerce")
+    df = df.dropna(subset=["today"])
+    df = df.sort_values("today").reset_index(drop=True)
+
+    unique_dates = np.array(sorted(df["today"].dt.normalize().unique()))
+
+    split_idx = int(len(unique_dates) * (1 - valid_ratio))
+    split_date = unique_dates[split_idx]
+
+    train = df[df["today"] < split_date].copy()
+    valid = df[df["today"] >= split_date].copy()
+
+    print("\n[SPLIT]")
+    print("split_date:", pd.to_datetime(split_date).date())
+    print("train:", len(train), train["today"].min().date(), "~", train["today"].max().date())
+    print("valid:", len(valid), valid["today"].min().date(), "~", valid["today"].max().date())
+
+    print("train success7:", round((train["is_success7"] == 1).mean() * 100, 2), "%")
+    print("valid success7:", round((valid["is_success7"] == 1).mean() * 100, 2), "%\n")
+
+    return train, valid, split_date
 
 
 if __name__ == "__main__":

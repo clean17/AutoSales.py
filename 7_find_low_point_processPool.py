@@ -14,12 +14,12 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
-import lowscan_rules_83_25_260504 as rule0
-# import lowscan_rules as rule00
+# import lowscan_rules_83_25_260504 as rule0
+import lowscan_rules as rule00
 # import lowscan_rules_77_25_5_42 as rule1
 # import lowscan_rules_80_25_4_42 as rule2
 import lowscan_avoid_rules
-# modules = [rule00]
+modules = [rule00]
 
 # log_file = open("csv/output.log", "w", encoding="utf-8")
 # sys.stdout = log_file
@@ -54,11 +54,11 @@ EXECUTION_RATIO = 1
 REQUIRED_HIGH_RETURN = VALIDATION_TARGET_RETURN * EXECUTION_RATIO
 VALIDATION_DAYS = 7
 STOP_LOSS = -2
-render_graph = 0
+render_graph = 1
 
 TEST_OFFSET = 60
 START_OFFSET = 7      # 1이면 어제 기준부터 검증 가능.. 7일 검증을 사용하려면 7사용
-END_OFFSET = 300      # 과거 300거래일까지 생성
+END_OFFSET = 40      # 과거 300거래일까지 생성
 
 if render_graph == 1:
     START_OFFSET = START_OFFSET + 8
@@ -614,14 +614,14 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
         종가가 계속 음수면
         데드캣 가능성이 높다.
         """
-        # row["is_success"]   = 1 if profit_day7 is not None else 0
+        row["is_success"]   = 1 if profit_day7 is not None else 0
         row["is_success5"]  = 1 if profit_day5 is not None else 0
         row["is_success7"]  = 1 if profit_day7 is not None else 0
         row["is_success10"] = 1 if profit_day10 is not None else 0
         row["target_pct"]   = REQUIRED_HIGH_RETURN
         row["target_class"] = target_class
         row["stop_loss"]    = STOP_LOSS
-        # row["predict_str"] = "상승" if row["is_success"] else "미달"
+        # row["predict_str"] = "상승" if row["is_success7"] else "미달"
 
 
 
@@ -641,7 +641,7 @@ if __name__ == "__main__":
     start = time.time()   # 시작 시간(초)
     nowTime = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
     print(f'{nowTime} - 🕒 running 7_find_low_point.py...')
-    print('=== 7일 이상 5일선이 20일선 보다 아래에 있으면서 최근 -2.5%이 존재 + 오늘 3.3% 이상 상승 ===')
+    print('=== 7일 이상 5일선이 20일선 보다 아래에 있으면서 최근 -2.5% 이상 하락이 존재, 오늘 +3.3% 이상 상승 ===')
 
     tickers_dict = get_kor_ticker_dict_list()
     tickers = list(tickers_dict.keys())
@@ -705,7 +705,7 @@ if __name__ == "__main__":
                 selected = df[mask].copy()
 
                 total_cnt = len(selected)
-                up_cnt = int(selected["is_success"].sum())
+                up_cnt = int(selected["is_success7"].sum())
                 shortfall_cnt = total_cnt - up_cnt
                 total_up_rate = up_cnt / total_cnt * 100 if total_cnt else 0
 
@@ -783,8 +783,7 @@ if __name__ == "__main__":
 
                 title = (
                     f"{today} {stock_name} [{ticker}] "
-                    f"{row['today_pct']}% Daily Chart - "
-                    f"{row['today_pct']}%_{row['validation_high_rate_max_adj']}% "
+                    f"일봉 차트 - 당일 상승_{row['today_pct']}%_최고 수익률_{row['validation_high_rate_max_adj']}% "
                     f"rules={row['matched_rules'][:80]}"
                 )
 
