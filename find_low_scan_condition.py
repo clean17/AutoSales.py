@@ -26,14 +26,13 @@ from itertools import count
 
 CSV_PATH = "csv/low_result_7_desc.csv"
 
-MIN_RATE     = 0.83
-MIN_CNT      = 25
-MIN_CNT_AVOID = 30
-MAX_DEPTH    = 4
+MIN_RATE        = 0.90
+MIN_CNT         = 80
+MIN_CNT_AVOID   = 30
+MAX_DEPTH       = 4
 MAX_DEPTH_AVOID = 5
 
-# GOOD_EXPAND_RATIO = [0.32, 0.39, 0.54, 0.7, 0.8] # 28, 6000, 16000
-GOOD_EXPAND_RATIO = [0.27, 0.38, 0.60, 0.76, 0.8]
+GOOD_EXPAND_RATIO = [0.45, 0.65, 0.85, 0.90]
 
 """
 MIN_BAD_RATE = 0.50      # 룰에 걸린 종목 중 class_0이 최소 55% 이상이어야 저장
@@ -143,6 +142,7 @@ def get_exclude_columns():
         "target_class",
         "stop_loss",
 
+        "_close_pos_20d",
         "_tr_value_ratio",
         "_tr_value_ratio_5d",
         "_dist_to_high_20d",
@@ -217,7 +217,7 @@ def build_literals(df, features):
         if len(col_nonan) == 0:
             continue
 
-        # print(f, len(col_nonan), len(np.unique(col_nonan)))
+        print(f, len(col_nonan), len(np.unique(col_nonan)))
 
         # 분위수(percentile) 배열 생성 (덜 촘촘하게 = 과적합 방지하면서 빠르게)
         unique_vals = np.unique(col_nonan)
@@ -599,7 +599,7 @@ def test_good_condition(name, cond, df, min_count=20, verbose=False):
     if len(sub) == 0:
         return False
 
-    up_cnt = int((sub["is_success"] == 1).sum())
+    up_cnt = int((sub["is_success7"] == 1).sum())
     ratio = up_cnt / len(sub)
 
     """
@@ -753,7 +753,7 @@ def save_good_rule_eval(df, selected, out_csv=GOOD_EVAL_PATH):
         if len(sub) == 0:
             continue
 
-        up_cnt = int((sub["is_success"] == 1).sum())
+        up_cnt = int((sub["is_success7"] == 1).sum())
         ratio = up_cnt / len(sub)
 
         rows.append({
@@ -885,14 +885,23 @@ def save_combined_avoid_eval(df, selected, out_csv="combined_avoid_eval.csv"):
 
 
 def find_good_rule(m_ratio, m_count):
-    df = pd.read_csv(CSV_PATH)
+    # df = pd.read_csv(CSV_PATH)
+    df = pd.read_csv(CSV_PATH, low_memory=False)
+
+    df["today"] = pd.to_datetime(df["today"])
+
+    train = df[df["today"] < "2026-04-01"].copy()
+    valid = df[df["today"] >= "2026-04-01"].copy()
 
     features = get_features(df)
     literals, literal_masks = build_literals(df, features)
-
     feature_groups, group_limits = get_feature_groups()
+    target = df["is_success7"].to_numpy() == 1
 
-    target = df["is_success"].to_numpy() == 1
+    # features = get_features(train)
+    # literals, literal_masks = build_literals(train, features)
+    # feature_groups, group_limits = get_feature_groups()
+    # target = train["is_success7"].to_numpy() == 1
 
     rules = mine_good_rules(
         df=df,
@@ -902,8 +911,8 @@ def find_good_rule(m_ratio, m_count):
         min_ratio=m_ratio,
         min_count=m_count,
         max_depth=MAX_DEPTH,
-        beam=30000,
-        top_n=1000,
+        beam=10000,
+        top_n=300,
         feature_groups=feature_groups,
         group_limits=group_limits,
     )
@@ -919,6 +928,17 @@ def find_good_rule(m_ratio, m_count):
         if test_good_condition(name, mask, df, verbose=False):
             selected.append((name, conds))
 
+        # train_mask = make_mask_from_conds(train, conds)
+        # valid_mask = make_mask_from_conds(valid, conds)
+        #
+        # if not test_good_condition(name, train_mask, train, min_count=MIN_CNT):
+        #     continue
+        #
+        # if not test_good_condition(name, valid_mask, valid, min_count=10):
+        #     continue
+        #
+        # selected.append((name, conds))
+
     print(f"[GOOD] 통과 룰 개수: {len(selected)} / {len(rules)}")
 
     write_rule_file(
@@ -927,8 +947,14 @@ def find_good_rule(m_ratio, m_count):
         header_comment=(
             "# auto-generated: lowscan good buy rules\n"
             "# usage:\n"
-            "#   from lowscan_rules import build_conditions, RULE_NAMES\n"
-            "#   buy_conditions = build_conditions(df)"
+            "#    import lowscan_rules\n"
+            "#    buy_conditions = lowscan_rules.build_conditions(df)\n"
+            "#    \n"
+            "#    buy_mask = np.zeros(len(df), dtype=bool)\n"
+            "#    for cond in buy_conditions.values():\n"
+            "#        buy_mask |= cond\n"
+            "#    \n"
+            "#    df = df[buy_mask].copy()\n"
         )
     )
 
@@ -936,7 +962,8 @@ def find_good_rule(m_ratio, m_count):
 
 
 def find_avoid_rule():
-    df = pd.read_csv(CSV_PATH)
+    # df = pd.read_csv(CSV_PATH)
+    df = pd.read_csv(CSV_PATH, low_memory=False)
     # df = add_target_class(df)
 
     if "target_class" not in df.columns:
@@ -983,9 +1010,14 @@ def find_avoid_rule():
         header_comment=(
             "# auto-generated: lowscan avoid rules for class_0\n"
             "# usage:\n"
-            "#   from lowscan_avoid_rules import build_conditions, RULE_NAMES\n"
-            "#   avoid_conditions = build_conditions(df)\n"
-            "#   final_buy_mask = base_buy_mask & ~avoid_mask"
+            "#   import lowscan_avoid_rules\n"
+            "#    \n"
+            "#   avoid_conditions = lowscan_avoid_rules.build_conditions(df)\n"
+            "#   avoid_mask = np.zeros(len(df), dtype=bool)\n"
+            "#   for cond in avoid_conditions.values():\n"
+            "#       avoid_mask |= cond\n"
+            "#    \n"
+            "#   df = df[~avoid_mask].copy()\n"
         )
     )
 
@@ -1139,8 +1171,8 @@ def select_avoid_rules_max_class0_under_class3_limit(
 
 if __name__ == "__main__":
     # MODE = "both"
-    # MODE = "good"
-    MODE = "avoid"
+    MODE = "good"
+    # MODE = "avoid"
 
     for i in range(1):
         for_cnt = MIN_CNT + (i*1)
