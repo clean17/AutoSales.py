@@ -1,5 +1,20 @@
 """
 생성한 csv 파일을 가지고 저점 조건을 찾는 스크립트
+
+사용할 때는
+
+buy_conditions = lowscan_rules.build_conditions(df)
+avoid_conditions = lowscan_avoid_rules.build_conditions(df)
+
+buy_mask = np.zeros(len(df), dtype=bool)
+for cond in buy_conditions.values():
+    buy_mask |= cond
+
+avoid_mask = np.zeros(len(df), dtype=bool)
+for cond in avoid_conditions.values():
+    avoid_mask |= cond
+
+final_buy_mask = buy_mask & ~avoid_mask
 """
 
 import pandas as pd
@@ -8,521 +23,1002 @@ from pathlib import Path
 import heapq
 from itertools import count
 
-df = pd.read_csv("csv/low_result_7_desc.csv")
-# df = pd.read_csv("csv/low_result_us_6_desc.csv")   # 미장
+# 컬럼 전체 출력
+pd.set_option("display.max_columns", None)
+# 행 전체 출력
+pd.set_option("display.max_rows", None)
+# 컬럼 너비 제한 해제
+pd.set_option("display.max_colwidth", None)
 
-"""
 
-"""
-MIN_RATE     = 0.80
+CSV_PATH = "csv/low_result_7_desc.csv"
+
+MIN_RATE     = 0.83
 MIN_CNT      = 25
+MIN_CNT_AVOID = 40
 MAX_DEPTH    = 4
-EXPAND_RATIO = [0.32, 0.39, 0.54, 0.7, 0.8]
-# TARGET_COL = "validation_chg_rate"         # 검증등락률
-# target = (df[TARGET_COL].to_numpy() >= 7)  # 7퍼 이상 검증 통과
-TARGET_COL = "is_success"                  # 동적 검증등락률 통과
-target = df[TARGET_COL].to_numpy() == 1
+MAX_DEPTH_AVOID = 5
 
-out_path = Path("lowscan_rules.py")
-# out_path = Path("lowscan_rules_us.py")   # 미장
+# GOOD_EXPAND_RATIO = [0.32, 0.39, 0.54, 0.7, 0.8] # 28, 6000, 16000
+GOOD_EXPAND_RATIO = [0.27, 0.38, 0.60, 0.76, 0.8]
 
-# 제외할 피쳐
-exclude = {
-    "ticker", "stock_name", "predict_str", "today",
+MIN_BAD_RATE = 0.50      # 룰에 걸린 종목 중 class_0이 최소 55% 이상이어야 저장
+MAX_PROTECT_RATE = 0.40  # 룰에 걸린 종목 중 class_2+3이 35% 이하여야 저장
+MAX_STRONG_RATE = 0.20   # 룰에 걸린 종목 중 class_3이 25% 이하여야 저장
+# AVOID_EXPAND_BAD_RATIO = [0.35, 0.50, 0.68, 0.78, 0.88]
+# AVOID_EXPAND_MAX_STRONG_RATE = [0.40, 0.28, 0.18, 0.08, 0.02]
+AVOID_EXPAND_BAD_RATIO = [0.33, 0.45, 0.58, 0.68, 0.78]
+AVOID_EXPAND_MAX_STRONG_RATE = [0.50, 0.40, 0.30, 0.20, 0.12]
 
-    "validation_chg_rate",
-    "validation_chg_rate1",
-    "validation_chg_rate2",
-    "validation_chg_rate3",
-    "validation_chg_rate4",
-    "validation_chg_rate5",
-    "validation_chg_rate6",
-    "validation_chg_rate7",
-
-    "hit_day", "is_success", "target",
-
-    "_gap_pct",
-    "_vol_ratio_15_60",
-    "_RSI_rebound",
-    "_rebound_power",
-    "_MACD_hist_1d",
-    "MACD_hist_3d",
-    "tr_volume_rank_20d"
-    # "trend_signal_tanh",
-    # "dist_from_low_tanh",
-    # "tr_value_ratio_tanh",
-}
-
-features = [c for c in df.columns if c not in exclude]
-
-for i in range(6):
-    for_cnt = MIN_CNT + (i*2)
-
-    for j in range(6):
-        for_rate = MIN_RATE + (0.01*j)
+GOOD_OUT_PATH = Path("lowscan_rules.py")
+GOOD_EVAL_PATH = Path("csv/good_rule_eval.csv")
+AVOID_OUT_PATH = Path("lowscan_avoid_rules.py")
+AVOID_EVAL_PATH = Path("csv/class0_remove_rule_eval.csv")
 
 
 
-        # --- literal(원자 조건) 만들기: feature <= q or feature > q ---
-        literals = []
-        literal_masks = []
-
-        """
-        0.05, 0.10, 0.15, 0.20, ... 0.95 → 총 19개 threshold
-        0.1, 0.2, 0.3, ... 0.9           → 총 9개 threshold
-        
-        depth4에서 데드캣을 이미 거른 뒤 depth5를 만들 거면 np.linspace(0.2, 0.8, 7) 괜찮음
-        0.05~0.95, 19개	많음	세밀하지만 과적합 위험 큼
-        0.1~0.9, 9개	중간	균형
-        0.2~0.8, 7개	적음	안정적, 룰 적음, 과적합 감소
-        """
-        for f in features:
-            # print(f)
-            col = df[f].astype(float).to_numpy()  # flaat 형변환 >  Series > Numpy 배열
-            col_nonan = col[~np.isnan(col)]       # ~np.isnan() 으로 True 값만 남는다 > NaN 제거
-            # print(f, len(col_nonan), len(np.unique(col_nonan)))
-
-            # 분위수(percentile) 배열 생성 (덜 촘촘하게 = 과적합 방지하면서 빠르게)
-            unique_vals = np.unique(col_nonan)
-            if len(unique_vals) < 50:
-                qs = unique_vals  # quantile 안씀
-            else:
-                # n_bins = min(19, len(unique_vals) - 1)
-                # qs = np.unique(np.quantile(col_nonan, np.linspace(0.05, 0.95, n_bins)))
-
-                qs = np.unique(np.quantile(col_nonan, np.linspace(0.05, 0.95, 19)))
-                # qs = np.unique(np.quantile(col_nonan, np.linspace(0.1, 0.9, 9)))
-                # qs = np.unique(np.quantile(col_nonan, np.linspace(0.2, 0.8, 7)))
-
-            for thr in qs:
-                thr = round(float(thr), 4)
-                literals.append((f, "<=", thr))
-                literal_masks.append(col <= thr)
-
-                literals.append((f, ">", thr))
-                literal_masks.append(col > thr)
-
-        # print(literals)
-
-        feature_groups = {
-            # 가격 / 당일 반등 강도
-            "today_pct": "PRICE",
-
-            # 추세 전환
-            "trend_signal": "TREND",
-
-            # MACD 모멘텀
-            "MACD_acc": "MACD",
-            "MACD_hist_3d_rank": "MACD",
-
-            # 저점 위치
-            "dist_from_low": "POSITION",
-
-            # 수급
-            "tr_value_ratio": "VOLUME",
-
-            # 눌림 강도
-            "max_drop_7d": "DROP",
-        }
-
-        group_limits = {
-            "PRICE": 1,
-            "TREND": 1,
-            "MACD": 2,
-            "POSITION": 1,
-            "VOLUME": 1,
-            "DROP": 1,
-        }
 
 
-        """
-        beam : 단계별 상위 수량만 다음 뎁스로 가져간다, 한 depth에서 유지할 후보 개수
-        expand_ratio : 각 후보의 성능이 이 값보다 커야 다음 뎁스로 진행, 다음 depth로 확장할 최소 기준
-        min_ratio : “좋은 룰”로 저장할 기준
-        cnt_priority_ratio : 넘기면 ratio 보다 cnt 를 더 중요시
-        """
-        def mine_rules(
-                min_ratio=0.7,
-                min_count=20,
-                max_depth=4,
-                beam=400,
-                expand_ratio=0.50,
-                cnt_priority_ratio=0.85,   # <-- 여기부터 cnt를 더 중요하게 볼 임계치 (고정)
-                top_n=500,                 # 원하면 최종 결과 상위 N개만 리턴
-                #  그룹 제약 추가
-                feature_groups=None,       # dict: feature_name -> group_name
-                group_limits=None,         # dict: group_name -> max_allowed_in_rule
-        ):
+def add_target_class(df):
+    """
+    7일간 최고가로 클래스를 분류, df에 "target_class"가 없을 경우 생성
+    """
+    high_cols = [f"validation_high_rate{i}" for i in range(1, 8)]
+
+    df["max_high_7d"] = df[high_cols].max(axis=1)
+
+    df["target_class"] = np.select(
+        [
+            df["max_high_7d"] < 5,
+            df["max_high_7d"] < 7,
+            df["max_high_7d"] < 10,
+            df["max_high_7d"] >= 10,
+            ],
+        [0, 1, 2, 3]
+    )
+
+    return df
+
+
+def get_exclude_columns():
+    """
+    제외할 피쳐 Set
+    """
+    return {
+        "ticker", "stock_name", "predict_str", "today", "idx",
+
+        "validation_high_rate_max",
+        "validation_high_rate_max_adj",
+
+        # 저가 기준 최저 수익률
+        "validation_low_rate_min",
+
+        # 종가 기준 일별 수익률
+        "validation_close_rate1",
+        "validation_close_rate2",
+        "validation_close_rate3",
+        "validation_close_rate4",
+        "validation_close_rate5",
+        "validation_close_rate6",
+        "validation_close_rate7",
+
+        # 고가 기준 일별 수익률
+        "validation_high_rate1",
+        "validation_high_rate2",
+        "validation_high_rate3",
+        "validation_high_rate4",
+        "validation_high_rate5",
+        "validation_high_rate6",
+        "validation_high_rate7",
+
+        # 저가 기준 일별 수익률
+        "validation_low_rate1",
+        "validation_low_rate2",
+        "validation_low_rate3",
+        "validation_low_rate4",
+        "validation_low_rate5",
+        "validation_low_rate6",
+        "validation_low_rate7",
+
+        # 시가 기준 일별 수익률
+        "validation_open_rate1",
+        "validation_open_rate2",
+        "validation_open_rate3",
+        "validation_open_rate4",
+        "validation_open_rate5",
+        "validation_open_rate6",
+        "validation_open_rate7",
+
+        "is_success",
+        "is_success5",
+        "is_success7",
+        "is_success10",
+        "target_pct",
+        "target_class",
+        "stop_loss",
+
+        "_tr_value_ratio",
+        "_tr_value_ratio_5d",
+        "_dist_to_high_20d",
+        "_BB_perc",
+        "_UltimateOsc",
+        "_CCI14",
+        "_ADX14",
+        "_gap_pct",
+        "_vol_ratio_15_60",
+        "_RSI_rebound",
+        "_rebound_power",
+        "_MACD_hist_1d",
+        "_MACD_acc",
+        "_MACD_hist_3d_close_norm",
+    }
+
+
+def get_features(df):
+    exclude = get_exclude_columns()
+    return [c for c in df.columns if c not in exclude]
+
+
+def get_feature_groups():
+    feature_groups = {
+        # 가격 / 당일 반등 강도
+        "today_pct": "PRICE",
+        # 최근 눌림 강도
+        "max_drop_7d": "DROP",
+
+        # 저점 대비 회복 위치
+        "dist_from_low_20d": "POSITION",
+        # 단기 이평선 대비 위치
+        "dist_to_ma5": "MA_POSITION",
+        # 추세 개선
+        "ma5_ma20_gap_chg_1d": "TREND",
+
+        # 거래대금 / 수급
+        "today_tr_val_eok": "VOLUME",
+        "tr_val_rank_20d": "VOLUME",
+
+        # MACD 모멘텀
+        "MACD_hist_3d": "MACD",
+        # 변동성
+        "ATR_pct": "VOLATILITY",
+    }
+
+    group_limits = {
+        "PRICE": 1,
+        "DROP": 1,
+        "POSITION": 1,
+        "MA_POSITION": 1,
+        "TREND": 1,
+        "VOLUME": 1,
+        "MACD": 1,
+        "VOLATILITY": 1,
+    }
+
+    return feature_groups, group_limits
+
+
+def build_literals(df, features):
+    """
+    literals(원자 조건)을 만드는 함수: feature <= q or feature > q
+    """
+    literals = []
+    literal_masks = []
+
+    for f in features:
+        col = df[f].astype(float).to_numpy()  # flaat 형변환 >  Series > Numpy 배열
+        col_nonan = col[~np.isnan(col)]       # ~np.isnan() 으로 True 값만 남는다 > NaN 제거
+
+        if len(col_nonan) == 0:
+            continue
+
+        print(f, len(col_nonan), len(np.unique(col_nonan)))
+
+        # 분위수(percentile) 배열 생성 (덜 촘촘하게 = 과적합 방지하면서 빠르게)
+        unique_vals = np.unique(col_nonan)
+
+        if len(unique_vals) < 50:  # quantile 안씀
+            qs = unique_vals
+        else:
             """
-            (count, ratio, up_cnt, conds) 리스트 반환
-
-            beam(확장 후보) 선별 정책(유지):
-            - ratio 우선
-            - ratio 동률이면 cnt 큰 후보 우대
-
-            최종 out 정렬 정책(변경):
-            - ratio >= cnt_priority_ratio 이면 cnt 우선(그 다음 ratio)
-            - ratio <  cnt_priority_ratio 이면 ratio 우선(그 다음 cnt)
-
-            그룹 제약:
-            - feature_groups에 매핑된 피쳐들은 같은 그룹에서 group_limits 개수 이상 못 씀
-            """
-
-            beams = [(np.ones(len(df), dtype=bool), [])]  # df 길이 만큼의 True 배열(불리언 마스크), 빈 배열의 튜플 리스트 > "데이터프레임의 모든 행을 선택한다"는 상태
-            good = {}
-
-            print("\nbeam", beam, "min_ratio", min_ratio, "min_count", min_count, "max_depth", max_depth, "expand_ratio", EXPAND_RATIO, "top_n", top_n)
-            print("cnt_priority_ratio", cnt_priority_ratio, '\n')
-
-            if feature_groups is None:
-                feature_groups = {}
-            if group_limits is None:
-                group_limits = {}
-
-            def get_group(feat_name: str):
-                return feature_groups.get(feat_name)
-
-            # beam(확장 후보)용 비교키
-            # "좋은 후보"가 더 큰 key를 갖도록 설계 (나중에 key 비교로 worst 교체)
-            def beam_key(ratio, cnt):
-                if ratio >= cnt_priority_ratio:
-                    # 0그룹: cnt 우선, ratio 보조
-                    return (1, cnt, ratio)
-                else:
-                    # 1그룹: ratio 우선, cnt 보조
-                    return (0, ratio, cnt)
-
-            for depth in range(max_depth):
-                print('----------------------------------')
-                print("depth", depth)
-
-                # heap item: (key, uid, mask, conds, ratio, cnt)
-                # heap[0] = 가장 "나쁜" 후보 (key가 가장 작음)
-                heap = []
-                uid = count()  # 카운트 제네레이터 (itertools 모듈)
-
-                for base_mask, conds in beams:
-                    used_feats = {c[0] for c in conds}  # c[0]: 피쳐 명, set comprehension
-
-                    # 현재 rule에서 그룹 사용량 계산
-                    group_used = {}
-                    for f in used_feats:
-                        g = get_group(f)
-                        if g is None:
-                            continue
-                        group_used[g] = group_used.get(g, 0) + 1
-
-                    for (lit, lmask) in zip(literals, literal_masks):  # zip() 이용한 동시 순회
-                        feat = lit[0]
-
-                        # 동일 feature 중복 금지 (기존)
-                        if feat in used_feats:
-                            continue
-
-                        # 그룹 제약 체크
-                        g = get_group(feat)
-                        if g is not None:
-                            limit = group_limits.get(g, None)
-                            if limit is not None:
-                                if group_used.get(g, 0) >= limit:
-                                    continue
-
-                        # 새로운 subset
-                        m = base_mask & lmask
-                        cnt = int(m.sum())
-                        if cnt < for_cnt:
-                            continue
-
-                        up = int((m & target).sum())
-                        ratio = up / cnt
-                        # score = ratio * np.log1p(cnt)
-                        # score = (ratio ** 2) * np.log1p(cnt)  # ratio에 더 강하게 보상
-                        score = (ratio ** 3) * np.log1p(cnt)  # ratio에 더 강하게 보상
-
-                        # good 저장
-                        if ratio >= min_ratio:
-                            key2 = tuple(sorted((c[0], c[1], round(float(c[2]), 6)) for c in (conds + [lit])))
-                            prev = good.get(key2)
-                            if (prev is None) or (score > prev[4]):
-                                good[key2] = (cnt, ratio, up, conds + [lit], score)
-
-                        """
-                        new ≈ beam의 30~70%가 되도록 expand_ratio 조절 필요
-        
-                        depth 0 >> new가 beam의 1~20%여도 괜찮음
-                        depth 1 >> beam의 20~70%
-                        depth 2+ > beam의 30~70%
-                        """
-                        # 확장 후보
-                        if ratio >= EXPAND_RATIO[depth]:
-                            k = beam_key(ratio, cnt)
-                            item = (k, next(uid), m, conds + [lit], ratio, cnt)
-
-                            if len(heap) < beam:
-                                heapq.heappush(heap, item)
-                            else:
-                                # early-skip: worst(=heap[0])보다 좋아야 교체
-                                if k <= heap[0][0]:
-                                    continue
-                                heapq.heapreplace(heap, item)
-
-                # 다음 depth로 넘길 후보들(좋은 순): key 내림차순
-                # key는 (group, primary, secondary)인데 primary/secondary는 큰 게 좋게 만들어 둠
-                new = sorted(heap, key=lambda x: x[0], reverse=True)  # 좋은 순으로 정렬
-                print("new", len(new))
-
-                if not new:
-                    print("no expandable candidates; stopping.")
-                    break
-
-                tail = new[-1]
-                print("tail ratio:", round(tail[4],3), "cnt:", tail[5], "conds:", tail[3])  # 최악 후보 출력 (디버깅용)
-
-                beams = [(m, conds) for _, _, m, conds, _, _ in new]
-
-            # ---- 최종 out 정렬 ----
-            # def out_key(x):
-            #     cnt, ratio, up, conds = x
-            #     if ratio >= cnt_priority_ratio:
-            #         return (0, -cnt, -ratio, len(conds))
-            #     else:
-            #         return (1, -ratio, -cnt, len(conds))
-
-            def out_key(x):
-                cnt, ratio, up, conds, score = x
-                return (-score, -ratio, -cnt, len(conds))
-
-            out = sorted(good.values(), key=out_key)
-            if top_n is not None:
-                out = out[:top_n]
-
-            # for cnt, ratio, up, conds in out[:20]:
-            #     print(cnt, ratio, len(conds))
-
-            # for cnt, ratio, up, conds, score in out[:20]:
-            #     print(cnt, round(ratio, 2), round(score, 2), len(conds))
-
-            return out
-
-
-
-        def test_condition(name, cond, df, verbose=False):
-            """
-            param cond: 조건식 결과, 각 행마다 True / False가 들어 있는 bool mask
-            return: 저장할 가치가 있으면 True, 아니면 False
-            """
-            # 조건을 만족한 종목/날짜만
-            sub = df[cond]
-
-            if len(sub) == 0:
-                if verbose:
-                    print(f"\n=== {name} ===")
-                    print("선택된 행이 없습니다.")
-                return False
-
-            # up_cnt = (sub["validation_chg_rate"] >= 7).sum()   # 검증등락률
-            up_cnt = (sub["is_success"] == 1).sum()            # 동적 검증등락률
-            ratio = up_cnt / len(sub)
-
-            """
-            confidence: 성공률에 “표본 수 신뢰도 할인”을 적용한 값
-            ratio = 0.70 일 때
-            # 표본 20개
-            confidence = 0.70 - (1 / sqrt(20))
-                       = 0.70 - 0.224
-                       = 0.476
+            0.05, 0.10, 0.15, 0.20, ... 0.95 → 총 19개 threshold
+            0.1, 0.2, 0.3, ... 0.9           → 총 9개 threshold
             
-            # 표본 200개
-            confidence = 0.70 - (1 / sqrt(200))
-                       = 0.70 - 0.071
-                       = 0.629
+            depth4에서 데드캣을 이미 거른 뒤 depth5를 만들 거면 np.linspace(0.2, 0.8, 7) 괜찮음
+            0.05~0.95, 19개	많음	세밀하지만 과적합 위험 큼
+            0.1~0.9, 9개	중간	균형
+            0.2~0.8, 7개	적음	안정적, 룰 적음, 과적합 감소
             """
-            confidence = ratio - (1 / np.sqrt(len(sub)))
+            # n_bins = min(19, len(unique_vals) - 1)
+            # qs = np.unique(np.quantile(col_nonan, np.linspace(0.05, 0.95, n_bins)))
 
-            if confidence < 0.55:
-                return False
+            qs = np.unique(np.quantile(col_nonan, np.linspace(0.05, 0.95, 19)))
+            # qs = np.unique(np.quantile(col_nonan, np.linspace(0.1, 0.9, 9)))
+            # qs = np.unique(np.quantile(col_nonan, np.linspace(0.2, 0.8, 7)))
 
-            # if ratio < (for_rate - 0.2):
-            #     return False
+        for thr in qs:
+            thr = round(float(thr), 4)
 
-            # 표본이 너무 적으면 과적합 가능성이 큼
-            if len(sub) < 20:
-                return False
+            literals.append((f, "<=", thr))
+            literal_masks.append(col <= thr)
 
-            if verbose:
-                print(f"\n=== {name} ===")
-                print(f"선택된 행 수: {len(sub)}")
-                print(f"성공 개수   : {up_cnt}")
-                print(f"성공률      : {ratio:.3f}")
+            literals.append((f, ">", thr))
+            literal_masks.append(col > thr)
 
-            return True
+    return literals, literal_masks
 
 
-        def rule_to_code(name, conds, thr_round=3):
-            lines = [f'    "{name}":']
-            parts = []
-            for f, op, thr in conds:
-                thr = float(np.round(thr, thr_round))
-                if op == "<=":
-                    parts.append(f'(df["{f}"] <= {thr})')
-                else:
-                    parts.append(f'(df["{f}"] >= {thr})')  # ">": ge로 출력
-            # 보기 좋게 줄바꿈
-            joined = " &\n        ".join(parts)
-            lines.append(f"        {joined},")
-            return "\n".join(lines)
+def mine_good_rules(
+        df,
+        literals,
+        literal_masks,
+        target,
+        min_ratio=0.83,
+        min_count=25,
+        max_depth=4,
+        beam=30000,
+        top_n=1000,
+        feature_groups=None,
+        group_limits=None,
+        cnt_priority_ratio=0.85,
+):
+    """
+    beam : 단계별 상위 수량만 다음 뎁스로 가져간다, 한 depth에서 유지할 후보 개수
+    expand_ratio : 각 후보의 성능이 이 값보다 커야 다음 뎁스로 진행, 다음 depth로 확장할 최소 기준
+    min_ratio : “좋은 룰”로 저장할 기준
+    cnt_priority_ratio : 넘기면 ratio 보다 cnt 를 더 중요시
+    - ratio >= cnt_priority_ratio 이면 cnt 우선(그 다음 ratio)
+    - ratio <  cnt_priority_ratio 이면 ratio 우선(그 다음 cnt)
 
-        # 뎁스가 진행되어도 cnt가 급격히 줄면 안된다
-        # 뎁스 증가에 따른 ratio 상승이 완만해야 한다
+    권장 depth
+    | depth | 적당한 new 개수 | 해석              |
+    | ----: | -------------: | ---------------- |
+    |     0 |       50 ~ 500 | 단일 조건 후보     |
+    |     1 |    500 ~ 5,000 | 2개 조건 조합      |
+    |     2 | 1,000 ~ 10,000 | 3개 조건 조합      |
+    |     3 | 1,000 ~ 10,000 | 4개 조건 조합      |
+    |     4 |    100 ~ 3,000 | 5개 조건 최종 후보 |
 
-        # 국장
-        rules = mine_rules(
-            min_ratio=for_rate,
-            min_count=for_cnt,
-            max_depth=MAX_DEPTH,
-            beam=30000,
-            top_n=1000,
-            feature_groups=feature_groups,
-            group_limits=group_limits,
+
+    :returns (count, ratio, up_cnt, conds) 리스트 반환
+    """
+
+    # df 길이 만큼의 True 배열(불리언 마스크), 빈 배열의 튜플 리스트 > "데이터프레임의 모든 행을 선택한다"는 상태
+    beams = [(np.ones(len(df), dtype=bool), [])]
+    good = {}
+
+    print(
+        "\nbeam", beam,
+        "\nmin_ratio", min_ratio,
+        "\nmin_count", min_count,
+        "\nmax_depth", max_depth,
+        "\nexpand_ratio", GOOD_EXPAND_RATIO,
+        "\ntop_n", top_n,
+        "\n"
+    )
+
+    if feature_groups is None:
+        feature_groups = {}
+    if group_limits is None:
+        group_limits = {}
+
+    def get_group(feat_name):
+        return feature_groups.get(feat_name)
+
+    def beam_key(ratio, cnt):
+        """
+        beam(확장 후보)용 비교키
+        "좋은 후보"가 더 큰 key를 갖도록 설계 (나중에 key 비교로 worst 교체)
+        """
+        if ratio >= cnt_priority_ratio:
+            return (1, cnt, ratio)  # cnt 우선
+        return (0, ratio, cnt)      # ratio 우선
+
+    for depth in range(max_depth):
+        print("----------------------------------")
+        print("[GOOD] depth", depth)
+
+        # heap item: (key, uid, mask, conds, ratio, cnt)
+        # heap[0] = 가장 "나쁜" 후보 (key가 가장 작음)
+        heap = []
+        uid = count()  # 카운트 제네레이터 (itertools 모듈)
+
+        for base_mask, conds in beams:
+            used_feats = {c[0] for c in conds}
+
+            # 현재 rule에서 그룹 사용량 계산
+            group_used = {}
+            for f in used_feats:
+                g = get_group(f)
+                if g is None:
+                    continue
+                group_used[g] = group_used.get(g, 0) + 1
+
+            for (lit, lmask) in zip(literals, literal_masks):  # zip() 이용한 동시 순회
+                feat = lit[0]
+
+                # 동일 feature 중복 금지 (기존)
+                if feat in used_feats:
+                    continue
+
+                # 그룹 제약 체크
+                g = get_group(feat)
+                if g is not None:
+                    limit = group_limits.get(g, None)
+                    if limit is not None:
+                        if group_used.get(g, 0) >= limit:
+                            continue
+
+                # 새로운 subset
+                m = base_mask & lmask
+                cnt = int(m.sum())
+
+                if cnt < min_count:
+                    continue
+
+                up = int((m & target).sum())
+                ratio = up / cnt
+                # score = ratio * np.log1p(cnt)
+                # score = (ratio ** 2) * np.log1p(cnt)
+                score = (ratio ** 3) * np.log1p(cnt)  # ratio에 더 강하게 보상
+
+                # good 저장
+                if ratio >= min_ratio:
+                    key2 = tuple(sorted(
+                        (c[0], c[1], round(float(c[2]), 6))
+                        for c in (conds + [lit])
+                    ))
+
+                    prev = good.get(key2)
+                    if prev is None or score > prev[4]:
+                        good[key2] = (cnt, ratio, up, conds + [lit], score)
+
+                """
+                new ≈ beam의 30~70%가 되도록 expand_ratio 조절 필요
+
+                depth 0 >> new가 beam의 1~20%여도 괜찮음
+                depth 1 >> beam의 20~70%
+                depth 2+ > beam의 30~70%
+                """
+                # 확장 후보
+                if ratio >= GOOD_EXPAND_RATIO[depth]:
+                    k = beam_key(ratio, cnt)
+                    item = (k, next(uid), m, conds + [lit], ratio, cnt)
+
+                    if len(heap) < beam:
+                        heapq.heappush(heap, item)
+                    else:
+                        if k <= heap[0][0]:
+                            continue
+                        heapq.heapreplace(heap, item)
+
+        # 다음 depth로 넘길 후보들(좋은 순): key 내림차순
+        # key는 (group, primary, secondary)인데 primary/secondary는 큰 게 좋게 만들어 둠
+        new = sorted(heap, key=lambda x: x[0], reverse=True)
+        print("[GOOD] new", len(new))
+
+        if not new:
+            print("[GOOD] no expandable candidates; stopping.")
+            break
+
+        tail = new[-1]
+        print("[GOOD] tail ratio:", round(tail[4], 3), "cnt:", tail[5], "conds:", tail[3])  # 최악 후보 출력 (디버깅용)
+
+        beams = [(m, conds) for _, _, m, conds, _, _ in new]
+
+    # 점수 내림차순 정렬
+    def out_key(x):
+        cnt, ratio, up, conds, score = x
+        return (-score, -ratio, -cnt, len(conds))
+
+    out = sorted(good.values(), key=out_key)
+
+    if top_n is not None:
+        out = out[:top_n]
+
+    return out
+
+
+def mine_avoid_rules(
+        df,
+        literals,
+        literal_masks,
+        bad,
+        protect,
+        strong,
+        min_count=25,
+        max_depth=4,
+        beam=30000,
+        top_n=1000,
+        feature_groups=None,
+        group_limits=None,
+):
+    beams = [(np.ones(len(df), dtype=bool), [])]
+    good = {}
+
+    print(
+        "\nbeam", beam,
+        "\nmin_count", min_count,
+        "\nmax_depth", max_depth,
+        "\nexpand_bad_ratio", AVOID_EXPAND_BAD_RATIO,
+        "\nexpand_max_strong_rate", AVOID_EXPAND_MAX_STRONG_RATE,
+        "\ntop_n", top_n,
+        "\nMIN_BAD_RATE", MIN_BAD_RATE,
+        "\nMAX_PROTECT_RATE", MAX_PROTECT_RATE,
+        "\nMAX_STRONG_RATE", MAX_STRONG_RATE,
+        "\n"
+    )
+
+    if feature_groups is None:
+        feature_groups = {}
+    if group_limits is None:
+        group_limits = {}
+
+    def get_group(feat_name):
+        return feature_groups.get(feat_name)
+
+    for depth in range(max_depth):
+        print("----------------------------------")
+        print("[AVOID] depth", depth)
+
+        heap = []
+        uid = count()
+
+        for base_mask, conds in beams:
+            used_feats = {c[0] for c in conds}
+
+            group_used = {}
+            for f in used_feats:
+                g = get_group(f)
+                if g is not None:
+                    group_used[g] = group_used.get(g, 0) + 1
+
+            for lit, lmask in zip(literals, literal_masks):
+                feat = lit[0]
+
+                if feat in used_feats:
+                    continue
+
+                g = get_group(feat)
+                if g is not None:
+                    limit = group_limits.get(g)
+                    if limit is not None and group_used.get(g, 0) >= limit:
+                        continue
+
+                m = base_mask & lmask
+                cnt = int(m.sum())
+
+                if cnt < min_count:
+                    continue
+
+                bad_cnt = int((m & bad).sum())
+                protect_cnt = int((m & protect).sum())
+                strong_cnt = int((m & strong).sum())
+
+                bad_rate = bad_cnt / cnt
+                protect_rate = protect_cnt / cnt
+                strong_rate = strong_cnt / cnt
+
+                score = (
+                        (bad_rate ** 2.5)
+                        * np.log1p(cnt)
+                        * ((1 - protect_rate) ** 1.5)
+                        * ((1 - strong_rate) ** 2.0)
+                )
+
+                if (
+                        bad_rate >= MIN_BAD_RATE
+                        and protect_rate <= MAX_PROTECT_RATE
+                        and strong_rate <= MAX_STRONG_RATE
+                ):
+                    key2 = tuple(sorted(
+                        (c[0], c[1], round(float(c[2]), 6))
+                        for c in (conds + [lit])
+                    ))
+
+                    prev = good.get(key2)
+                    if prev is None or score > prev[8]:
+                        good[key2] = (
+                            cnt,
+                            bad_cnt,
+                            bad_rate,
+                            protect_cnt,
+                            protect_rate,
+                            strong_cnt,
+                            strong_rate,
+                            conds + [lit],
+                            score,
+                        )
+
+                if (
+                        # 이 룰 subset 안에 class_0 비율이 충분히 높아야 함
+                        bad_rate >= AVOID_EXPAND_BAD_RATIO[depth]
+                        # 이 룰 subset 안에 class_3 비율이 너무 높으면 안 됨
+                        and strong_rate <= AVOID_EXPAND_MAX_STRONG_RATE[depth]
+                ):
+                    k = (score, bad_rate, -strong_rate, -protect_rate, cnt)
+                    item = (k, next(uid), m, conds + [lit], bad_rate, cnt)
+
+                    if len(heap) < beam:
+                        heapq.heappush(heap, item)
+                    else:
+                        if k <= heap[0][0]:
+                            continue
+                        heapq.heapreplace(heap, item)
+
+        new = sorted(heap, key=lambda x: x[0], reverse=True)
+        print("[AVOID] new", len(new))
+
+        if not new:
+            print("[AVOID] no expandable candidates; stopping.")
+            break
+
+        tail = new[-1]
+        print("[AVOID] tail bad_rate:", round(tail[4], 3), "cnt:", tail[5], "conds:", tail[3])
+
+        beams = [(m, conds) for _, _, m, conds, _, _ in new]
+
+    def out_key(x):
+        cnt, bad_cnt, bad_rate, protect_cnt, protect_rate, strong_cnt, strong_rate, conds, score = x
+        return (-score, -bad_rate, strong_rate, protect_rate, -cnt)
+
+    out = sorted(good.values(), key=out_key)
+
+    if top_n is not None:
+        out = out[:top_n]
+
+    return out
+
+
+def make_mask_from_conds(df, conds):
+    mask = np.ones(len(df), dtype=bool)
+
+    for f, op, thr in conds:
+        if op == "<=":
+            mask &= (df[f] <= thr)
+        else:
+            mask &= (df[f] > thr)
+
+    return mask
+
+
+def test_good_condition(name, cond, df, min_count=20, verbose=False):
+    """
+    룰 검증
+    """
+    # 조건을 만족한 종목/날짜만
+    sub = df[cond]
+
+    if len(sub) == 0:
+        return False
+
+    up_cnt = int((sub["is_success"] == 1).sum())
+    ratio = up_cnt / len(sub)
+
+    """
+    confidence: 성공률에 “표본 수 신뢰도 할인”을 적용한 값
+    ratio = 0.70 일 때
+    # 표본 20개
+    confidence = 0.70 - (1 / sqrt(20))
+               = 0.70 - 0.224
+               = 0.476
+    
+    # 표본 200개
+    confidence = 0.70 - (1 / sqrt(200))
+               = 0.70 - 0.071
+               = 0.629
+    """
+    confidence = ratio - (1 / np.sqrt(len(sub)))
+
+    if confidence < 0.55:
+        return False
+
+    # 표본이 너무 적으면 과적합 가능성이 큼
+    if len(sub) < min_count:
+        return False
+
+    if verbose:
+        print(f"\n=== {name} ===")
+        print(f"선택된 행 수: {len(sub)}")
+        print(f"성공 개수   : {up_cnt}")
+        print(f"성공률      : {ratio:.3f}")
+        print(f"confidence : {confidence:.3f}")
+
+    return True
+
+
+def test_avoid_condition(name, cond, df, min_count=25, verbose=False):
+    sub = df[cond]
+
+    if len(sub) == 0:
+        return False
+
+    cnt = len(sub)
+
+    class0_cnt = int((sub["target_class"] == 0).sum())
+    class2_cnt = int((sub["target_class"] == 2).sum())
+    class3_cnt = int((sub["target_class"] == 3).sum())
+
+    class0_rate = class0_cnt / cnt
+    protect_rate = (class2_cnt + class3_cnt) / cnt
+    class3_rate = class3_cnt / cnt
+
+    # 전체 class별 총량 대비 얼마나 제거했는지도 중요
+    total_class0 = int((df["target_class"] == 0).sum())
+    total_class2 = int((df["target_class"] == 2).sum())
+    total_class3 = int((df["target_class"] == 3).sum())
+
+    class0_remove_rate = class0_cnt / total_class0 if total_class0 else 0
+    class2_loss_rate = class2_cnt / total_class2 if total_class2 else 0
+    class3_loss_rate = class3_cnt / total_class3 if total_class3 else 0
+
+    # 핵심: class_0은 많이 제거하고 class_2/3은 적게 잃는 룰
+    score = (
+            class0_remove_rate
+            - class2_loss_rate
+            - class3_loss_rate * 1.5
+    )
+
+    if cnt < min_count:
+        return False
+
+    # 룰 subset 내부가 class_0 위주여야 함
+    if class0_rate < MIN_BAD_RATE:
+        return False
+
+    # 좋은 종목이 너무 많이 섞이면 제외 룰로 부적합
+    if protect_rate > MAX_PROTECT_RATE:
+        return False
+
+    # class_3 손실은 특히 제한
+    if class3_rate > MAX_STRONG_RATE:
+        return False
+
+    # 전체 기준으로도 의미 있는 제거 성능이 있어야 함
+    if score <= 0:
+        return False
+
+    if verbose:
+        print(f"\n=== {name} ===")
+        print(f"선택된 행 수: {cnt}")
+        print(f"class_0 비율: {class0_rate:.3f}")
+        print(f"class_2+3 비율: {protect_rate:.3f}")
+        print(f"class_0 제거율: {class0_remove_rate:.3f}")
+        print(f"class_2 손실률: {class2_loss_rate:.3f}")
+        print(f"class_3 손실률: {class3_loss_rate:.3f}")
+        print(f"score: {score:.3f}")
+
+    return True
+
+
+def rule_to_code(name, conds, thr_round=3):
+    lines = [f'    "{name}":']
+    parts = []
+
+    for f, op, thr in conds:
+        thr = float(np.round(thr, thr_round))
+
+        if op == "<=":
+            parts.append(f'(df["{f}"] <= {thr})')
+        else:
+            parts.append(f'(df["{f}"] > {thr})')  # ">": ge로 출력
+
+    joined = " &\n        ".join(parts)
+    lines.append(f"        {joined},")
+
+    return "\n".join(lines)
+
+
+def write_rule_file(out_path, selected, header_comment):
+    with out_path.open("w", encoding="utf-8") as f:
+        f.write(header_comment + "\n")
+        f.write("import numpy as np\n\n")
+
+        f.write("RULE_NAMES = [\n")
+        for name, _ in selected:
+            f.write(f'    "{name}",\n')
+        f.write("]\n\n")
+
+        f.write("def build_conditions(df):\n")
+        f.write("    conditions = {\n")
+
+        for name, conds in selected:
+            code = rule_to_code(name, conds)
+            lines = code.splitlines()
+
+            f.write("        " + lines[0] + "\n")
+            for line in lines[1:]:
+                f.write("        " + line + "\n")
+
+        f.write("    }\n")
+        f.write("    return conditions\n")
+
+    print(f"saved to: {out_path.resolve()}")
+
+
+def save_good_rule_eval(df, selected, out_csv=GOOD_EVAL_PATH):
+    rows = []
+
+    for name, conds in selected:
+        mask = make_mask_from_conds(df, conds)
+        sub = df[mask]
+
+        if len(sub) == 0:
+            continue
+
+        up_cnt = int((sub["is_success"] == 1).sum())
+        ratio = up_cnt / len(sub)
+
+        rows.append({
+            "rule": name,
+            "count": len(sub),
+            "success_cnt": up_cnt,
+            "success_rate": round(ratio * 100, 1),
+        })
+
+    result = pd.DataFrame(rows)
+
+    if len(result):
+        result = result.sort_values(
+            ["success_rate", "count"],
+            ascending=[False, False]
         )
 
-        # 미장
-        # rules = mine_rules(min_ratio=for_rate, min_count=50, max_depth=6, beam=30000, expand_ratio=0.45, top_n=10000)
-
-        top_n = min(1000, len(rules))
-        selected = []  # (name, conds)만 저장해두고 파일로 씀
-
-        # for i, (cnt, ratio, up, conds) in enumerate(rules[:top_n], start=1):
-            # name = f"rule_{i:03d}__n{cnt}__r{ratio:.3f}"
-        for i, (cnt, ratio, up, conds, score) in enumerate(rules[:top_n], start=1):
-            name = f"rule_{i:03d}__n{cnt}__r{ratio:.3f}__s{score:.2f}"
-
-            # df로 mask 생성
-            mask = np.ones(len(df), dtype=bool)
-            for f, op, thr in conds:
-                if op == "<=":
-                    mask &= (df[f] <= thr)
-                else:
-                    # rule_to_code가 >=를 찍고 있으니 검증도 >=로 맞추기
-                    mask &= (df[f] >= thr)
-
-            # 통과한 룰만 담기
-            if test_condition(name, mask, df, verbose=False):
-                selected.append((name, conds))
-
-        print(f"\n통과 룰 개수: {len(selected)} / {min(len(rules), top_n)}")
+    result.to_csv(out_csv, index=False, encoding="utf-8-sig")
+    print(f"saved eval to: {out_csv.resolve()}")
 
 
-        # dict 자료구조 >> 값: 불리언(boolean) 마스크
-        # df가 pandas DataFrame라면 >> 값은 pandas.Series (dtype=bool)
-        # pandas.Series[bool] (여러 값): True/False가 행 개수만큼 들어있는 1차원 배열 같은 것, 인덱스를 가진 1차원 배열
-        """
-        s = pd.Series([10, 20, 30], index=["a", "b", "c"])
-        index   value
-        a       10
-        b       20
-        c       30
-        
-        # list
-        [1, 2, 3] + 1    # ❌ 에러
-        
-        # Series
-        s + 1           # ⭕ 모든 원소에 +1
-        
-        ----------------------
-        
-        mask = conditions["rule_001__n77__r0.805"]
-        mask.any()   # 하나라도 True면 True (단일 bool)
-        mask.all()   # 전부 True면 True (단일 bool)
-        mask.sum()   # True 개수 (int)
-        """
+def save_avoid_rule_eval(df, selected, out_csv=AVOID_EVAL_PATH):
+    rows = []
 
-        # ✅ 통과 룰만 파일로 저장 (.py 모듈)
-        with out_path.open("w", encoding="utf-8") as f:
-            f.write("# auto-generated: lowscan rules (filtered)\n")
-            f.write("# usage:\n")
-            f.write("#   from lowscan_rules import build_conditions, RULE_NAMES\n")
-            f.write("#   find_conditions = build_conditions(df)\n\n")
-            f.write("import numpy as np\n\n")
+    total0 = int((df["target_class"] == 0).sum())
+    total1 = int((df["target_class"] == 1).sum())
+    total2 = int((df["target_class"] == 2).sum())
+    total3 = int((df["target_class"] == 3).sum())
 
-            # 이름 리스트도 같이 저장하면 편함
-            f.write("RULE_NAMES = [\n")
-            for name, _ in selected:
-                f.write(f'    "{name}",\n')
-            f.write("]\n\n")
+    for name, conds in selected:
+        mask = make_mask_from_conds(df, conds)
+        sub = df[mask]
 
-            f.write("def build_conditions(df):\n")
-            f.write("    conditions = {\n")
+        if len(sub) == 0:
+            continue
 
-            for name, conds in selected:
-                code = rule_to_code(name, conds)  # 기존 너 함수 그대로 활용
-                lines = code.splitlines()
-                f.write("        " + lines[0] + "\n")
-                for line in lines[1:]:
-                    f.write("        " + line + "\n")
+        cnt = len(sub)
 
-            f.write("    }\n")
-            f.write("    return conditions\n")
+        c0 = int((sub["target_class"] == 0).sum())
+        c1 = int((sub["target_class"] == 1).sum())
+        c2 = int((sub["target_class"] == 2).sum())
+        c3 = int((sub["target_class"] == 3).sum())
 
-        print(f"saved to: {out_path.resolve()}")
+        rows.append({
+            "rule": name,
+            "remove_count": cnt,
 
-        # import re
-        # txt = out_path.read_text(encoding="utf-8")
-        #
-        # m = re.search(r'RULE_NAMES\s*=\s*\[(.*?)\]\s*\n', txt, flags=re.S)
-        # block = m.group(1) if m else ""
-        # print("RULE_NAMES entries (exact):", len(re.findall(r'"rule_\d+__n', block)))
-        #
-        # m = re.search(r'conditions\s*=\s*\{(.*?)\n\s*\}\s*\n\s*return conditions', txt, flags=re.S)
-        # block = m.group(1) if m else ""
-        # print("conditions entries (exact):", len(re.findall(r'^\s*"rule_\d+__n.*":', block, flags=re.M)))
+            "class0_cnt": c0,
+            "class1_cnt": c1,
+            "class2_cnt": c2,
+            "class3_cnt": c3,
+
+            "class0_in_rule_rate": round(c0 / cnt * 100, 1),
+            "class23_in_rule_rate": round((c2 + c3) / cnt * 100, 1),
+
+            "class0_remove_rate": round(c0 / total0 * 100, 1) if total0 else 0,
+            "class1_remove_rate": round(c1 / total1 * 100, 1) if total1 else 0,
+            "class2_loss_rate": round(c2 / total2 * 100, 1) if total2 else 0,
+            "class3_loss_rate": round(c3 / total3 * 100, 1) if total3 else 0,
+
+            "score": round(
+                (c0 / total0 if total0 else 0)
+                - (c2 / total2 if total2 else 0)
+                - 1.5 * (c3 / total3 if total3 else 0),
+                4
+            ),
+        })
+
+    result = pd.DataFrame(rows)
+
+    if len(result):
+        result = result.sort_values(
+            ["score", "class0_in_rule_rate", "class3_loss_rate"],
+            ascending=[False, False, True]
+        )
+
+    result.to_csv(out_csv, index=False, encoding="utf-8-sig")
+    print(f"saved avoid eval to: {out_csv.resolve()}")
 
 
+def save_combined_avoid_eval(df, selected, out_csv="combined_avoid_eval.csv"):
+    avoid_mask = np.zeros(len(df), dtype=bool)
 
-        from utils import sort_csv_by_today_desc
+    for name, conds in selected:
+        avoid_mask |= make_mask_from_conds(df, conds)
 
-        # 각 조건 정의
+    removed = df[avoid_mask]
+    remain = df[~avoid_mask]
 
-        import importlib
-        import lowscan_rules
+    total0 = (df["target_class"] == 0).sum()
+    total1 = (df["target_class"] == 1).sum()
+    total2 = (df["target_class"] == 2).sum()
+    total3 = (df["target_class"] == 3).sum()
 
-        importlib.reload(lowscan_rules)
+    c0 = (removed["target_class"] == 0).sum()
+    c1 = (removed["target_class"] == 1).sum()
+    c2 = (removed["target_class"] == 2).sum()
+    c3 = (removed["target_class"] == 3).sum()
 
-        conditions = lowscan_rules.build_conditions(df)
+    summary = pd.DataFrame([{
+        "total_count": len(df),
+        "removed_count": len(removed),
+        "remain_count": len(remain),
+        "removed_rate": round(len(removed) / len(df) * 100, 1),
 
-        rows = []
+        "removed_class0": int(c0),
+        "removed_class1": int(c1),
+        "removed_class2": int(c2),
+        "removed_class3": int(c3),
 
-        # 조건을 만족하는 행등만 골라서(sub) 확인
-        def test_condition2(name, cond):
-            """
-            param cond: 조건식 결과
-            """
+        "class0_remove_rate": round(c0 / total0 * 100, 1) if total0 else 0,
+        "class1_remove_rate": round(c1 / total1 * 100, 1) if total1 else 0,
+        "class2_loss_rate": round(c2 / total2 * 100, 1) if total2 else 0,
+        "class3_loss_rate": round(c3 / total3 * 100, 1) if total3 else 0,
 
-            # 조건을 만족한 행들만 모인 DataFrame
-            sub = df[cond]
+        "removed_class0_rate": round((removed["target_class"] == 0).mean() * 100, 1),
+        "removed_class1_rate": round((removed["target_class"] == 1).mean() * 100, 1),
+        "removed_class2_rate": round((removed["target_class"] == 2).mean() * 100, 1),
+        "removed_class3_rate": round((removed["target_class"] == 3).mean() * 100, 1),
 
-            if len(sub) == 0:
-                print(f"\n=== {name} ===")
-                print("선택된 행이 없습니다.")
-                return
+        "remain_class0_rate": round((remain["target_class"] == 0).mean() * 100, 1),
+        "remain_class1_rate": round((remain["target_class"] == 1).mean() * 100, 1),
+        "remain_class2_rate": round((remain["target_class"] == 2).mean() * 100, 1),
+        "remain_class3_rate": round((remain["target_class"] == 3).mean() * 100, 1),
+    }])
 
-            # up_cnt = (sub["validation_chg_rate"] >= 7).sum()   # 정적 기준
-            up_cnt = (sub["is_success"] == 1).sum()            # 동적 기준 반영
-            ratio = up_cnt / len(sub)
+    summary.to_csv(out_csv, index=False, encoding="utf-8-sig")
+    print(summary)
 
-            rows.append({
-                "rule": name,
-                "count": len(sub),
-                "success_cnt": up_cnt,
-                "success_rate": ratio,
-            })
 
-        # 모든 조건 테스트
-        for name, cond in conditions.items():
-            test_condition2(name, cond)
+def find_good_rule(m_ratio, m_count):
+    df = pd.read_csv(CSV_PATH)
 
-        base_result = pd.DataFrame(rows)
+    features = get_features(df)
+    literals, literal_masks = build_literals(df, features)
 
-        print("룰 개수:", len(base_result))
-        print("총 선택 수:", base_result["count"].sum())
-        print("평균 성공률:", round(base_result["success_rate"].mean(), 2))
+    feature_groups, group_limits = get_feature_groups()
+
+    target = df["is_success"].to_numpy() == 1
+
+    rules = mine_good_rules(
+        df=df,
+        literals=literals,
+        literal_masks=literal_masks,
+        target=target,
+        min_ratio=m_ratio,
+        min_count=m_count,
+        max_depth=MAX_DEPTH,
+        beam=30000,
+        top_n=1000,
+        feature_groups=feature_groups,
+        group_limits=group_limits,
+    )
+
+    selected = []
+
+    for i, (cnt, ratio, up, conds, score) in enumerate(rules, start=1):
+        name = f"rule_{i:03d}_s{score:.2f}_n{cnt}_r{ratio:.3f}"
+
+        mask = make_mask_from_conds(df, conds)
+
+        # 테스트 통과만
+        if test_good_condition(name, mask, df, verbose=False):
+            selected.append((name, conds))
+
+    print(f"[GOOD] 통과 룰 개수: {len(selected)} / {len(rules)}")
+
+    write_rule_file(
+        GOOD_OUT_PATH,
+        selected,
+        header_comment=(
+            "# auto-generated: lowscan good buy rules\n"
+            "# usage:\n"
+            "#   from lowscan_rules import build_conditions, RULE_NAMES\n"
+            "#   buy_conditions = build_conditions(df)"
+        )
+    )
+
+    save_good_rule_eval(df, selected)
+
+
+def find_avoid_rule():
+    df = pd.read_csv(CSV_PATH)
+    # df = add_target_class(df)
+
+    if "target_class" not in df.columns:
+        raise ValueError("target_class 컬럼이 없습니다. 데이터 생성 시 target_class를 먼저 저장하세요.")
+
+    features = get_features(df)
+    literals, literal_masks = build_literals(df, features)
+
+    feature_groups, group_limits = get_feature_groups()
+
+    bad = df["target_class"].to_numpy() == 0
+    protect = df["target_class"].to_numpy() >= 2
+    strong = df["target_class"].to_numpy() == 3
+
+    rules = mine_avoid_rules(
+        df=df,
+        literals=literals,
+        literal_masks=literal_masks,
+        bad=bad,
+        protect=protect,
+        strong=strong,
+        min_count=MIN_CNT_AVOID,
+        max_depth=MAX_DEPTH_AVOID,
+        beam=30000,
+        top_n=300,
+        feature_groups=feature_groups,
+        group_limits=group_limits,
+    )
+
+    selected = []
+
+    for i, (
+            cnt,
+            bad_cnt,
+            bad_rate,
+            protect_cnt,
+            protect_rate,
+            strong_cnt,
+            strong_rate,
+            conds,
+            score,
+    ) in enumerate(rules, start=1):
+
+        name = (
+            f"avoid_{i:03d}"
+            f"_s{score:.2f}"
+            f"_n{cnt}"
+            f"_bad{bad_rate:.3f}"
+            f"_p{protect_rate:.3f}"
+            f"_strong{strong_rate:.3f}"
+        )
+
+        mask = make_mask_from_conds(df, conds)
+
+        if test_avoid_condition(name, mask, df, verbose=False):
+            selected.append((name, conds))
+
+    print(f"[AVOID] 통과 룰 개수: {len(selected)} / {len(rules)}")
+
+    write_rule_file(
+        AVOID_OUT_PATH,
+        selected,
+        header_comment=(
+            "# auto-generated: lowscan avoid rules for class_0\n"
+            "# usage:\n"
+            "#   from lowscan_avoid_rules import build_conditions, RULE_NAMES\n"
+            "#   avoid_conditions = build_conditions(df)\n"
+            "#   final_buy_mask = base_buy_mask & ~avoid_mask"
+        )
+    )
+
+    # save_avoid_rule_eval(df, selected)
+    save_combined_avoid_eval(df, selected)
+
+
+
+if __name__ == "__main__":
+    # MODE = "both"
+    # MODE = "good"
+    MODE = "avoid"
+
+    for i in range(1):
+        for_cnt = MIN_CNT + (i*1)
+
+        for j in range(1):
+            for_rate = MIN_RATE + (0.01*j)
+
+            if MODE in ("good", "both"):
+                find_good_rule(for_rate, for_cnt)
+
+            if MODE in ("avoid", "both"):
+                # class_0 제거용 데드캣 제외 룰 생성
+                find_avoid_rule()
