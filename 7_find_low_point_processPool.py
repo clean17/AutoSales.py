@@ -3,7 +3,6 @@
 signal_any_drop 를 통해서 5일선이 20일선보다 아래에 있으면서 최근 -3%이 존재 + 오늘 4% 이상 상승
 
 2025-02-02 되면 멈추는 조건 필요
-데드캣 공통 필터 개선 필요
 '''
 import matplotlib
 matplotlib.use("Agg")  # 비인터랙티브 백엔드 (창 안 띄움)
@@ -167,7 +166,6 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
     # 오늘 제외 최근 7일 5일선이 20일선보다 계속 낮은데 -2.5% 하락이 있으면서 오늘 3.3% 상승 ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
     signal = signal_any_drop(data, 7, 3.3, -2.5)
     # signal = signal_any_drop(data, 7, 2, -2.5)
-    # signal = signal_any_drop(data, 8, 3.5, -3.0)
     if not signal:
         return
 
@@ -358,25 +356,23 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
 
     rule_features.update(risk_rule_features)
 
-    if ATR_pct < 2.463:
+    if ATR_pct < 2.413:
         return
-    if today_tr_val_eok < 0.594:
+    if today_tr_val_eok < 0.304:
         return
-    if _close_pos_20d < 0.043:
+    if _close_pos_20d < 0.038:
         return
     if dist_to_ma5 < -16.293:
         return
-    if dist_from_low_20d < 3.311:
+    if dist_from_low_20d < 3.302:
         return
-    if ma5_ma20_gap_chg_1d < -5.933:
+    if ma5_ma20_gap_chg_1d < -6.282:
         return
-    if today_tr_val_eok < 0.594:
+    if _MACD_hist_3d_close_norm < -5.386:
         return
-    if _MACD_hist_3d_close_norm < -5.386:  # -4.045
+    if _BB_perc < -0.117:
         return
-    if _BB_perc < -0.117:  # -0.073
-        return
-    if _dist_to_high_20d < -72.546:  # -63.590
+    if _dist_to_high_20d < -72.546:
         return
     if _UltimateOsc < 12.458:
         return
@@ -388,17 +384,17 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
         return
     if _ADX14 < 7.555:
         return
-    if _gap_pct < -9.187:
+    if _gap_pct < -21.833:
         return
-    if _vol_ratio_15_60 < 0.246:
+    if _vol_ratio_15_60 < 0.184:
         return
     if _RSI_rebound < -15.247:
         return
-    if _rebound_power < 1.823:  # 1.890
+    if _rebound_power < 1.823:
         return
     if _MACD_hist_1d < -553.4:
         return
-    if _MACD_acc < -479.478:
+    if _MACD_acc < -583.492:
         return
 
     ########################################################################
@@ -618,7 +614,7 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
         종가가 계속 음수면
         데드캣 가능성이 높다.
         """
-        # row["is_success"]  = is_success
+        # row["is_success"]   = 1 if profit_day7 is not None else 0
         row["is_success5"]  = 1 if profit_day5 is not None else 0
         row["is_success7"]  = 1 if profit_day7 is not None else 0
         row["is_success10"] = 1 if profit_day10 is not None else 0
@@ -686,37 +682,27 @@ if __name__ == "__main__":
                 mask = pd.Series(False, index=df.index)
                 matched_rule_map = {idx: [] for idx in df.index}
 
-                # for mod in modules:
-                #     conditions = mod.build_conditions(df)
-                #
-                #     for name in mod.RULE_NAMES:
-                #         if name not in conditions:
-                #             continue
-                #
-                #         cond = conditions[name].fillna(False)
-                #
-                #         # 하나라도 만족하면 통과
-                #         mask |= cond
-                #
-                #         # 어떤 룰에 걸렸는지 기록
-                #         for idx in df.index[cond]:
-                #             matched_rule_map[idx].append(name)
-                #
-                # df["matched_rules"] = df.index.map(
-                #     lambda idx: ",".join(matched_rule_map[idx])
-                # )
-                #
-                # selected = df[mask].copy()
+                for mod in modules:
+                    conditions = mod.build_conditions(df)
 
+                    for name in mod.RULE_NAMES:
+                        if name not in conditions:
+                            continue
 
-                avoid_conditions = lowscan_avoid_rules.build_conditions(df)
+                        cond = conditions[name].fillna(False)
 
-                avoid_mask = np.zeros(len(df), dtype=bool)
-                for cond in avoid_conditions.values():
-                    avoid_mask |= cond
+                        # 하나라도 만족하면 통과
+                        mask |= cond
 
-                selected = df[~avoid_mask].copy()
+                        # 어떤 룰에 걸렸는지 기록
+                        for idx in df.index[cond]:
+                            matched_rule_map[idx].append(name)
 
+                df["matched_rules"] = df.index.map(
+                    lambda idx: ",".join(matched_rule_map[idx])
+                )
+
+                selected = df[mask].copy()
 
                 total_cnt = len(selected)
                 up_cnt = int(selected["is_success"].sum())
@@ -726,9 +712,23 @@ if __name__ == "__main__":
                 print(f"\n룰 통과 수: {total_cnt}")
                 print(f"룰 통과 후 성공률: {total_up_rate:.2f}% ({up_cnt} / {total_cnt})")
 
-            if render_graph == 0:
+            else:
+                # 데드캣 필터 패스한 것만 룰 마이닝
+                avoid_conditions = lowscan_avoid_rules.build_conditions(df)
+
+                avoid_mask = np.zeros(len(df), dtype=bool)
+                for cond in avoid_conditions.values():
+                    avoid_mask |= cond
+
+                selected = df[~avoid_mask].copy()
+
                 # CSV 저장
-                df.to_csv('csv/low_result_7.csv', index=False)  # 인덱스 칼럼 'Unnamed: 0' 생성하지 않음
+                # df.to_csv('csv/low_result_7.csv', index=False)  # 인덱스 칼럼 'Unnamed: 0' 생성하지 않음
+
+                # 데드캣 필터 통과한 것만 저장
+                selected.to_csv('csv/low_result_7.csv', index=False)
+
+                # 내림차순 정렬
                 saved = sort_csv_by_today_desc(
                     in_path=r"csv/low_result_7.csv",
                     out_path=r"csv/low_result_7_desc.csv",
