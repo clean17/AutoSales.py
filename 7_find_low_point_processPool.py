@@ -14,12 +14,17 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
-# import lowscan_rules_83_25_260504 as rule0
-import lowscan_rules as rule00
-# import lowscan_rules_77_25_5_42 as rule1
-# import lowscan_rules_80_25_4_42 as rule2
+import lowscan_rules_260510_4t as rule1
+import lowscan_rules_260510_5t as rule2
+import lowscan_rules_260510_4tx as rule3
+import lowscan_rules_260510_5tx as rule4
 import lowscan_avoid_rules
-modules = [rule00]
+modules = [  # 전체 > 87% (67 / 77)
+    rule1,  # 단독 제외 > 87% (65 / 74)
+    # rule2,  # 단독 제외 > 87% (67 / 77)  >> 오늘 등락률 포함한 depth5는 필요 없음
+    rule3,  # 단독 제외 > 87% (57 / 65)
+    # rule4  # 단독 제외 > 87.01% (67 / 77)
+]
 
 # log_file = open("csv/output.log", "w", encoding="utf-8")
 # sys.stdout = log_file
@@ -783,7 +788,7 @@ if __name__ == "__main__":
 
                 title = (
                     f"{today} {stock_name} [{ticker}] "
-                    f"일봉 차트 - 당일 상승_{row['today_pct']}%_최고 수익률_{row['validation_high_rate_max_adj']}% "
+                    f"일봉 차트 - 당일 상승_{row['today_pct']}%_7일 최고 수익률_{row['validation_high_rate_max_adj']}% "
                     f"rules={row['matched_rules'][:80]}"
                 )
 

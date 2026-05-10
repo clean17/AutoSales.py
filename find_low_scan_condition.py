@@ -26,15 +26,21 @@ from itertools import count
 
 CSV_PATH = "csv/low_result_7_desc.csv"
 
-MIN_RATE        = 0.90
+# 고정
+# GOOD_EXPAND_RATIO = [0.45, 0.65, 0.84, 0.90, 0.92]
+GOOD_EXPAND_RATIO = [0.45, 0.63, 0.83, 0.87, 0.90]  # today_pct x depth 5
+
+# MIN_RATE        = 0.91  # (today_pct o / 4)
+# MIN_RATE        = 0.928  # (today_pct o / 5)
+MIN_RATE        = 0.88  # (today_pct x / 4)
+# MIN_RATE        = 0.90  # (today_pct x / 5)
 MIN_CNT         = 80
 MIN_CNT_AVOID   = 30
-MAX_DEPTH       = 4
+MAX_DEPTH       = 4   # today_pct 제외했냐 ?
 MAX_DEPTH_AVOID = 5
 
-GOOD_EXPAND_RATIO = [0.45, 0.65, 0.85, 0.90]
 VALID_MIN_RATE = 0.80
-VALID_MIN_CNT = 18
+VALID_MIN_CNT = 15
 VALID_RATIO = 0.10
 
 """
@@ -160,6 +166,7 @@ def get_exclude_columns():
         "_MACD_hist_1d",
         "_MACD_acc",
         "_MACD_hist_3d_close_norm",
+        "today_pct",  # depth 5에서 추가로 만들 경우
     }
 
 
@@ -301,8 +308,8 @@ def mine_good_rules(
         "\nmax_depth", max_depth,
         "\nexpand_ratio", GOOD_EXPAND_RATIO,
         "\ntop_n", top_n,
-        "\nvalie_min_rate", VALID_MIN_RATE,
-        "\nvalie_min_cnt", VALID_MIN_CNT,
+        "\nvalid_min_rate", VALID_MIN_RATE,
+        "\nvalid_min_cnt", VALID_MIN_CNT,
         "\n"
     )
 
@@ -920,7 +927,7 @@ def find_good_rule(m_ratio, m_count):
             continue
 
         name = (
-            f"{len(selected) + 1:03d}"
+            f"rule_{len(selected) + 1:03d}"
             # f"_trn{len(train_sub)}_trr{train_ratio:.3f}"
             # f"_van{len(valid_sub)}_var{valid_ratio:.3f}"
         )
@@ -939,7 +946,15 @@ def find_good_rule(m_ratio, m_count):
             "conds": str(conds),
         })
 
-    print(f"[GOOD] valid 통과 룰 개수: {len(selected)} / {len(rules)}")
+    # 진단용으로 사용, 실제 룰 저장에서는 제외
+    # print(f"[GOOD] before reduce: {len(selected)}")
+    # selected = reduce_rules_by_new_rows(valid, selected, min_new_rows=1)
+    # print(f"[GOOD] after reduce: {len(selected)}")
+
+    print(f"\n[GOOD] valid 통과 룰 개수: {len(selected)} / {len(rules)}")
+
+    eval_combined_good_rules(train, selected, title="TRAIN")
+    eval_combined_good_rules(valid, selected, title="VALID")
 
     write_rule_file(
         GOOD_OUT_PATH,
@@ -1212,6 +1227,56 @@ def split_train_valid_by_date_ratio(df, valid_ratio=0.10):
     return train, valid, split_date
 
 
+def eval_combined_good_rules(df, selected, title=""):
+    buy_mask = np.zeros(len(df), dtype=bool)
+
+    for name, conds in selected:
+        buy_mask |= make_mask_from_conds(df, conds)
+
+    sub = df[buy_mask]
+
+    print(f"\n[{title}] combined good rules")
+    print("rule_count:", len(selected))
+    print("row_count:", len(sub))
+
+    if len(sub) == 0:
+        return
+
+    print("success7:", round((sub["is_success7"] == 1).mean() * 100, 2), "%")
+    print("success5:", round((sub["is_success5"] == 1).mean() * 100, 2), "%")
+    print("success10:", round((sub["is_success10"] == 1).mean() * 100, 2), "%")
+
+    if "target_class" in sub.columns:
+        print("class0:", round((sub["target_class"] == 0).mean() * 100, 2), "%")
+        print("class1:", round((sub["target_class"] == 1).mean() * 100, 2), "%")
+        print("class2:", round((sub["target_class"] == 2).mean() * 100, 2), "%")
+        print("class3:", round((sub["target_class"] == 3).mean() * 100, 2), "%")
+
+    if "validation_high_rate_max" in sub.columns:
+        print("avg_high:", round(sub["validation_high_rate_max"].mean(), 2))
+        print("median_high:", round(sub["validation_high_rate_max"].median(), 2))
+
+    if "validation_low_rate_min" in sub.columns:
+        print("avg_low:", round(sub["validation_low_rate_min"].mean(), 2))
+        print("median_low:", round(sub["validation_low_rate_min"].median(), 2))
+
+
+def reduce_rules_by_new_rows(df, selected, min_new_rows=1):
+    final = []
+    used_mask = np.zeros(len(df), dtype=bool)
+
+    for name, conds in selected:
+        rule_mask = make_mask_from_conds(df, conds)
+        new_rows = rule_mask & ~used_mask
+
+        if int(new_rows.sum()) >= min_new_rows:
+            final.append((name, conds))
+            used_mask |= rule_mask
+
+    return final
+
+
+
 if __name__ == "__main__":
     # MODE = "both"
     MODE = "good"
@@ -1230,8 +1295,8 @@ if __name__ == "__main__":
                 # class_0 제거용 데드캣 제외 룰 생성
                 find_avoid_rule()
 
-    import winsound
-
-    winsound.Beep(1500, 500)  # 1000Hz, 0.5초
-    winsound.Beep(1000, 500)  # 1000Hz, 0.5초
+    # import winsound
+    #
+    # winsound.Beep(1500, 500)  # 1000Hz, 0.5초
+    # winsound.Beep(1000, 500)  # 1000Hz, 0.5초
 
