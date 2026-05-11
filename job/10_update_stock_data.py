@@ -21,7 +21,7 @@ root_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 
 pickle_dir = os.path.join(root_dir, '../pickle')
 os.makedirs(pickle_dir, exist_ok=True) # 없으면 생성
 
-DATA_COLLECTION_PERIOD = 700 # 샘플 수 = 68(100일 기준) - 20 - 4 + 1 = 45
+DATA_COLLECTION_PERIOD = 800 # 샘플 수 = 68(100일 기준) - 20 - 4 + 1 = 45
 
 today = datetime.today().strftime('%Y%m%d')
 start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y%m%d')
