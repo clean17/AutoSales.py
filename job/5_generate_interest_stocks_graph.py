@@ -168,7 +168,6 @@ if __name__ == "__main__":
         # 파일 저장 (옵션)
         plt.savefig(job["save_path"], format="webp", dpi=100, bbox_inches="tight", pad_inches=0.1)
         plt.close()
-    print('\n5_generate_interest_stocks_graph - 그래프 갱신 완료')
 
     end = time.time()     # 끝 시간(초)
     elapsed = end - start
@@ -176,6 +175,10 @@ if __name__ == "__main__":
     hours, remainder = divmod(int(elapsed), 3600)
     minutes, seconds = divmod(remainder, 60)
 
-    if elapsed > 20:
-        print(f"5_generate_interest_stocks_graph.py 총 소요 시간: {hours}시간 {minutes}분 {seconds}초")
+    # if elapsed > 20:
+    #     print(f"5_generate_interest_stocks_graph.py 총 소요 시간: {hours}시간 {minutes}분 {seconds}초")
+
+    nowTime = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
+    print(f'{nowTime} - ✅ 그래프 갱신 완료, 총 소요 시간: {hours}시간 {minutes}분 {seconds}초')
+
 
