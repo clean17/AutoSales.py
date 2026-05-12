@@ -179,6 +179,6 @@ if __name__ == "__main__":
     #     print(f"5_generate_interest_stocks_graph.py 총 소요 시간: {hours}시간 {minutes}분 {seconds}초")
 
     nowTime = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
-    print(f'{nowTime} - ✅ 그래프 갱신 완료, 총 소요 시간: {hours}시간 {minutes}분 {seconds}초')
+    print(f'{nowTime} - Complete 5_generate_interest_stocks_graph.py, 총 소요 시간: {hours}시간 {minutes}분 {seconds}초')
 
 

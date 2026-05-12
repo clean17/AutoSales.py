@@ -209,8 +209,10 @@ for count, ticker in enumerate(tickers):
 end = time.time()     # 끝 시간(초)
 elapsed = end - start
 
-# hours, remainder = divmod(int(elapsed), 3600)
-# minutes, seconds = divmod(remainder, 60)
+hours, remainder = divmod(int(elapsed), 3600)
+minutes, seconds = divmod(remainder, 60)
 
 # if elapsed > 20:
 #     print(f"총 소요 시간: {hours}시간 {minutes}분 {seconds}초")
+nowTime = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
+print(f'{nowTime} - Complete : 1_periodically_update_today_interest_stocks.py, 총 소요 시간: {hours}시간 {minutes}분 {seconds}초')

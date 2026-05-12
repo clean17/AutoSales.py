@@ -508,11 +508,12 @@ if __name__ == "__main__":
 
             today = row["today"].replace("-", "")
             now_hm = datetime.now().strftime("%H:%M")
+            rule_cnt = len(row["matched_rules"].split(",")) if row["matched_rules"] else 0
 
             title = (
                 f"{today} ({now_hm}) {stock_name} [{ticker}] "
                 f"일봉 차트 - 오늘 등락률_{row['today_pct']}% "
-                f"조건수: {len(row['matched_rules'])}"
+                f"조건수: {rule_cnt}"
             )
 
             final_file_name = f"{today} {stock_name} [{ticker}].webp"
@@ -561,7 +562,7 @@ if __name__ == "__main__":
                 ax_price=ax_d_price,
                 ax_volume=ax_d_vol,
                 date_tick=5,
-                today=job["today"],
+                # today=job["today"],
             )
 
             plot_candles_weekly(

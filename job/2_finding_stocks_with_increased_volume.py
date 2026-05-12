@@ -435,4 +435,4 @@ minutes, seconds = divmod(remainder, 60)
 # if elapsed > 20:
 #     print(f"2_finding_stocks_with_increased_volume.py - 총 소요 시간: {hours}시간 {minutes}분 {seconds}초")
 nowTime = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
-print(f'{nowTime} - Complete: 2_finding_stocks_with_increased_volume, 총 소요 시간: {hours}시간 {minutes}분 {seconds}초')
+print(f'{nowTime} - Complete : 2_finding_stocks_with_increased_volume.py, 총 소요 시간: {hours}시간 {minutes}분 {seconds}초')
