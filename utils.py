@@ -830,8 +830,11 @@ def add_technical_features(data):
 
     o, h, l, c, v = data[col_o], data[col_h], data[col_l], data[col_c], data[col_v]
 
-    if "등락률" not in data.columns  and "Close" not in data.columns:
+    if "등락률" not in data.columns and "Close" not in data.columns:
         data["등락률"] = (c.pct_change() * 100).replace([np.inf, -np.inf], np.nan).fillna(0)
+
+    if "Change_pct" not in data.columns and "종가" not in data.columns:
+        data["Change_pct"] = (c.pct_change() * 100).replace([np.inf, -np.inf], np.nan).fillna(0)
 
 
     # 이동평균선
