@@ -28,9 +28,7 @@ else:
     raise FileNotFoundError("utils.py를 상위 디렉터리에서 찾지 못했습니다.")
 
 from utils import fetch_stock_data, get_kor_interest_ticker_dick_list, add_technical_features, \
-    plot_candles_weekly, plot_candles_daily, drop_sparse_columns, drop_trading_halt_rows
-
-
+    plot_candles_weekly, plot_candles_daily, drop_sparse_columns, drop_trading_halt_rows, get_kor_low_ticker_dick_list
 
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
 root_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(=루트)
@@ -43,6 +41,8 @@ today = datetime.today().strftime('%Y%m%d')
 start_yesterday = (datetime.today() - timedelta(days=1)).strftime('%Y%m%d')
 
 tickers_dict = get_kor_interest_ticker_dick_list()
+low_tickers_dict = get_kor_low_ticker_dick_list()
+tickers_dict.update(low_tickers_dict)
 tickers = list(tickers_dict.keys())
 
 
