@@ -487,6 +487,22 @@ def get_kor_interest_ticker_dick_list():
     }
 
 
+def get_kor_low_ticker_dick_list():
+    url = "https://chickchick.kr/stocks/interest/data/low"
+    payload = {
+        "date": today,
+    }
+
+    res = requests.post(url, json=payload)
+    try:
+        data = res.json()
+    except ValueError:  # JSONDecodeError도 ValueError 하위
+        data = {}
+    return {
+        item["stock_code"]: item["stock_name"]
+        for item in data
+        if "stock_code" in item and "stock_name" in item
+    }
 
 def get_nasdaq_symbols():
     url = "https://api.nasdaq.com/api/screener/stocks?tableonly=true&exchange=NASDAQ&limit=0"
