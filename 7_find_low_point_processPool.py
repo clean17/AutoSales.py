@@ -44,7 +44,8 @@ else:
 
 from utils import get_kor_ticker_dict_list, add_technical_features, plot_candles_weekly, plot_candles_daily, \
     drop_sparse_columns, drop_trading_halt_rows, signal_any_drop, low_weekly_check, extract_numbers_from_filenames, \
-    sort_csv_by_today_desc, safe_read_pickle, safe_rate, to_float, round_float_features, pad_text
+    sort_csv_by_today_desc, safe_read_pickle, safe_rate, to_float, round_float_features, pad_text, \
+    first_reach_day_from_rates
 
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
 root_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(=루트)
@@ -59,30 +60,29 @@ EXECUTION_RATIO = 1
 REQUIRED_HIGH_RETURN = VALIDATION_TARGET_RETURN * EXECUTION_RATIO
 VALIDATION_DAYS = 7
 STOP_LOSS = -2
-render_graph = 1
+render_graph = 0
 
-TEST_OFFSET = 60
+TEST_OFFSET = 90      # 2026부터 테스트
 START_OFFSET = 7      # 1이면 어제 기준부터 검증 가능.. 7일 검증을 사용하려면 7사용
-END_OFFSET = 40      # 과거 300거래일까지 생성
+END_OFFSET = 600      # 2024년 ~ 2025년 학습
 
 if render_graph == 1:
     START_OFFSET = START_OFFSET + 8
-# else:
-#     END_OFFSET = END_OFFSET - TEST_OFFSET
+else:
+    END_OFFSET = END_OFFSET - TEST_OFFSET  # df = df[:-TEST_OFFSET] 테스트 데이터를 자른만큼
 
 def process_ticker(ticker, tickers_dict, i):
     results = []
-
     stock_name = tickers_dict.get(ticker, 'Unknown Stock')
     filepath = os.path.join(pickle_dir, f'{ticker}.pkl')
     if not os.path.exists(filepath):
-        print(f"[process_ticker] {stock_name} ({ticker}) 파일 없음")
+        print(f"[process_ticker] [idx={i}] {ticker} 파일 없음")
         return results
 
     df = safe_read_pickle(filepath)
 
-    # if render_graph == 0:
-    #     df = df[:-TEST_OFFSET]  # 검증 데이터 분리 테스트
+    if render_graph == 0:
+        df = df[:-TEST_OFFSET]  # 검증 데이터 분리 테스트
 
     # 데이터가 부족하면 패스
     if df is None or df.empty or len(df) < 70:
@@ -107,8 +107,11 @@ def process_ticker(ticker, tickers_dict, i):
     # 거래대금
     df["trading_value"] = df["종가"] * df["거래량"]
 
+    last_date = df.index[-1].strftime("%Y-%m-%d")
+    first_index = min(len(df), END_OFFSET)
+    first_date = df.index[-first_index].strftime("%Y-%m-%d")
     # print(f"[idx={i}] {stock_name:<15} ({ticker})")  #  문자열을 왼쪽 정렬하고, 전체 너비를 15칸
-    print(f"{pad_text(i, 4)} | {ticker} | {pad_text(stock_name, 26)}")  #  문자열을 왼쪽 정렬하고, 전체 너비를 15칸
+    print(f"{pad_text(i, 4)} | {first_date} - {last_date} | {ticker} | {pad_text(stock_name, 26)} | {len(df)}")  #  문자열을 왼쪽 정렬하고, 전체 너비를 15칸
 
     for idx in range(START_OFFSET, END_OFFSET + 1):
         res = process_one_with_df(df, idx, ticker, tickers_dict)
@@ -486,17 +489,42 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
 
         max_high_7d = validation_high_rate_max
 
-        if max_high_7d < 5:
+        if max_high_7d < 4:     # 4% 미만
             target_class = 0
-        elif max_high_7d < 7:
+        elif max_high_7d < 7:   # 4~7
             target_class = 1
-        elif max_high_7d < 10:
+        elif max_high_7d < 12:  # 7~12
             target_class = 2
-        else:
+        else:                   # 12+
             target_class = 3
 
 
+        # 최초 도달일
+        day_to_4 = first_reach_day_from_rates(high_rates, 4)
+        day_to_5 = first_reach_day_from_rates(high_rates, 5)
+        day_to_7 = first_reach_day_from_rates(high_rates, 7)
+        day_to_12 = first_reach_day_from_rates(high_rates, 12)
+
+        # 속도 라벨
+        fast_7 = day_to_7 is not None and day_to_7 <= 4
+        slow_7 = day_to_7 is not None and 5 <= day_to_7 <= 7
+        fail_7 = day_to_7 is None
+
+        fast_12 = day_to_12 is not None and day_to_12 <= 4
+        slow_12 = day_to_12 is not None and 5 <= day_to_12 <= 7
+        fail_12 = day_to_12 is None
+
         validation_row = {
+            "day_to_4": day_to_4,
+            "day_to_7": day_to_7,
+            "day_to_12": day_to_12,
+            "fast_7": fast_7,
+            "slow_7": slow_7,
+            "fail_7": fail_7,
+            "fast_12": fast_12,
+            "slow_12": slow_12,
+            "fail_12": fail_12,
+
             # 고가 기준 최대 수익률
             "validation_high_rate_max": validation_high_rate_max,
             "validation_high_rate_max_adj": validation_high_rate_max * EXECUTION_RATIO,
