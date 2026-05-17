@@ -61,6 +61,7 @@ MAX_STRONG_RATE = 0.20
 
 AVOID_EXPAND_BAD_RATIO = [0.33, 0.45, 0.58, 0.68, 0.78]
 AVOID_EXPAND_MAX_STRONG_RATE = [0.50, 0.40, 0.30, 0.20, 0.12]
+AVOID_EXPAND_MAX_PROTECT_RATE = [0.65, 0.55, 0.42, 0.32, 0.22]
 
 CLASS_2_SCORE = 2.0
 CLASS_3_SCORE = 2.5
@@ -75,84 +76,25 @@ AVOID_EVAL_PATH = Path("csv/class0_remove_rule_eval.csv")
 
 
 
-def add_target_class(df):
-    """
-    7일간 최고가로 클래스를 분류, df에 "target_class"가 없을 경우 생성
-    """
-    high_cols = [f"validation_high_rate{i}" for i in range(1, 8)]
 
-    df["max_high_7d"] = df[high_cols].max(axis=1)
-
-    df["target_class"] = np.select(
-        [
-            df["max_high_7d"] < 5,
-            df["max_high_7d"] < 7,
-            df["max_high_7d"] < 10,
-            df["max_high_7d"] >= 10,
-            ],
-        [0, 1, 2, 3]
-    )
-
-    return df
-
-
-def get_exclude_columns():
+def get_exclude_columns(df=None):
     """
     제외할 피쳐 Set
+
+    df를 넘기면 패턴 기반으로 실제 존재하는 컬럼까지 자동 제외.
+    df를 안 넘겨도 기본 제외 컬럼 set 반환.
     """
-    return {
-        "ticker", "stock_name", "predict_str", "today", "idx",
+    exclude = {
+        # 식별자 / 메타
+        "ticker", "stock_name", "today", "idx",
 
-        "validation_high_rate_max",
-        "validation_high_rate_max_adj",
-
-        # 저가 기준 최저 수익률
-        "validation_low_rate_min",
-
-        # 종가 기준 일별 수익률
-        "validation_close_rate1",
-        "validation_close_rate2",
-        "validation_close_rate3",
-        "validation_close_rate4",
-        "validation_close_rate5",
-        "validation_close_rate6",
-        "validation_close_rate7",
-
-        # 고가 기준 일별 수익률
-        "validation_high_rate1",
-        "validation_high_rate2",
-        "validation_high_rate3",
-        "validation_high_rate4",
-        "validation_high_rate5",
-        "validation_high_rate6",
-        "validation_high_rate7",
-
-        # 저가 기준 일별 수익률
-        "validation_low_rate1",
-        "validation_low_rate2",
-        "validation_low_rate3",
-        "validation_low_rate4",
-        "validation_low_rate5",
-        "validation_low_rate6",
-        "validation_low_rate7",
-
-        # 시가 기준 일별 수익률
-        "validation_open_rate1",
-        "validation_open_rate2",
-        "validation_open_rate3",
-        "validation_open_rate4",
-        "validation_open_rate5",
-        "validation_open_rate6",
-        "validation_open_rate7",
-
-        "is_success",
-        "is_success5",
-        "is_success7",
-        "is_success10",
+        # stop / target / label
+        "stop_loss",
+        "stop_day",
         "target_pct",
         "target_class",
-        "stop_loss",
 
+        # 과거 실험용 / raw 후보
         "_close_pos_20d",
         "_tr_value_ratio",
         "_tr_value_ratio_5d",
@@ -168,8 +110,24 @@ def get_exclude_columns():
         "_MACD_hist_1d",
         "_MACD_acc",
         "_MACD_hist_3d_close_norm",
-        "today_pct",  # depth 5에서 추가로 만들 경우
     }
+
+    if df is not None:
+        for c in df.columns:
+            if (
+                    c.startswith("validation_")
+                    or c.startswith("day_to_")
+                    or c.startswith("target_before_stop_")
+                    or c.startswith("stop_before_target_")
+                    or c.startswith("target_stop_same_day_")
+                    or c.startswith("no_target_no_stop_")
+                    or c.startswith("fast_success_")
+                    or c.startswith("slow_success_")
+                    or c.startswith("fail_success_")
+            ):
+                exclude.add(c)
+
+    return exclude
 
 
 def get_features(df):
@@ -456,11 +414,12 @@ def mine_avoid_rules(
 
     print(
         "\nbeam", beam,
+        "\ntop_n", top_n,
         "\nmin_count", min_count,
         "\nmax_depth", max_depth,
         "\nexpand_bad_ratio", AVOID_EXPAND_BAD_RATIO,
+        "\navoid_expand_max_protect_rate", AVOID_EXPAND_MAX_PROTECT_RATE,
         "\nexpand_max_strong_rate", AVOID_EXPAND_MAX_STRONG_RATE,
-        "\ntop_n", top_n,
         "\nmin_bad_rate", MIN_BAD_RATE,
         "\nmax_protect_rate", MAX_PROTECT_RATE,
         "\nmax_strong_rate", MAX_STRONG_RATE,
@@ -552,9 +511,8 @@ def mine_avoid_rules(
                         )
 
                 if (
-                        # 이 룰 subset 안에 class_0 비율이 충분히 높아야 함
                         bad_rate >= AVOID_EXPAND_BAD_RATIO[depth]
-                        # 이 룰 subset 안에 class_3 비율이 너무 높으면 안 됨
+                        and protect_rate <= AVOID_EXPAND_MAX_PROTECT_RATE[depth]
                         and strong_rate <= AVOID_EXPAND_MAX_STRONG_RATE[depth]
                 ):
                     k = (score, bad_rate, -strong_rate, -protect_rate, cnt)
