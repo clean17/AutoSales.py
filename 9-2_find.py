@@ -29,17 +29,16 @@ CSV_PATH = "csv/low_result_7_desc.csv"
 GOOD_OUT_PATH = Path("lowscan_rules.py")
 
 # 고정
-GOOD_EXPAND_RATIO = [0.45, 0.65, 0.84, 0.90, 0.92]
+GOOD_EXPAND_RATIO = [0.33, 0.55, 0.73, 0.80, 0.85]
 
-MIN_RATE        = 0.91  # (today_pct o / 4)
-# MIN_RATE        = 0.928  # (today_pct o / 5)
-MIN_CNT         = 80
+MIN_RATE        = 0.75
+MIN_CNT         = 120
 MAX_DEPTH       = 4
+TOP_N = 3000
 
-VALID_MIN_RATE = 0.80
-VALID_MIN_CNT = 15
+VALID_MIN_RATE = 0.65
+VALID_MIN_CNT = 6
 VALID_RATIO = 0.10
-
 
 
 
@@ -398,7 +397,7 @@ def find_good_rule(m_ratio, m_count):
         min_count=m_count,
         max_depth=MAX_DEPTH,
         beam=10000,
-        top_n=300,
+        top_n=TOP_N,
         feature_groups=feature_groups,
         group_limits=group_limits,
     )
