@@ -137,37 +137,42 @@ def get_features(df):
 
 def get_feature_groups():
     feature_groups = {
-        # 가격 / 당일 반등 강도
         "today_pct": "PRICE",
-        # 최근 눌림 강도
+
         "max_drop_7d": "DROP",
 
-        # 저점 대비 회복 위치
         "dist_from_low_20d": "POSITION",
-        # 단기 이평선 대비 위치
-        "dist_to_ma5": "MA_POSITION",
-        # 추세 개선
+        "three_m_cur_max_chg_rate": "POSITION",  #
+        "dist_to_ma5": "POSITION",  #
+        "dist_to_ma20": "POSITION",  #
+
+        "pct_vs_lastweek": "WEEK_POSITION",
+
         "ma5_ma20_gap_chg_1d": "TREND",
 
-        # 거래대금 / 수급
+        "gap_pct": "GAP",
+
         "today_tr_val_eok": "VOLUME",
         "tr_val_rank_20d": "VOLUME",
+        "tr_value_ratio_5d": "VOLUME",
 
-        # MACD 모멘텀
         "MACD_hist_3d": "MACD",
-        # 변동성
+
+        "vol5": "VOLATILITY",
         "ATR_pct": "VOLATILITY",
+        "vol_ratio_5_15": "VOLATILITY",
     }
 
     group_limits = {
         "PRICE": 1,
         "DROP": 1,
-        "POSITION": 1,
-        "MA_POSITION": 1,
+        "POSITION": 2,
+        "WEEK_POSITION": 1,
         "TREND": 1,
+        "GAP": 1,
+        "VOLATILITY": 2,
         "VOLUME": 1,
         "MACD": 1,
-        "VOLATILITY": 1,
     }
 
     return feature_groups, group_limits
