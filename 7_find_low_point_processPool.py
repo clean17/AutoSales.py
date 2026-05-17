@@ -53,6 +53,10 @@ pickle_dir = os.path.join(root_dir, 'pickle')
 output_dir = 'F:\\5below20_test'
 # output_dir = 'F:\\5below20'
 
+
+CSV_PATH = r"csv/low_result_7.csv"
+SORTED_CSV_PATH = r"csv/low_result_7_desc.csv"
+
 # 목표 검증 수익률
 VALIDATION_TARGET_RETURN = 7
 EXECUTION_RATIO = 1
@@ -70,6 +74,8 @@ if render_graph == 1:
     START_OFFSET = START_OFFSET + 8
 else:
     END_OFFSET = END_OFFSET - TEST_OFFSET  # df = df[:-TEST_OFFSET] 테스트 데이터를 자른만큼
+
+
 
 def process_ticker(ticker, tickers_dict, i):
     results = []
@@ -635,15 +641,15 @@ if __name__ == "__main__":
                 # selected = df[~avoid_mask].copy()
 
                 # CSV 저장
-                df.to_csv('csv/low_result_7.csv', index=False)  # 인덱스 칼럼 'Unnamed: 0' 생성하지 않음
+                df.to_csv(CSV_PATH, index=False)  # 인덱스 칼럼 'Unnamed: 0' 생성하지 않음
 
                 # 데드캣 필터 통과한 것만 저장
-                # selected.to_csv('csv/low_result_7.csv', index=False)
+                # selected.to_csv(CSV_PATH, index=False)
 
                 # 내림차순 정렬
                 saved = sort_csv_by_today_desc(
-                    in_path=r"csv/low_result_7.csv",
-                    out_path=r"csv/low_result_7_desc.csv",
+                    in_path=CSV_PATH,
+                    out_path=SORTED_CSV_PATH,
                 )
                 print("saved:", saved)
 
