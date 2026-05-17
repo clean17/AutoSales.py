@@ -23,23 +23,17 @@ from pathlib import Path
 import heapq
 from itertools import count
 
+from utils import make_mask_from_conds, rule_to_code
 
 CSV_PATH = "csv/low_result_7_desc.csv"
+AVOID_OUT_PATH = Path("lowscan_avoid_rules.py")
+
 
 AVOID_BEAM = 30000
+AVOID_TOP_N = 5000
 
-# 고정
-# GOOD_EXPAND_RATIO = [0.45, 0.65, 0.84, 0.90, 0.92]
-GOOD_EXPAND_RATIO = [0.45, 0.63, 0.83, 0.87, 0.90]  # today_pct x depth 5
-
-# MIN_RATE        = 0.91  # (today_pct o / 4)
-# MIN_RATE        = 0.928  # (today_pct o / 5)
-MIN_RATE        = 0.88  # (today_pct x / 4)
-# MIN_RATE        = 0.90  # (today_pct x / 5)
-MIN_CNT         = 80
-MIN_CNT_AVOID   = 30
-MAX_DEPTH       = 4   # today_pct 제외했냐 ?
-MAX_DEPTH_AVOID = 5
+AVOID_MIN_CNT   = 30
+AVOID_MAX_DEPTH = 5
 
 VALID_MIN_RATE = 0.80
 VALID_MIN_CNT = 15
@@ -52,8 +46,6 @@ MAX_STRONG_RATE = 0.20   # 룰에 걸린 종목 중 class_3이 25% 이하여야 
 AVOID_EXPAND_BAD_RATIO   # 해당 룰에 걸린 종목 중 class0 비율이 최소 몇 % 이상이어야 다음 단계로 확장할지
 AVOID_EXPAND_MAX_STRONG_RATE # 해당 룰에 걸린 종목 중 class3 비율이 최대 몇 % 이하여야 다음 단계로 확장할지
 """
-CLASS_3_LOSS_LIMIT = 0.013
-AVOID_TOP_N = 5000
 
 MIN_BAD_RATE = 0.60
 MAX_PROTECT_RATE = 0.25
@@ -65,10 +57,9 @@ AVOID_EXPAND_MAX_PROTECT_RATE = [0.65, 0.55, 0.42, 0.32, 0.22]
 
 CLASS_2_SCORE = 2.0
 CLASS_3_SCORE = 2.5
+CLASS_3_LOSS_LIMIT = 0.013
 
 
-AVOID_OUT_PATH = Path("lowscan_avoid_rules.py")
-AVOID_EVAL_PATH = Path("csv/class0_remove_rule_eval.csv")
 
 
 
@@ -129,7 +120,7 @@ def get_exclude_columns(df=None):
 
 
 def get_features(df):
-    exclude = get_exclude_columns()
+    exclude = get_exclude_columns(df)
     return [c for c in df.columns if c not in exclude]
 
 
@@ -144,21 +135,21 @@ def get_feature_groups():
         "dist_to_ma5": "POSITION",  #
         "dist_to_ma20": "POSITION",  #
 
-        "pct_vs_lastweek": "WEEK_POSITION",
+        "pct_vs_lastweek": "WEEK_POSITION",  #
 
         "ma5_ma20_gap_chg_1d": "TREND",
 
-        "gap_pct": "GAP",
+        "gap_pct": "GAP",  #
 
         "today_tr_val_eok": "VOLUME",
         "tr_val_rank_20d": "VOLUME",
-        "tr_value_ratio_5d": "VOLUME",
+        "tr_value_ratio_5d": "VOLUME",  #
 
         "MACD_hist_3d": "MACD",
 
-        "vol5": "VOLATILITY",
+        "vol5": "VOLATILITY",  #
         "ATR_pct": "VOLATILITY",
-        "vol_ratio_5_15": "VOLATILITY",
+        "vol_ratio_5_15": "VOLATILITY",  #
     }
 
     group_limits = {
@@ -174,56 +165,6 @@ def get_feature_groups():
     }
 
     return feature_groups, group_limits
-
-
-def build_literals(df, features):
-    """
-    literals(원자 조건)을 만드는 함수: feature <= q or feature > q
-    """
-    literals = []
-    literal_masks = []
-
-    for f in features:
-        col = df[f].astype(float).to_numpy()  # flaat 형변환 >  Series > Numpy 배열
-        col_nonan = col[~np.isnan(col)]       # ~np.isnan() 으로 True 값만 남는다 > NaN 제거
-
-        if len(col_nonan) == 0:
-            continue
-
-        print(f, len(col_nonan), len(np.unique(col_nonan)))
-
-        # 분위수(percentile) 배열 생성 (덜 촘촘하게 = 과적합 방지하면서 빠르게)
-        unique_vals = np.unique(col_nonan)
-
-        if len(unique_vals) < 50:  # quantile 안씀
-            qs = unique_vals
-        else:
-            """
-            0.05, 0.10, 0.15, 0.20, ... 0.95 → 총 19개 threshold
-            0.1, 0.2, 0.3, ... 0.9           → 총 9개 threshold
-
-            depth4에서 데드캣을 이미 거른 뒤 depth5를 만들 거면 np.linspace(0.2, 0.8, 7) 괜찮음
-            0.05~0.95, 19개  많음 세밀하지만 과적합 위험 큼
-            0.1~0.9, 9개 중간 균형
-            0.2~0.8, 7개 적음 안정적, 룰 적음, 과적합 감소
-            """
-            # n_bins = min(19, len(unique_vals) - 1)
-            # qs = np.unique(np.quantile(col_nonan, np.linspace(0.05, 0.95, n_bins)))
-
-            qs = np.unique(np.quantile(col_nonan, np.linspace(0.05, 0.95, 19)))
-            # qs = np.unique(np.quantile(col_nonan, np.linspace(0.1, 0.9, 9)))
-            # qs = np.unique(np.quantile(col_nonan, np.linspace(0.2, 0.8, 7)))
-
-        for thr in qs:
-            thr = round(float(thr), 4)
-
-            literals.append((f, "<=", thr))
-            literal_masks.append(col <= thr)
-
-            literals.append((f, ">", thr))
-            literal_masks.append(col > thr)
-
-    return literals, literal_masks
 
 
 def mine_avoid_rules(
@@ -380,17 +321,6 @@ def mine_avoid_rules(
     return out
 
 
-def make_mask_from_conds(df, conds):
-    mask = np.ones(len(df), dtype=bool)
-
-    for f, op, thr in conds:
-        if op == "<=":
-            mask &= (df[f] <= thr)
-        else:
-            mask &= (df[f] > thr)
-
-    return mask
-
 
 def test_avoid_condition(name, cond, df, min_count=25, verbose=False):
     sub = df[cond]
@@ -454,24 +384,6 @@ def test_avoid_condition(name, cond, df, min_count=25, verbose=False):
         print(f"score: {score:.3f}")
 
     return True
-
-
-def rule_to_code(name, conds, thr_round=3):
-    lines = [f'    "{name}":']
-    parts = []
-
-    for f, op, thr in conds:
-        thr = float(np.round(thr, thr_round))
-
-        if op == "<=":
-            parts.append(f'(df["{f}"] <= {thr})')
-        else:
-            parts.append(f'(df["{f}"] > {thr})')  # ">": ge로 출력
-
-    joined = " &\n        ".join(parts)
-    lines.append(f"        {joined},")
-
-    return "\n".join(lines)
 
 
 def write_rule_file(out_path, selected, header_comment):
@@ -574,8 +486,8 @@ def find_avoid_rule():
         bad=train_bad,
         protect=train_protect,
         strong=train_strong,
-        min_count=MIN_CNT_AVOID,
-        max_depth=MAX_DEPTH_AVOID,
+        min_count=AVOID_MIN_CNT,
+        max_depth=AVOID_MAX_DEPTH,
         beam=AVOID_BEAM,
         top_n=AVOID_TOP_N,
         feature_groups=feature_groups,
@@ -586,7 +498,7 @@ def find_avoid_rule():
         df=train,
         rules=rules,
         class3_loss_limit=CLASS_3_LOSS_LIMIT,
-        min_count=MIN_CNT_AVOID,
+        min_count=AVOID_MIN_CNT,
         max_rules=None,
         verbose=True,
     )
@@ -760,35 +672,6 @@ def select_avoid_rules_max_class0_under_class3_limit(
         )
 
     return selected, avoid_mask
-
-
-def split_train_valid_by_date_ratio(df, valid_ratio=0.10):
-    """
-    날짜 기준 train/valid 분리.
-    과거 90%, 최근 10%를 valid로 사용.
-    """
-    df = df.copy()
-    df["today"] = pd.to_datetime(df["today"], errors="coerce")
-    df = df.dropna(subset=["today"])
-    df = df.sort_values("today").reset_index(drop=True)
-
-    unique_dates = np.array(sorted(df["today"].dt.normalize().unique()))
-
-    split_idx = int(len(unique_dates) * (1 - valid_ratio))
-    split_date = unique_dates[split_idx]
-
-    train = df[df["today"] < split_date].copy()
-    valid = df[df["today"] >= split_date].copy()
-
-    print("\n[SPLIT]")
-    print("split_date:", pd.to_datetime(split_date).date())
-    print("train:", len(train), train["today"].min().date(), "~", train["today"].max().date())
-    print("valid:", len(valid), valid["today"].min().date(), "~", valid["today"].max().date())
-
-    print("train success7:", round((train["is_success7"] == 1).mean() * 100, 2), "%")
-    print("valid success7:", round((valid["is_success7"] == 1).mean() * 100, 2), "%\n")
-
-    return train, valid, split_date
 
 
 
