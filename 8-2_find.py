@@ -23,7 +23,7 @@ from pathlib import Path
 import heapq
 from itertools import count
 
-from utils import make_mask_from_conds, rule_to_code
+from utils import make_mask_from_conds, write_rule_file
 
 CSV_PATH = "csv/low_result_7_desc.csv"
 AVOID_OUT_PATH = Path("lowscan_avoid_rules.py")
@@ -385,32 +385,6 @@ def test_avoid_condition(name, cond, df, min_count=25, verbose=False):
 
     return True
 
-
-def write_rule_file(out_path, selected, header_comment):
-    with out_path.open("w", encoding="utf-8") as f:
-        f.write(header_comment + "\n")
-        f.write("import numpy as np\n\n")
-
-        f.write("RULE_NAMES = [\n")
-        for name, _ in selected:
-            f.write(f'    "{name}",\n')
-        f.write("]\n\n")
-
-        f.write("def build_conditions(df):\n")
-        f.write("    conditions = {\n")
-
-        for name, conds in selected:
-            code = rule_to_code(name, conds)
-            lines = code.splitlines()
-
-            f.write("        " + lines[0] + "\n")
-            for line in lines[1:]:
-                f.write("        " + line + "\n")
-
-        f.write("    }\n")
-        f.write("    return conditions\n")
-
-    print(f"saved to: {out_path.resolve()}")
 
 
 def save_combined_avoid_eval(df, selected):
