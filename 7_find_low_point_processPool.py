@@ -423,7 +423,7 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
 
         # 익절 가능 최대 수익률: 고가 기준
         validation_high_rate_max     = safe_rate(r_highs.max(skipna=True), m_current)  # 결측치(NaN)를 무시하고 계산
-        validation_close_rate_max    = safe_rate(r_closes.max(skipna=True), m_current) # 익절 기준: 종가
+        # validation_close_rate_max    = safe_rate(r_closes.max(skipna=True), m_current) # 익절 기준: 종가
 
         # 손절 위험 최소 수익률: 저가 기준
         validation_low_rate_min      = safe_rate(r_lows.min(skipna=True), m_current)
@@ -452,41 +452,6 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
             for i in range(VALIDATION_DAYS)
         ]
 
-        trade_labels = make_trade_labels(
-            high_rates=high_rates,
-            low_rates=low_rates,
-            close_rates=close_rates,
-            stop_loss=STOP_LOSS
-        )
-
-        # +4% 도달일
-        profit_day_4pct = next(
-            (i for i, r in enumerate(high_rates, start=1)  # 익절 기준: 고가
-            # (i for i, r in enumerate(close_rates, start=1)  # 익절 기준: 종가
-             if r >= 4),
-            None
-        )
-
-        # +7% 도달일
-        profit_day_7pct = next(
-            (i for i, r in enumerate(high_rates, start=1)  # 익절 기준: 고가
-             if r >= 7),
-            None
-        )
-
-        # +12% 도달일
-        profit_day_12pct = next(
-            (i for i, r in enumerate(high_rates, start=1)  # 익절 기준: 고가
-             if r >= 12),
-            None
-        )
-
-        # stop_loss 보다 낮아진 날 (이탈한 날)
-        stop_day = next(
-            (i for i, r in enumerate(low_rates, start=1)
-             if r <= STOP_LOSS),
-            None
-        )
 
         max_high_7d = validation_high_rate_max
 
@@ -500,46 +465,54 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
             target_class = 3
 
 
-        # 최초 도달일
-        day_to_4 = first_reach_day_from_rates(high_rates, 4)
-        day_to_5 = first_reach_day_from_rates(high_rates, 5)
-        day_to_7 = first_reach_day_from_rates(high_rates, 7)
-        day_to_12 = first_reach_day_from_rates(high_rates, 12)
+        trade_labels = make_trade_labels(
+            high_rates=high_rates,
+            low_rates=low_rates,
+            close_rates=close_rates,
+            stop_loss=STOP_LOSS
+        )
 
-        # 속도 라벨
-        fast_7 = day_to_7 is not None and day_to_7 <= 4
-        slow_7 = day_to_7 is not None and 5 <= day_to_7 <= 7
-        fail_7 = day_to_7 is None
 
-        fast_12 = day_to_12 is not None and day_to_12 <= 4
-        slow_12 = day_to_12 is not None and 5 <= day_to_12 <= 7
-        fail_12 = day_to_12 is None
+        """
+        class_0~3 구간 분류
+          1. class_0 제거 룰을 먼저 만든다. ++ 성공보다 이탈을 먼저하는 종목 룰
+          2. class_1은 부분익절 또는 짧은 매도 후보로 본다.
+          3. class_2는 기존 7% target 후보로 본다.
+          4. class_3은 트레일링 스탑으로 더 끌고 갈 후보로 본다.
+          
+        4일 안에 고가 target_pct 이상을 한 번도 못 찍고
+        저가가 stop_loss 이하로 밀리면
+        데드캣 가능성이 높다.
+        """
 
         validation_row = {
-            "day_to_4": trade_labels["day_to_4"],
-            "day_to_5": trade_labels["day_to_5"],
-            "day_to_7": trade_labels["day_to_7"],
-            "day_to_10": trade_labels["day_to_10"],
-            "day_to_12": trade_labels["day_to_12"],
-            "stop_day": trade_labels["stop_day"],
+            "stop_loss": STOP_LOSS,
+            "target_pct": REQUIRED_HIGH_RETURN,
+            "target_class": target_class,              # class 0~3
 
-            "target_before_stop_7": trade_labels["target_before_stop_7"],
-            "stop_before_target_7": trade_labels["stop_before_target_7"],
-            "target_stop_same_day_7": trade_labels["target_stop_same_day_7"],
-            "no_target_no_stop_7": trade_labels["no_target_no_stop_7"],
+            "day_to_4": trade_labels["day_to_4"],      # 4% 도달 날짜.. 0이면 class0
+            "day_to_7": trade_labels["day_to_7"],      # 7% 도달 날짜
+            "day_to_12": trade_labels["day_to_12"],    # 12% 도달 날짜
+            "stop_day": trade_labels["stop_day"],      # 이탈 발생 날짜
 
-            "target_before_stop_12": trade_labels["target_before_stop_12"],
-            "stop_before_target_12": trade_labels["stop_before_target_12"],
-            "target_stop_same_day_12": trade_labels["target_stop_same_day_12"],
-            "no_target_no_stop_12": trade_labels["no_target_no_stop_12"],
+            "target_before_stop_7": trade_labels["target_before_stop_7"],        # 이탈 전에 성공
+            "stop_before_target_7": trade_labels["stop_before_target_7"],        # 성공 전에 이탈
+            "target_stop_same_day_7": trade_labels["target_stop_same_day_7"],    # 이탈 성공 같은 날
+            "no_target_no_stop_7": trade_labels["no_target_no_stop_7"],          # 횡보
 
-            "fast_success_7": trade_labels["fast_success_7"],
-            "slow_success_7": trade_labels["slow_success_7"],
-            "fail_success_7": trade_labels["fail_success_7"],
+            "target_before_stop_12": trade_labels["target_before_stop_12"],      # 이탈 전에 성공
+            "stop_before_target_12": trade_labels["stop_before_target_12"],      # 성공 전에 이탈
+            "target_stop_same_day_12": trade_labels["target_stop_same_day_12"],  # 이탈 성공 같은 날
+            "no_target_no_stop_12": trade_labels["no_target_no_stop_12"],        # 횡보
 
-            "fast_success_12": trade_labels["fast_success_12"],
-            "slow_success_12": trade_labels["slow_success_12"],
-            "fail_success_12": trade_labels["fail_success_12"],
+            "fast_success_7": trade_labels["fast_success_7"],    # ~4거래일만에 달성
+            "slow_success_7": trade_labels["slow_success_7"],    # 5~7거래일만에 달성
+            "fail_success_7": trade_labels["fail_success_7"],    # 도달 실패
+
+            "fast_success_12": trade_labels["fast_success_12"],  # ~4거래일만에 달성
+            "slow_success_12": trade_labels["slow_success_12"],  # 5~7거래일만에 달성
+            "fail_success_12": trade_labels["fail_success_12"],  # 도달 실패
+
 
             # 고가 기준 최대 수익률
             "validation_high_rate_max": validation_high_rate_max,
@@ -547,133 +520,21 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
 
             # 저가 기준 최저 수익률
             "validation_low_rate_min": validation_low_rate_min,
-
-            # 종가 기준 일별 수익률
-            "validation_close_rate1": close_rates[0],
-            "validation_close_rate2": close_rates[1],
-            "validation_close_rate3": close_rates[2],
-            "validation_close_rate4": close_rates[3],
-            "validation_close_rate5": close_rates[4],
-            "validation_close_rate6": close_rates[5],
-            "validation_close_rate7": close_rates[6],
-
-            # 고가 기준 일별 수익률
-            "validation_high_rate1": high_rates[0],
-            "validation_high_rate2": high_rates[1],
-            "validation_high_rate3": high_rates[2],
-            "validation_high_rate4": high_rates[3],
-            "validation_high_rate5": high_rates[4],
-            "validation_high_rate6": high_rates[5],
-            "validation_high_rate7": high_rates[6],
-
-            # 저가 기준 일별 수익률
-            "validation_low_rate1": low_rates[0],
-            "validation_low_rate2": low_rates[1],
-            "validation_low_rate3": low_rates[2],
-            "validation_low_rate4": low_rates[3],
-            "validation_low_rate5": low_rates[4],
-            "validation_low_rate6": low_rates[5],
-            "validation_low_rate7": low_rates[6],
-
-            # 시가 기준 일별 수익률
-            "validation_open_rate1": open_rates[0],
-            "validation_open_rate2": open_rates[1],
-            "validation_open_rate3": open_rates[2],
-            "validation_open_rate4": open_rates[3],
-            "validation_open_rate5": open_rates[4],
-            "validation_open_rate6": open_rates[5],
-            "validation_open_rate7": open_rates[6],
         }
 
+        rate_groups = {
+            "close": close_rates,
+            "high": high_rates,
+            "low": low_rates,
+            "open": open_rates,
+        }
+
+        # OHLC 기준 일별 수익률
+        for prefix, rates in rate_groups.items():
+            for i, rate in enumerate(rates, start=1):
+                validation_row[f"validation_{prefix}_rate{i}"] = rate
+
         row.update(validation_row)
-
-        """
-        stop_loss 라벨은 백테스트 매매 결과 계산용으로 좋다
-        룰 마이닝 전에 하면 정보가 줄어든다
-    
-        profit_first:      익절 먼저
-        stop_first:        손절 먼저
-        no_hit:            익절/손절 둘 다 없음
-        same_day_or_edge:  경계 케이스 (고가 뚫고 저가 내려가면 여기)
-        
-        1. 손절 방어 룰:
-          stop_first vs 나머지
-        
-        2. 성공 룰:
-          profit_first vs 나머지
-        
-        3. 무반응 제거 룰:
-          no_hit vs 나머지
-        
-        4. same_day_or_edge
-          4-1) profit_day와 stop_day가 같은 날 (찍고 내려오나 이탈한 뒤 성공, 보수적으로 실패)
-          4-2) 둘 다 존재하지만 어느 분기에도 명확히 안 들어가는 경계 케이스
-          trailing_stop 사용으로 도달 못하게 해야함
-        """
-        # if profit_day is not None and stop_day is not None:
-        #     if profit_day < stop_day:
-        #         result_type = "profit_first"  # 성공 먼저
-        #         is_success = 1
-        #
-        #     elif stop_day < profit_day:
-        #         result_type = "stop_first"  # 이탈 먼저
-        #         is_success = 0
-        #
-        #     else:
-        #         open_rate = open_rates[profit_day - 1]
-        #
-        #         if open_rate >= REQUIRED_HIGH_RETURN:
-        #             result_type = "profit_at_open"  # 시가 성공
-        #             is_success = 1
-        #
-        #         elif open_rate <= STOP_LOSS:
-        #             result_type = "stop_at_open"  # 시가 스탑로스
-        #             is_success = 0
-        #
-        #         elif close_rates[profit_day - 1] >= REQUIRED_HIGH_RETURN:
-        #             result_type = "profit_at_close"  # 종가 성공
-        #             is_success = 1
-        #
-        #         else:
-        #             result_type = "same_day_unknown_order"
-        #             is_success = 0
-        #
-        # elif profit_day is not None:
-        #     result_type = "profit_only"
-        #     is_success = 1
-        #
-        # elif stop_day is not None:
-        #     result_type = "stop_only"
-        #     is_success = 0
-        #
-        # else:
-        #     result_type = "no_hit"
-        #     is_success = 0
-
-
-        """
-        class_0~3 구간 분류
-          1. class_0 제거 룰을 먼저 만든다.
-          2. class_1은 부분익절 또는 짧은 매도 후보로 본다.
-          3. class_2는 기존 7% target 후보로 본다.
-          4. class_3은 트레일링 스탑으로 더 끌고 갈 후보로 본다.
-          
-        1~3일 안에 고가 +3% 이상을 한 번도 못 찍고
-        저가가 -2% 이하로 밀리고
-        종가가 계속 음수면
-        데드캣 가능성이 높다.
-        """
-        # row["is_success"]   = 1 if profit_day_7pct is not None else 0
-        row["is_target_hit_4pct"]  = 1 if profit_day_4pct is not None else 0
-        row["is_target_hit_7pct"]  = 1 if profit_day_7pct is not None else 0
-        row["is_target_hit_12pct"] = 1 if profit_day_12pct is not None else 0
-        row["is_trade_success_7pct"] = int(
-            profit_day_7pct is not None and (stop_day is None or profit_day_7pct < stop_day)
-        )
-        row["target_pct"]   = REQUIRED_HIGH_RETURN
-        row["target_class"] = target_class
-        row["stop_loss"]    = STOP_LOSS
-
 
 
     ########################################################################
