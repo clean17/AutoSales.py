@@ -1,20 +1,26 @@
 """
 생성한 csv 파일을 가지고 저점 조건을 찾는 스크립트
+binning 기반 rule mining
+beam search 기반 조건 조합 모델
 
 사용할 때는
 
-buy_conditions = lowscan_rules.build_conditions(df)
-avoid_conditions = lowscan_avoid_rules.build_conditions(df)
+import lowscan_avoid_class0_rules
+import lowscan_avoid_stop_first_rules
 
-buy_mask = np.zeros(len(df), dtype=bool)
-for cond in buy_conditions.values():
-    buy_mask |= cond
+avoid_class0_conditions = lowscan_avoid_class0_rules.build_conditions(df)
+avoid_stop_conditions = lowscan_avoid_stop_first_rules.build_conditions(df)
 
-avoid_mask = np.zeros(len(df), dtype=bool)
-for cond in avoid_conditions.values():
-    avoid_mask |= cond
+avoid_class0_mask = np.zeros(len(df), dtype=bool)
+for cond in avoid_class0_conditions.values():
+    avoid_class0_mask |= cond
 
-final_buy_mask = buy_mask & ~avoid_mask
+avoid_stop_mask = np.zeros(len(df), dtype=bool)
+for cond in avoid_stop_conditions.values():
+    avoid_stop_mask |= cond
+
+final_avoid_mask = avoid_class0_mask | avoid_stop_mask
+final_buy_mask = buy_mask & ~final_avoid_mask
 """
 
 import pandas as pd
@@ -25,6 +31,16 @@ from itertools import count
 
 
 CSV_PATH = "csv/low_result_7_desc.csv"
+
+DEPTH0_FEATURES = {
+    "vol5",
+    "ATR_pct",
+    "today_pct",
+    "max_drop_7d",
+    "dist_from_low_20d",
+    "vol_ratio_5_15",
+    "three_m_cur_max_chg_rate",
+}
 
 # 고정
 # GOOD_EXPAND_RATIO = [0.45, 0.65, 0.84, 0.90, 0.92]
@@ -72,85 +88,57 @@ AVOID_EVAL_PATH = Path("csv/class0_remove_rule_eval.csv")
 
 
 
-
-def add_target_class(df):
+def is_literal_allowed_at_depth(feat, depth):
     """
-    7일간 최고가로 클래스를 분류, df에 "target_class"가 없을 경우 생성
+    모든 룰 마이닝에서 depth 0은 상위 피처만 허용.
+    depth 1 이상에서는 전체 피처 허용.
     """
-    high_cols = [f"validation_high_rate{i}" for i in range(1, 8)]
+    if depth == 0:
+        return feat in DEPTH0_FEATURES
 
-    df["max_high_7d"] = df[high_cols].max(axis=1)
+    return True
 
-    df["target_class"] = np.select(
-        [
-            df["max_high_7d"] < 5,
-            df["max_high_7d"] < 7,
-            df["max_high_7d"] < 10,
-            df["max_high_7d"] >= 10,
-            ],
-        [0, 1, 2, 3]
+
+def to_bool_series(s):
+    """
+    CSV에서 True/False, 1/0, 'true'/'false' 등이 섞여 있어도 bool Series로 변환
+    """
+    if s.dtype == bool:
+        return s.fillna(False)
+
+    if np.issubdtype(s.dtype, np.number):
+        return s.fillna(0).astype(int) != 0
+
+    return (
+        s.astype(str)
+        .str.strip()
+        .str.lower()
+        .isin(["true", "1", "yes", "y", "t"])
     )
 
-    return df
 
-
-def get_exclude_columns():
+def get_exclude_columns(df=None):
     """
     제외할 피쳐 Set
+
+    df를 넘기면 패턴 기반으로 실제 존재하는 컬럼까지 자동 제외.
+    df를 안 넘겨도 기본 제외 컬럼 set 반환.
     """
-    return {
-        "ticker", "stock_name", "predict_str", "today", "idx",
+    exclude = {
+        # 식별자 / 메타
+        "ticker",
+        "stock_name",
+        "predict_str",
+        "today",
+        "idx",
 
-        "validation_high_rate_max",
-        "validation_high_rate_max_adj",
-
-        # 저가 기준 최저 수익률
-        "validation_low_rate_min",
-
-        # 종가 기준 일별 수익률
-        "validation_close_rate1",
-        "validation_close_rate2",
-        "validation_close_rate3",
-        "validation_close_rate4",
-        "validation_close_rate5",
-        "validation_close_rate6",
-        "validation_close_rate7",
-
-        # 고가 기준 일별 수익률
-        "validation_high_rate1",
-        "validation_high_rate2",
-        "validation_high_rate3",
-        "validation_high_rate4",
-        "validation_high_rate5",
-        "validation_high_rate6",
-        "validation_high_rate7",
-
-        # 저가 기준 일별 수익률
-        "validation_low_rate1",
-        "validation_low_rate2",
-        "validation_low_rate3",
-        "validation_low_rate4",
-        "validation_low_rate5",
-        "validation_low_rate6",
-        "validation_low_rate7",
-
-        # 시가 기준 일별 수익률
-        "validation_open_rate1",
-        "validation_open_rate2",
-        "validation_open_rate3",
-        "validation_open_rate4",
-        "validation_open_rate5",
-        "validation_open_rate6",
-        "validation_open_rate7",
-
-        "is_success",
-        "is_success5",
-        "is_success7",
-        "is_success10",
+        # stop / target / label
+        "stop_loss",
+        "stop_day",
         "target_pct",
         "target_class",
-        "stop_loss",
 
+        # 과거 실험용 / raw 후보
         "_close_pos_20d",
         "_tr_value_ratio",
         "_tr_value_ratio_5d",
@@ -166,48 +154,72 @@ def get_exclude_columns():
         "_MACD_hist_1d",
         "_MACD_acc",
         "_MACD_hist_3d_close_norm",
-        "today_pct",  # depth 5에서 추가로 만들 경우
     }
+
+    if df is not None:
+        for c in df.columns:
+            if (
+                    c.startswith("validation_")
+                    or c.startswith("day_to_")
+                    or c.startswith("target_before_stop_")
+                    or c.startswith("stop_before_target_")
+                    or c.startswith("target_stop_same_day_")
+                    or c.startswith("no_target_no_stop_")
+                    or c.startswith("fast_success_")
+                    or c.startswith("slow_success_")
+                    or c.startswith("fail_success_")
+            ):
+                exclude.add(c)
+
+    return exclude
 
 
 def get_features(df):
-    exclude = get_exclude_columns()
-    return [c for c in df.columns if c not in exclude]
+    exclude = get_exclude_columns(df)
+
+    features = [
+        c for c in df.columns
+        if c not in exclude
+           and np.issubdtype(df[c].dtype, np.number)
+    ]
+
+    return features
 
 
 def get_feature_groups():
     feature_groups = {
         # 가격 / 당일 반등 강도
         "today_pct": "PRICE",
+
         # 최근 눌림 강도
         "max_drop_7d": "DROP",
 
-        # 저점 대비 회복 위치
+        # 위치 / 회복 계열
         "dist_from_low_20d": "POSITION",
-        # 단기 이평선 대비 위치
-        "dist_to_ma5": "MA_POSITION",
+        "three_m_cur_max_chg_rate": "POSITION",
+        "dist_to_ma5": "POSITION",
+        "dist_to_ma20": "POSITION",
+        "pct_vs_lastweek": "POSITION",
+
         # 추세 개선
         "ma5_ma20_gap_chg_1d": "TREND",
 
-        # 거래대금 / 수급
-        "today_tr_val_eok": "VOLUME",
-        "tr_val_rank_20d": "VOLUME",
+        # 갭
+        "gap_pct": "GAP",
 
-        # MACD 모멘텀
-        "MACD_hist_3d": "MACD",
-        # 변동성
+        # 변동성 / 거래 확장 계열
+        "vol5": "VOLATILITY",
         "ATR_pct": "VOLATILITY",
+        "vol_ratio_5_15": "VOLATILITY",
     }
 
     group_limits = {
         "PRICE": 1,
         "DROP": 1,
-        "POSITION": 1,
-        "MA_POSITION": 1,
+        "POSITION": 2,
         "TREND": 1,
-        "VOLUME": 1,
-        "MACD": 1,
-        "VOLATILITY": 1,
+        "GAP": 1,
+        "VOLATILITY": 2,
     }
 
     return feature_groups, group_limits
@@ -353,7 +365,11 @@ def mine_good_rules(
             for (lit, lmask) in zip(literals, literal_masks):  # zip() 이용한 동시 순회
                 feat = lit[0]
 
-                # 동일 feature 중복 금지 (기존)
+                # depth 0에서는 상위 피처만 시작 조건으로 허용
+                if not is_literal_allowed_at_depth(feat, depth):
+                    continue
+
+                # 동일 feature 중복 금지
                 if feat in used_feats:
                     continue
 
@@ -494,6 +510,10 @@ def mine_avoid_rules(
 
             for lit, lmask in zip(literals, literal_masks):
                 feat = lit[0]
+
+                # depth 0에서는 상위 피처만 시작 조건으로 허용
+                if not is_literal_allowed_at_depth(feat, depth):
+                    continue
 
                 if feat in used_feats:
                     continue
@@ -994,7 +1014,6 @@ def find_good_rule(m_ratio, m_count):
 def find_avoid_rule():
     # df = pd.read_csv(CSV_PATH)
     df = pd.read_csv(CSV_PATH, low_memory=False)
-    # df = add_target_class(df)
 
     if "target_class" not in df.columns:
         raise ValueError("target_class 컬럼이 없습니다. 데이터 생성 시 target_class를 먼저 저장하세요.")
@@ -1279,8 +1298,8 @@ def reduce_rules_by_new_rows(df, selected, min_new_rows=1):
 
 if __name__ == "__main__":
     # MODE = "both"
-    MODE = "good"
-    # MODE = "avoid"
+    # MODE = "good"
+    MODE = "avoid"
 
     for i in range(1):
         for_cnt = MIN_CNT + (i*1)
