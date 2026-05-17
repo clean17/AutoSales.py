@@ -30,16 +30,16 @@ import heapq
 from itertools import count
 
 
-CSV_PATH = "csv/low_result_7_desc.csv"
+CSV_PATH = "csv/low_result_7_desc2.csv"
 
 DEPTH0_FEATURES = {
-    "vol5",
     "ATR_pct",
+    "vol5",
     "today_pct",
     "max_drop_7d",
-    "dist_from_low_20d",
-    "vol_ratio_5_15",
-    "three_m_cur_max_chg_rate",
+    "gap_pct",
+    "pct_vs_lastweek",
+    "dist_to_ma20",
 }
 
 # ============================================================
@@ -47,22 +47,19 @@ DEPTH0_FEATURES = {
 # 목적: target_class == 2 or 3 탐색
 # ============================================================
 GOOD_OUT_PATH = Path("lowscan_rules.py")
-GOOD_EVAL_PATH = Path("csv/good_rule_eval.csv")
+GOOD_EXPAND_RATIO = [0.32, 0.55, 0.73, 0.82, 0.85]
+MIN_CNT = 120
+MAX_DEPTH = 3
+# MIN_RATE = GOOD_EXPAND_RATIO[(MAX_DEPTH-1)]
+MIN_RATE = 0.75
+BEAM = 30000
+TOP_N = 3000
 
-# 고정
-# GOOD_EXPAND_RATIO = [0.45, 0.65, 0.84, 0.90, 0.92]
-GOOD_EXPAND_RATIO = [0.45, 0.63, 0.83, 0.87, 0.90]  # today_pct x depth 5
+VALID_MIN_RATE = 0.63
+VALID_MIN_CNT = 6
+VALID_RATIO = 0.15
 
-# MIN_RATE        = 0.91  # (today_pct o / 4)
-# MIN_RATE        = 0.928  # (today_pct o / 5)
-MIN_RATE        = 0.88  # (today_pct x / 4)
-# MIN_RATE        = 0.90  # (today_pct x / 5)
-MIN_CNT         = 80
-MAX_DEPTH       = 4   # today_pct 제외했냐 ?
-
-VALID_MIN_RATE = 0.80
-VALID_MIN_CNT = 15
-VALID_RATIO = 0.10
+redule_rule = 1  # 중복 룰 제거 조건
 
 
 
@@ -160,7 +157,8 @@ def get_feature_groups():
         "three_m_cur_max_chg_rate": "POSITION",
         "dist_to_ma5": "POSITION",
         "dist_to_ma20": "POSITION",
-        "pct_vs_lastweek": "POSITION",
+
+        "pct_vs_lastweek": "WEEK_POSITION",
 
         # 추세 개선
         "ma5_ma20_gap_chg_1d": "TREND",
@@ -178,6 +176,7 @@ def get_feature_groups():
         "PRICE": 1,
         "DROP": 1,
         "POSITION": 2,
+        "WEEK_POSITION": 1,
         "TREND": 1,
         "GAP": 1,
         "VOLATILITY": 2,
@@ -434,7 +433,7 @@ def test_good_condition(name, cond, df, min_count=20, verbose=False):
     if len(sub) == 0:
         return False
 
-    up_cnt = int((sub["is_success7"] == 1).sum())
+    up_cnt = int((sub["target_before_stop_7"] == 1).sum())
     ratio = up_cnt / len(sub)
 
     """
@@ -516,7 +515,6 @@ def write_rule_file(out_path, selected, header_comment):
 
 
 def find_good_rule(m_ratio, m_count):
-    # df = pd.read_csv(CSV_PATH)
     df = pd.read_csv(CSV_PATH, low_memory=False)
 
     df["today"] = pd.to_datetime(df["today"], errors="coerce")
@@ -532,7 +530,7 @@ def find_good_rule(m_ratio, m_count):
     literals, literal_masks = build_literals(train, features)
 
     feature_groups, group_limits = get_feature_groups()
-    target = train["is_success7"].to_numpy() == 1
+    target = train["target_before_stop_7"].to_numpy() == 1
 
     rules = mine_good_rules(
         df=train,
@@ -542,15 +540,23 @@ def find_good_rule(m_ratio, m_count):
         min_ratio=m_ratio,
         min_count=m_count,
         max_depth=MAX_DEPTH,
-        beam=10000,
-        top_n=300,
+        beam=BEAM,
+        top_n=TOP_N,
         feature_groups=feature_groups,
         group_limits=group_limits,
     )
 
-    selected = []
+    fail_reason = {
+        "train_count": 0,
+        "train_ratio": 0,
+        "valid_count": 0,
+        "valid_ratio": 0,
+        "selected": 0,
+    }
 
-    eval_rows = []
+    valid_counts = []
+    debug_candidates = []
+    passed = []
 
     for i, (cnt, ratio, up, conds, score) in enumerate(rules, start=1):
         train_mask = make_mask_from_conds(train, conds)
@@ -559,51 +565,167 @@ def find_good_rule(m_ratio, m_count):
         train_sub = train[train_mask]
         valid_sub = valid[valid_mask]
 
-        if len(train_sub) < m_count:
-            continue
+        train_cnt = len(train_sub)
+        valid_cnt = len(valid_sub)
 
-        train_up = int((train_sub["is_success7"] == 1).sum())
-        train_ratio = train_up / len(train_sub)
+        valid_counts.append(valid_cnt)
 
-        if train_ratio < m_ratio:
-            continue
+        if train_cnt > 0:
+            train_up = int((train_sub["target_before_stop_7"] == 1).sum())
+            train_ratio = train_up / train_cnt
+        else:
+            train_up = 0
+            train_ratio = 0.0
 
-        if len(valid_sub) < VALID_MIN_CNT:
-            continue
+        if valid_cnt > 0:
+            valid_up = int((valid_sub["target_before_stop_7"] == 1).sum())
+            valid_ratio = valid_up / valid_cnt
+        else:
+            valid_up = 0
+            valid_ratio = 0.0
 
-        valid_up = int((valid_sub["is_success7"] == 1).sum())
-        valid_ratio = valid_up / len(valid_sub)
-
-        if valid_ratio < VALID_MIN_RATE:
-            continue
-
-        name = (
-            f"rule_{len(selected) + 1:03d}"
-            # f"_trn{len(train_sub)}_trr{train_ratio:.3f}"
-            # f"_van{len(valid_sub)}_var{valid_ratio:.3f}"
-        )
-
-        selected.append((name, conds))
-
-        eval_rows.append({
-            "rule": name,
-            "train_count": len(train_sub),
+        debug_candidates.append({
+            "train_count": train_cnt,
             "train_success_cnt": train_up,
             "train_success_rate": round(train_ratio * 100, 1),
-            "valid_count": len(valid_sub),
+            "valid_count": valid_cnt,
             "valid_success_cnt": valid_up,
             "valid_success_rate": round(valid_ratio * 100, 1),
-            "split_date": pd.to_datetime(split_date).date(),
-            "conds": str(conds),
+            "score": round(float(score), 6),
+            "conds": conds,
         })
 
-    # 진단용으로 사용, 실제 룰 저장에서는 제외
-    # print(f"[GOOD] before reduce: {len(selected)}")
-    # selected = reduce_rules_by_new_rows(valid, selected, min_new_rows=1)
-    # print(f"[GOOD] after reduce: {len(selected)}")
+        if train_cnt < m_count:
+            fail_reason["train_count"] += 1
+            continue
 
-    print(f"\n[GOOD] valid 통과 룰 개수: {len(selected)} / {len(rules)}")
+        if train_ratio < m_ratio:
+            fail_reason["train_ratio"] += 1
+            continue
 
+        if valid_cnt < VALID_MIN_CNT:
+            fail_reason["valid_count"] += 1
+            continue
+
+        if valid_ratio < VALID_MIN_RATE:
+            fail_reason["valid_ratio"] += 1
+            continue
+
+        fail_reason["selected"] += 1
+
+        passed.append({
+            "conds": conds,
+            "train_count": train_cnt,
+            "train_success_cnt": train_up,
+            "train_ratio": train_ratio,
+            "valid_count": valid_cnt,
+            "valid_success_cnt": valid_up,
+            "valid_ratio": valid_ratio,
+            "score": score,
+        })
+
+    # ============================================================
+    # DEBUG 출력
+    # ============================================================
+    print("valid_count max:", max(valid_counts) if valid_counts else 0)
+    print("valid_count p95:", np.percentile(valid_counts, 95) if valid_counts else 0)
+    print("valid_count p90:", np.percentile(valid_counts, 90) if valid_counts else 0)
+    print("valid_count p50:", np.percentile(valid_counts, 50) if valid_counts else 0)
+    print("valid_count >= 10:", sum(c >= 10 for c in valid_counts))
+    print("valid_count >= 15:", sum(c >= 15 for c in valid_counts))
+
+    debug_df = pd.DataFrame(debug_candidates)
+
+    if len(debug_df):
+        print("\n[DEBUG] top valid_count candidates")
+        tmp = debug_df.sort_values(
+            ["valid_count", "valid_success_rate", "train_success_rate"],
+            ascending=[False, False, False],
+        )
+        print(
+            tmp.head(30)[[
+                "train_count",
+                "train_success_rate",
+                "valid_count",
+                "valid_success_rate",
+                "conds",
+            ]].to_string(index=False)
+        )
+
+        print("\n[DEBUG] valid_count >= VALID_MIN_CNT candidates")
+        tmp2 = debug_df[debug_df["valid_count"] >= VALID_MIN_CNT].copy()
+
+        if len(tmp2):
+            tmp2 = tmp2.sort_values(
+                ["valid_success_rate", "valid_count", "train_success_rate"],
+                ascending=[False, False, False],
+            )
+
+            print(
+                tmp2.head(30)[[
+                    "train_count",
+                    "train_success_rate",
+                    "valid_count",
+                    "valid_success_rate",
+                    "conds",
+                ]].to_string(index=False)
+            )
+
+            print("\n[DEBUG] valid_count >= VALID_MIN_CNT summary")
+            print("candidate_count:", len(tmp2))
+            print("valid_success_rate max:", tmp2["valid_success_rate"].max())
+            print("valid_success_rate p90:", np.percentile(tmp2["valid_success_rate"], 90))
+            print("valid_success_rate p50:", np.percentile(tmp2["valid_success_rate"], 50))
+            print("valid_success_rate >= 50:", int((tmp2["valid_success_rate"] >= 50).sum()))
+            print("valid_success_rate >= 55:", int((tmp2["valid_success_rate"] >= 55).sum()))
+            print("valid_success_rate >= 60:", int((tmp2["valid_success_rate"] >= 60).sum()))
+            print("valid_success_rate >= 65:", int((tmp2["valid_success_rate"] >= 65).sum()))
+            print("valid_success_rate >= 70:", int((tmp2["valid_success_rate"] >= 70).sum()))
+            print("valid_success_rate >= 75:", int((tmp2["valid_success_rate"] >= 75).sum()))
+        else:
+            print("없음")
+
+    print("[GOOD] fail reason:", fail_reason)
+    print(f"\n[GOOD] valid 통과 룰 개수: {len(passed)} / {len(rules)}")
+
+    # ============================================================
+    # valid 성능순으로 통과 룰 정렬
+    # ============================================================
+    passed = sorted(
+        passed,
+        key=lambda x: (
+            x["valid_ratio"],
+            x["valid_count"],
+            x["train_ratio"],
+            x["train_count"],
+        ),
+        reverse=True,
+    )
+
+    selected = []
+
+    for row in passed:
+        name = f"rule_{len(selected) + 1:03d}"
+        selected.append((name, row["conds"]))
+
+    # ============================================================
+    # 중복 룰 제거
+    # ============================================================
+    if redule_rule == 1:
+        print(f"[GOOD] before reduce: {len(selected)}")
+        selected = reduce_rules_by_new_rows(valid, selected, min_new_rows=3)
+        print(f"[GOOD] after reduce: {len(selected)}")
+
+    # reduce 이후 이름 재정렬
+    selected = [
+        (f"rule_{i + 1:03d}", conds)
+        for i, (_, conds) in enumerate(selected)
+    ]
+
+
+    # ============================================================
+    # 최종 선택 룰 평가 / 저장
+    # ============================================================
     eval_combined_good_rules(train, selected, title="TRAIN")
     eval_combined_good_rules(valid, selected, title="VALID")
 
@@ -629,19 +751,6 @@ def find_good_rule(m_ratio, m_count):
             "#    df = df[buy_mask].copy()\n"
         )
     )
-
-    eval_df = pd.DataFrame(eval_rows)
-
-    if len(eval_df):
-        eval_df = eval_df.sort_values(
-            ["valid_success_rate", "valid_count", "train_success_rate"],
-            ascending=[False, False, False],
-        )
-
-    eval_df.to_csv(GOOD_EVAL_PATH, index=False, encoding="utf-8-sig")
-    print(f"saved eval to: {GOOD_EVAL_PATH.resolve()}")
-
-
 
 
 
@@ -689,9 +798,8 @@ def eval_combined_good_rules(df, selected, title=""):
     if len(sub) == 0:
         return
 
-    print("success7:", round((sub["is_success7"] == 1).mean() * 100, 2), "%")
-    print("success5:", round((sub["is_success5"] == 1).mean() * 100, 2), "%")
-    print("success10:", round((sub["is_success10"] == 1).mean() * 100, 2), "%")
+    print("target_before_stop_7:", round((sub["target_before_stop_7"] == 1).mean() * 100, 2), "%")
+    print("target_before_stop_12:", round((sub["target_before_stop_12"] == 1).mean() * 100, 2), "%")
 
     if "target_class" in sub.columns:
         print("class0:", round((sub["target_class"] == 0).mean() * 100, 2), "%")
@@ -708,17 +816,29 @@ def eval_combined_good_rules(df, selected, title=""):
         print("median_low:", round(sub["validation_low_rate_min"].median(), 2))
 
 
-def reduce_rules_by_new_rows(df, selected, min_new_rows=1):
+def reduce_rules_by_new_rows(df, selected, min_new_rows=2):
     final = []
     used_mask = np.zeros(len(df), dtype=bool)
 
     for name, conds in selected:
         rule_mask = make_mask_from_conds(df, conds)
         new_rows = rule_mask & ~used_mask
+        new_cnt = int(new_rows.sum())
+        total_cnt = int(rule_mask.sum())
 
-        if int(new_rows.sum()) >= min_new_rows:
+        if new_cnt >= min_new_rows:
             final.append((name, conds))
             used_mask |= rule_mask
+            print(
+                f"[REDUCE KEEP] {name} total_cnt={total_cnt} new_cnt={new_cnt} conds={conds}"
+            )
+        else:
+            print(
+                f"[REDUCE DROP] {name} total_cnt={total_cnt} new_cnt={new_cnt} conds={conds}"
+            )
+
+    print("[REDUCE] final_rule_count:", len(final))
+    print("[REDUCE] final_row_count:", int(used_mask.sum()))
 
     return final
 

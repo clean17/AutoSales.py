@@ -32,8 +32,7 @@ def test_condition(name, cond):
         print("선택된 행이 없습니다.")
         return
 
-    # up_cnt = (sub["validation_chg_rate"] >= 7).sum()   # 정적 기준
-    up_cnt = (sub["is_success"] == 1).sum()            # 동적 기준 반영
+    up_cnt = (sub["target_before_stop_7"] == 1).sum()
     ratio = up_cnt / len(sub)
 
     rows.append({
@@ -68,14 +67,18 @@ print("평균 성공률:", round(base_result["success_rate"].mean(), 2))
 print("가중 성공률:", round(base_result["success_cnt"].sum() / base_result["count"].sum(), 2))
 
 
-# df = df.drop(columns=["pct_vs_lastweek"], errors="ignore")
-# df = df.drop(columns=["pct_vs_last4week"], errors="ignore")
-# df = df.drop(columns=["vol15"], errors="ignore")
-# df = df.drop(columns=["three_m_min_cur"], errors="ignore")
-# df = df.drop(columns=["mean_prev3"], errors="ignore")
-# df = df.drop(columns=["pos20_ratio"], errors="ignore")
-# df = df.drop(columns=["dist_to_ma20"], errors="ignore")
+# df = df.drop(columns=["vol5"], errors="ignore")
+# df = df.drop(columns=["ATR_pct"], errors="ignore")
 # df = df.drop(columns=["today_pct"], errors="ignore")
+# df = df.drop(columns=["max_drop_7d"], errors="ignore")
+# df = df.drop(columns=["dist_from_low_20d"], errors="ignore")
+df = df.drop(columns=["vol_ratio_5_15"], errors="ignore")
+df = df.drop(columns=["three_m_cur_max_chg_rate"], errors="ignore")
+# df = df.drop(columns=["gap_pct"], errors="ignore")
+# df = df.drop(columns=["dist_to_ma5"], errors="ignore")
+# df = df.drop(columns=["dist_to_ma20"], errors="ignore")
+# df = df.drop(columns=["pct_vs_lastweek"], errors="ignore")
+# df = df.drop(columns=["ma5_ma20_gap_chg_1d"], errors="ignore")
 df.to_csv("csv/low_result_7_desc2.csv", index=False)
 
 print("\n이제 룰 마이닝 스크립트에서 CSV만 아래로 바꿔서 다시 실행하세요:")
