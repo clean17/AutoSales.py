@@ -45,7 +45,7 @@ else:
 from utils import get_kor_ticker_dict_list, add_technical_features, plot_candles_weekly, plot_candles_daily, \
     drop_sparse_columns, drop_trading_halt_rows, signal_any_drop, low_weekly_check, extract_numbers_from_filenames, \
     sort_csv_by_today_desc, safe_read_pickle, safe_rate, to_float, round_float_features, pad_text, \
-    first_reach_day_from_rates
+    first_reach_day_from_rates, make_trade_labels
 
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
 root_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(=루트)
@@ -59,7 +59,7 @@ EXECUTION_RATIO = 1
 # 최고가 판매는 힘드니까 보수적으로
 REQUIRED_HIGH_RETURN = VALIDATION_TARGET_RETURN * EXECUTION_RATIO
 VALIDATION_DAYS = 7
-STOP_LOSS = -2
+STOP_LOSS = -6
 render_graph = 0
 
 TEST_OFFSET = 90      # 2026부터 테스트
@@ -154,8 +154,10 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
     _mean_prev20_eok = mean_prev20 / 100_000_000
 
 
-    # ★★★★★ 20거래일 평균 거래대금 4억보다 작으면 패스 ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-    if mean_prev20 / 100_000_000 < 4:
+    # ★★★★★ 20거래일 평균 거래대금 3억보다 작으면 패스 ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+    if mean_prev20 / 100_000_000 < 3:
+        # if START_OFFSET == idx:
+        #     print('거래대금 미달', round(_mean_prev20_eok, 1))
         return
 
     # 5일, 20일 이동평균선 없으면 패스
@@ -172,7 +174,7 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
     - 거래량 증가
     """
     # 오늘 제외 최근 7일 5일선이 20일선보다 계속 낮은데 -2.5% 하락이 있으면서 오늘 3.3% 상승 ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-    signal = signal_any_drop(data, 7, 3.3, -2.5)
+    signal = signal_any_drop(data, 7, 3, -2.5)
     # signal = signal_any_drop(data, 7, 2, -2.5)
     if not signal:
         return
@@ -186,9 +188,12 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
     _ma5_yesterday      = data['MA5'].iloc[-2]
     ma5_chg_rate        = safe_rate(_ma5_today, _ma5_yesterday)
 
-    # ma5_recovery_rate_3d  = safe_rate(data["MA5"].iloc[-1], data["MA5"].iloc[-4])
+    ma5_recovery_rate_3d  = safe_rate(data["MA5"].iloc[-1], data["MA5"].iloc[-4])
     # ma20_recovery_rate_3d = safe_rate(data["MA20"].iloc[-1], data["MA20"].iloc[-4])
     # trend_signal_pct      = ma5_recovery_rate_3d - ma20_recovery_rate_3d * 0.5
+
+    vol5                = data['등락률'].tail(5).std()
+    vol15               = data['등락률'].tail(15).std()
 
     # 거래대금 변동률
     tr_value_ratio_3d = 0
@@ -200,12 +205,13 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
 
     if mean_prev5 > 0 and np.isfinite(mean_prev5):
         _tr_value_ratio_5d = today_tr_val / (mean_prev5 + 1e-9)
+        log_tr_value_ratio_5d = np.log1p(_tr_value_ratio_5d)
 
     if mean_prev20 > 0 and np.isfinite(mean_prev20):
         tr_value_ratio_20d = today_tr_val / (mean_prev20 + 1e-9)
 
     # 최근 대비 오늘 거래대금 변동률 (중복)
-    _tr_value_ratio       = tr_value_ratio_3d * 0.4 + _tr_value_ratio_5d * 0.6
+    # _tr_value_ratio       = tr_value_ratio_3d * 0.4 + _tr_value_ratio_5d * 0.6
     tr_val_rank_20d      = (trading_value.iloc[-20:] <= today_tr_val).mean()
     # tr_val_rank_60d    = (trading_value.iloc[-60:] <= today_tr_val).mean()
 
@@ -222,7 +228,7 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
     _high_20d             = data["고가"].iloc[-20:].max()
     _high_60d             = data["고가"].iloc[-60:].max()
     dist_from_low_20d     = safe_rate(last['종가'], _low_20d)
-    dist_from_low_60d     = safe_rate(last['종가'], _low_60d)
+    # dist_from_low_60d     = safe_rate(last['종가'], _low_60d)  # 3달 저가 대비 종가는 너무 멀다
 
     # 이평선 대비 종가의 변동률
     dist_to_ma5           = safe_rate(last['종가'], last['MA5'])
@@ -236,8 +242,8 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
     _ma5_ma20_gap_1d_ago  = safe_rate(data["MA5"].iloc[-2], data["MA20"].iloc[-2])
     _ma5_ma20_gap_3d_ago  = safe_rate(data["MA5"].iloc[-4], data["MA20"].iloc[-4])
     _ma5_ma20_gap         = safe_rate(last["MA5"], last["MA20"])
-    ma5_ma20_gap_chg_1d   = _ma5_ma20_gap - _ma5_ma20_gap_1d_ago
-    # ma5_ma20_gap_chg_3d   = _ma5_ma20_gap - _ma5_ma20_gap_3d_ago  # 중복
+    _ma5_ma20_gap_chg_1d   = _ma5_ma20_gap - _ma5_ma20_gap_1d_ago
+    _ma5_ma20_gap_chg_3d   = _ma5_ma20_gap - _ma5_ma20_gap_3d_ago  # 중복
 
     # 20일 저가~고가 구간에서 현재 종가가 어디쯤 있는지를 보는 값 (dist_to_ma20 상관 0.882)
     _close_pos_20d        = (last["종가"] - _low_20d) / (_high_20d - _low_20d + 1e-9)
@@ -248,7 +254,7 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
     # 하루 변화량 : 빠름, 노이즈 많음, 3일 : 신호는 늦엇지만 안정된 필터용
     _MACD_hist_1d        = data['MACD_hist'].iloc[-1] - data['MACD_hist'].iloc[-2]
     MACD_hist_3d         = data['MACD_hist'].iloc[-1] - data['MACD_hist'].iloc[-4]     # (AUC 0.545)
-    ATR_pct = last["ATR14"] / last["종가"] * 100
+    ATR_pct              = last["ATR14"] / last["종가"] * 100  # 평균진폭 (변동성)
 
     # -------------------------------
     # 필터
@@ -259,7 +265,7 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
     _CCI14                = last['CCI14']
     _ADX14                = last['ADX14']
     _gap_pct              = (data['시가'].iloc[-1] / data['종가'].iloc[-2] - 1) * 100
-    _vol_ratio_15_60      = round(data['등락률'].tail(15).std() / (data['등락률'].tail(60).std() + 1e-9), 3)   # 단기 변동성과 장기 변동성을 비교하는 비율
+    _vol_ratio_5_15      = round(vol5 / (vol15 + 1e-9), 3)   # 단기 변동성과 장기 변동성을 비교하는 비율
     _RSI_rebound          = data['RSI14'].iloc[-1] - data['RSI14'].iloc[-3]
     _close_pos_day        = (last["종가"] - last["저가"]) / (last["고가"] - last["저가"] + 1e-9)
     _rebound_power        = today_pct * (0.5 + _close_pos_day)
@@ -295,7 +301,7 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
     # low_idx_pos          = window['저가'].values.argmin()   # 최솟값의 인덱스를 반환
     # days_since_low       = len(window) - 1 - low_idx_pos
 
-    # 최근 5일 동안 상승일 거래대금이 하락일 거래대금보다 얼마나 강했는가, ma5_ma20_gap_chg_1d 유사, 거래대금이 작으면 설명력 부족
+    # 최근 5일 동안 상승일 거래대금이 하락일 거래대금보다 얼마나 강했는가, _ma5_ma20_gap_chg_1d 유사, 거래대금이 작으면 설명력 부족
     # _recent_5d            = data.iloc[-5:]
     # _ret5                 = _recent_5d["등락률"]
     # _recent_tr_value      = _recent_5d["종가"] * _recent_5d["거래량"]
@@ -316,28 +322,60 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
     # _deadcat_penalty     = max(0, (-_drawdown_60d - 40) / 20) + max(0, -_dist_to_ma20 / 5)
 
 
+    m_data = data[-60:] # 뒤에서 x개 (3개월 정도)
+    m_current = m_data['종가'].iloc[-1]                               # 오늘 종가, 검증 데이터로 잘랐다면 검증 직전까지의 마지막 값 (수익률 분석 용도)
 
+    m_closes = m_data['종가']
+    m_max = m_closes.max()
+    m_min = m_closes.min()
+
+    # three_m_max_min_chg_rate = safe_rate(m_max, m_min)         # 최근 3개월 동안의 등락률
+    three_m_cur_max_chg_rate = safe_rate(m_current, m_max)     # 최근 3개월 최고 대비 오늘 등락률 계산
+
+    result = low_weekly_check(m_data)
+
+    """
+    3개중 2개만 사용하도록 규제
+    dist_to_ma5
+    pct_vs_lastweek
+    ma5_ma20_gap_chg_1d
+    """
     rule_features = {
-        "today_pct": today_pct,
-        "max_drop_7d": max_drop_7d,
-
-        "dist_from_low_20d": dist_from_low_20d,
-        "dist_to_ma5": dist_to_ma5,
-        "ma5_ma20_gap_chg_1d": ma5_ma20_gap_chg_1d,
-
-        "today_tr_val_eok": today_tr_val_eok,
-        "tr_val_rank_20d": tr_val_rank_20d,
-
-        "MACD_hist_3d": MACD_hist_3d,
-        "ATR_pct": ATR_pct,
+        # 상위 피쳐
+        "vol5": vol5,                                          # 성공군의 단기 변동성이 큼
+        "ATR_pct": ATR_pct,                                    # 성공군의 평균 변동폭이 큼
+        "today_pct": today_pct,                                # 성공군의 마지막 날 반등 강도가 큼
+        "max_drop_7d": max_drop_7d,                            # 성공군이 더 깊게 빠졌다가 반등
+        "dist_from_low_20d": dist_from_low_20d,                # 성공군이 저점에서 조금 더 반등한 상태
+        "vol_ratio_5_15": _vol_ratio_5_15,                     # 성공군의 최근 단기 변동성 확장이 큼
+        "three_m_cur_max_chg_rate": three_m_cur_max_chg_rate,  # 성공군이 3개월 고점 대비 더 눌림
 
 
-        # "_mean_prev20_eok": _mean_prev20_eok,  # 거래대금 확인용
-        # "dist_from_low_60d": dist_from_low_60d,  # 약함
-        # "dist_to_ma20": dist_to_ma20,  # _close_pos_20d가 조합에 더 좋음 (AUC 0.524)
-        # "_close_pos_20d": _close_pos_20d,  # dist_from_low_20d, dist_to_ma5 에서도 반영됨
-        # "ma5_recovery_rate_3d": ma5_recovery_rate_3d,  # ma5_ma20_gap_chg_1d, dist_to_ma20 겹침 (AUC 0.525)
-        # "ma5_chg_rate": ma5_chg_rate,  # ma5_ma20_gap_chg_1d 상관 0.930
+        # 후순위
+        "gap_pct": _gap_pct,                                   # gap_pct는 단독 분리력은 약하지만 today_pct와 조합하면 의미가 있을 수 있음, 비단조 주의, 룰 조합에서 강함
+        "dist_to_ma20": dist_to_ma20,                          # 성공군이 20일선 대비 조금 더 아래, 비단조 주의, 룰 조합에서 강함
+
+        "dist_to_ma5": dist_to_ma5,                            # dist_from_low_20d, pct_vs_lastweek, dist_to_ma20와 중복이 큼
+        "pct_vs_lastweek": result['pct_vs_lastweek'],          # 단독 AUC는 약하지만 룰 조합에서 강함
+        "ma5_ma20_gap_chg_1d": _ma5_ma20_gap_chg_1d,           # best bin은 괜찮지만 전체 방향성이 거의 없음.. dist_to_ma5, dist_to_ma20, pct_vs_lastweek와 의미가 겹친다
+
+
+        # 제거 후보
+        # "ma5_recovery_rate_3d": ma5_recovery_rate_3d,          # _ma5_ma20_gap_chg_1d, dist_to_ma20 겹침 (AUC 0.525)
+        # "ma5_chg_rate": ma5_chg_rate,                          # _ma5_ma20_gap_chg_1d 상관 0.930, 중복이므로 정리, 룰 조합에서 강함
+        # "MACD_hist_3d": MACD_hist_3d,                          # 기술적 모멘텀 신호로는 약함, AUC가 0.517, IV가 0.016으로 매우 약함
+        # "log_tr_value_ratio_5d": log_tr_value_ratio_5d,        # 약함, 다른 변동성계열 피쳐 설명이 더 좋음
+
+        # 거래대금 지표
+        # "today_tr_val_eok": today_tr_val_eok,
+        # "mean_prev5_eok": _mean_prev5_eok,
+        # "tr_val_rank_20d": tr_val_rank_20d,                    # 분리력 약함, 성공률 상승폭 작음
+        # "tr_value_ratio_5d": _tr_value_ratio_5d,               # 단일 AUC 0.528, IV 0.023으로 약함. vol5, vol_ratio_5_15가 있으면 우선순위 낮음
+
+        # 이전 피쳐
+        # "vol15": vol15,
+        # "pct_vs_last4week": result['pct_vs_last4week'],        # dist_to_ma20 상관 0.874.. 20일선 대비 위치가 더 직접적으로 해석
+        # "three_m_max_min_chg_rate": three_m_max_min_chg_rate,
     }
 
 
@@ -345,65 +383,22 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
 
     # 성공 최저 확인용
     risk_rule_features  = {
-        "_close_pos_20d": _close_pos_20d,
-        "_tr_value_ratio": _tr_value_ratio,
-        "_tr_value_ratio_5d": _tr_value_ratio_5d,
-        "_dist_to_high_20d": _dist_to_high_20d,
-        "_BB_perc": _BB_perc,
-        "_UltimateOsc": _UltimateOsc,
-        "_CCI14": _CCI14,
-        "_ADX14": _ADX14,
-        "_gap_pct": _gap_pct,
-        "_vol_ratio_15_60": _vol_ratio_15_60,
-        "_RSI_rebound": _RSI_rebound,
-        "_rebound_power": _rebound_power,
-        "_MACD_hist_1d": _MACD_hist_1d,
-        "_MACD_acc": _MACD_acc,
-        "_MACD_hist_3d_close_norm": _MACD_hist_3d_close_norm,
+        # "_RSI_rebound": _RSI_rebound,  # AUC가 너무 약함, 단독 방향성 불안정..
+        # "_UltimateOsc": _UltimateOsc,  # 거의 평균과 차이 작음
+        # "_MACD_acc": _MACD_acc,  # 거의 랜덤에 가까움
+        # "_dist_to_high_20d": _dist_to_high_20d,  # dist_to_ma20 우선
+        #
+        # # 차이가 없음
+        # "_close_pos_20d": _close_pos_20d,  # dist_from_low_20d, dist_to_ma5 에서도 반영됨, 별 차이가 없음
+        # "_BB_perc": _BB_perc,  # 볼린저밴드 위치
+        # "_CCI14": _CCI14,  # 단기 모멘텀 변화를 잘 포착하지만, 노이즈가 많음
+        # "_ADX14": _ADX14,  # 별 차이가 없음
+        # "_rebound_power": _rebound_power,
+        # "_MACD_hist_1d": _MACD_hist_1d,  # 차이가 작고 해석이 애매
+        # "_MACD_hist_3d_close_norm": _MACD_hist_3d_close_norm,  # 차이 작고 _ma5_ma20_gap_chg_1d와 중복
     }
 
     rule_features.update(risk_rule_features)
-
-    if ATR_pct < 2.413:
-        return
-    if today_tr_val_eok < 0.304:
-        return
-    if _close_pos_20d < 0.038:
-        return
-    if dist_to_ma5 < -16.293:
-        return
-    if dist_from_low_20d < 3.302:
-        return
-    if ma5_ma20_gap_chg_1d < -6.282:
-        return
-    if _MACD_hist_3d_close_norm < -5.386:
-        return
-    if _BB_perc < -0.117:
-        return
-    if _dist_to_high_20d < -72.546:
-        return
-    if _UltimateOsc < 12.458:
-        return
-    if _tr_value_ratio_5d < 0.073:
-        return
-    if _tr_value_ratio < 0.066:
-        return
-    if _CCI14 < -261.263:
-        return
-    if _ADX14 < 7.555:
-        return
-    if _gap_pct < -21.833:
-        return
-    if _vol_ratio_15_60 < 0.184:
-        return
-    if _RSI_rebound < -15.247:
-        return
-    if _rebound_power < 1.823:
-        return
-    if _MACD_hist_1d < -553.4:
-        return
-    if _MACD_acc < -583.492:
-        return
 
     ########################################################################
 
@@ -413,10 +408,6 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
         "idx": idx,
     }
 
-    m_data = data[-60:] # 뒤에서 x개 (3개월 정도)
-    m_current = m_data['종가'].iloc[-1]                               # 오늘 종가, 검증 데이터로 잘랐다면 검증 직전까지의 마지막 값 (수익률 분석 용도)
-
-    # result = low_weekly_check(m_data)
 
     # 검증 데이터 (마지막 n일)
     if remaining_data is not None:
@@ -461,26 +452,36 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
             for i in range(VALIDATION_DAYS)
         ]
 
-        # +7% 닿으면 매도
-        profit_day5 = next(
+        trade_labels = make_trade_labels(
+            high_rates=high_rates,
+            low_rates=low_rates,
+            close_rates=close_rates,
+            stop_loss=STOP_LOSS
+        )
+
+        # +4% 도달일
+        profit_day_4pct = next(
             (i for i, r in enumerate(high_rates, start=1)  # 익절 기준: 고가
             # (i for i, r in enumerate(close_rates, start=1)  # 익절 기준: 종가
-             if r >= 5),
+             if r >= 4),
             None
         )
 
-        profit_day7 = next(
+        # +7% 도달일
+        profit_day_7pct = next(
             (i for i, r in enumerate(high_rates, start=1)  # 익절 기준: 고가
              if r >= 7),
             None
         )
 
-        profit_day10 = next(
+        # +12% 도달일
+        profit_day_12pct = next(
             (i for i, r in enumerate(high_rates, start=1)  # 익절 기준: 고가
-             if r >= 10),
+             if r >= 12),
             None
         )
 
+        # stop_loss 보다 낮아진 날 (이탈한 날)
         stop_day = next(
             (i for i, r in enumerate(low_rates, start=1)
              if r <= STOP_LOSS),
@@ -515,15 +516,30 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
         fail_12 = day_to_12 is None
 
         validation_row = {
-            "day_to_4": day_to_4,
-            "day_to_7": day_to_7,
-            "day_to_12": day_to_12,
-            "fast_7": fast_7,
-            "slow_7": slow_7,
-            "fail_7": fail_7,
-            "fast_12": fast_12,
-            "slow_12": slow_12,
-            "fail_12": fail_12,
+            "day_to_4": trade_labels["day_to_4"],
+            "day_to_5": trade_labels["day_to_5"],
+            "day_to_7": trade_labels["day_to_7"],
+            "day_to_10": trade_labels["day_to_10"],
+            "day_to_12": trade_labels["day_to_12"],
+            "stop_day": trade_labels["stop_day"],
+
+            "target_before_stop_7": trade_labels["target_before_stop_7"],
+            "stop_before_target_7": trade_labels["stop_before_target_7"],
+            "target_stop_same_day_7": trade_labels["target_stop_same_day_7"],
+            "no_target_no_stop_7": trade_labels["no_target_no_stop_7"],
+
+            "target_before_stop_12": trade_labels["target_before_stop_12"],
+            "stop_before_target_12": trade_labels["stop_before_target_12"],
+            "target_stop_same_day_12": trade_labels["target_stop_same_day_12"],
+            "no_target_no_stop_12": trade_labels["no_target_no_stop_12"],
+
+            "fast_success_7": trade_labels["fast_success_7"],
+            "slow_success_7": trade_labels["slow_success_7"],
+            "fail_success_7": trade_labels["fail_success_7"],
+
+            "fast_success_12": trade_labels["fast_success_12"],
+            "slow_success_12": trade_labels["slow_success_12"],
+            "fail_success_12": trade_labels["fail_success_12"],
 
             # 고가 기준 최대 수익률
             "validation_high_rate_max": validation_high_rate_max,
@@ -647,14 +663,16 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
         종가가 계속 음수면
         데드캣 가능성이 높다.
         """
-        row["is_success"]   = 1 if profit_day7 is not None else 0
-        row["is_success5"]  = 1 if profit_day5 is not None else 0
-        row["is_success7"]  = 1 if profit_day7 is not None else 0
-        row["is_success10"] = 1 if profit_day10 is not None else 0
+        # row["is_success"]   = 1 if profit_day_7pct is not None else 0
+        row["is_target_hit_4pct"]  = 1 if profit_day_4pct is not None else 0
+        row["is_target_hit_7pct"]  = 1 if profit_day_7pct is not None else 0
+        row["is_target_hit_12pct"] = 1 if profit_day_12pct is not None else 0
+        row["is_trade_success_7pct"] = int(
+            profit_day_7pct is not None and (stop_day is None or profit_day_7pct < stop_day)
+        )
         row["target_pct"]   = REQUIRED_HIGH_RETURN
         row["target_class"] = target_class
         row["stop_loss"]    = STOP_LOSS
-        # row["predict_str"] = "상승" if row["is_success7"] else "미달"
 
 
 
@@ -746,20 +764,20 @@ if __name__ == "__main__":
                 print(f"룰 통과 후 성공률: {total_up_rate:.2f}% ({up_cnt} / {total_cnt})")
 
             else:
-                # 데드캣 필터 패스한 것만 룰 마이닝
-                avoid_conditions = lowscan_avoid_rules.build_conditions(df)
-
-                avoid_mask = np.zeros(len(df), dtype=bool)
-                for cond in avoid_conditions.values():
-                    avoid_mask |= cond
-
-                selected = df[~avoid_mask].copy()
+                # # 데드캣 필터 패스한 것만 룰 마이닝
+                # avoid_conditions = lowscan_avoid_rules.build_conditions(df)
+                #
+                # avoid_mask = np.zeros(len(df), dtype=bool)
+                # for cond in avoid_conditions.values():
+                #     avoid_mask |= cond
+                #
+                # selected = df[~avoid_mask].copy()
 
                 # CSV 저장
-                # df.to_csv('csv/low_result_7.csv', index=False)  # 인덱스 칼럼 'Unnamed: 0' 생성하지 않음
+                df.to_csv('csv/low_result_7.csv', index=False)  # 인덱스 칼럼 'Unnamed: 0' 생성하지 않음
 
                 # 데드캣 필터 통과한 것만 저장
-                selected.to_csv('csv/low_result_7.csv', index=False)
+                # selected.to_csv('csv/low_result_7.csv', index=False)
 
                 # 내림차순 정렬
                 saved = sort_csv_by_today_desc(
