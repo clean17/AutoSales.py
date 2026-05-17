@@ -29,6 +29,7 @@ from pathlib import Path
 import heapq
 from itertools import count
 
+from utils import build_literals, split_train_valid_by_date_ratio, write_rule_file
 
 CSV_PATH = "csv/low_result_7_desc2.csv"
 
@@ -134,25 +135,15 @@ def get_exclude_columns(df=None):
 
 def get_features(df):
     exclude = get_exclude_columns(df)
-
-    features = [
-        c for c in df.columns
-        if c not in exclude
-           and np.issubdtype(df[c].dtype, np.number)
-    ]
-
-    return features
+    return [c for c in df.columns if c not in exclude]
 
 
 def get_feature_groups():
     feature_groups = {
-        # 가격 / 당일 반등 강도
         "today_pct": "PRICE",
 
-        # 최근 눌림 강도
         "max_drop_7d": "DROP",
 
-        # 위치 / 회복 계열
         "dist_from_low_20d": "POSITION",
         "three_m_cur_max_chg_rate": "POSITION",
         "dist_to_ma5": "POSITION",
@@ -160,13 +151,16 @@ def get_feature_groups():
 
         "pct_vs_lastweek": "WEEK_POSITION",
 
-        # 추세 개선
         "ma5_ma20_gap_chg_1d": "TREND",
 
-        # 갭
         "gap_pct": "GAP",
 
-        # 변동성 / 거래 확장 계열
+        "today_tr_val_eok": "VOLUME",
+        "tr_val_rank_20d": "VOLUME",
+        "tr_value_ratio_5d": "VOLUME",
+
+        "MACD_hist_3d": "MACD",
+
         "vol5": "VOLATILITY",
         "ATR_pct": "VOLATILITY",
         "vol_ratio_5_15": "VOLATILITY",
@@ -180,59 +174,11 @@ def get_feature_groups():
         "TREND": 1,
         "GAP": 1,
         "VOLATILITY": 2,
+        "VOLUME": 1,
+        "MACD": 1,
     }
 
     return feature_groups, group_limits
-
-
-def build_literals(df, features):
-    """
-    literals(원자 조건)을 만드는 함수: feature <= q or feature > q
-    """
-    literals = []
-    literal_masks = []
-
-    for f in features:
-        col = df[f].astype(float).to_numpy()  # flaat 형변환 >  Series > Numpy 배열
-        col_nonan = col[~np.isnan(col)]       # ~np.isnan() 으로 True 값만 남는다 > NaN 제거
-
-        if len(col_nonan) == 0:
-            continue
-
-        print(f, len(col_nonan), len(np.unique(col_nonan)))
-
-        # 분위수(percentile) 배열 생성 (덜 촘촘하게 = 과적합 방지하면서 빠르게)
-        unique_vals = np.unique(col_nonan)
-
-        if len(unique_vals) < 50:  # quantile 안씀
-            qs = unique_vals
-        else:
-            """
-            0.05, 0.10, 0.15, 0.20, ... 0.95 → 총 19개 threshold
-            0.1, 0.2, 0.3, ... 0.9           → 총 9개 threshold
-            
-            depth4에서 데드캣을 이미 거른 뒤 depth5를 만들 거면 np.linspace(0.2, 0.8, 7) 괜찮음
-            0.05~0.95, 19개	많음	세밀하지만 과적합 위험 큼
-            0.1~0.9, 9개	중간	균형
-            0.2~0.8, 7개	적음	안정적, 룰 적음, 과적합 감소
-            """
-            # n_bins = min(19, len(unique_vals) - 1)
-            # qs = np.unique(np.quantile(col_nonan, np.linspace(0.05, 0.95, n_bins)))
-
-            qs = np.unique(np.quantile(col_nonan, np.linspace(0.05, 0.95, 19)))
-            # qs = np.unique(np.quantile(col_nonan, np.linspace(0.1, 0.9, 9)))
-            # qs = np.unique(np.quantile(col_nonan, np.linspace(0.2, 0.8, 7)))
-
-        for thr in qs:
-            thr = round(float(thr), 4)
-
-            literals.append((f, "<=", thr))
-            literal_masks.append(col <= thr)
-
-            literals.append((f, ">", thr))
-            literal_masks.append(col > thr)
-
-    return literals, literal_masks
 
 
 def mine_good_rules(
@@ -411,17 +357,6 @@ def mine_good_rules(
     return out
 
 
-def make_mask_from_conds(df, conds):
-    mask = np.ones(len(df), dtype=bool)
-
-    for f, op, thr in conds:
-        if op == "<=":
-            mask &= (df[f] <= thr)
-        else:
-            mask &= (df[f] > thr)
-
-    return mask
-
 
 def test_good_condition(name, cond, df, min_count=20, verbose=False):
     """
@@ -468,51 +403,6 @@ def test_good_condition(name, cond, df, min_count=20, verbose=False):
     return True
 
 
-def rule_to_code(name, conds, thr_round=3):
-    lines = [f'    "{name}":']
-    parts = []
-
-    for f, op, thr in conds:
-        thr = float(np.round(thr, thr_round))
-
-        if op == "<=":
-            parts.append(f'(df["{f}"] <= {thr})')
-        else:
-            parts.append(f'(df["{f}"] > {thr})')  # ">": ge로 출력
-
-    joined = " &\n        ".join(parts)
-    lines.append(f"        {joined},")
-
-    return "\n".join(lines)
-
-
-def write_rule_file(out_path, selected, header_comment):
-    with out_path.open("w", encoding="utf-8") as f:
-        f.write(header_comment + "\n")
-        f.write("import numpy as np\n\n")
-
-        f.write("RULE_NAMES = [\n")
-        for name, _ in selected:
-            f.write(f'    "{name}",\n')
-        f.write("]\n\n")
-
-        f.write("def build_conditions(df):\n")
-        f.write("    conditions = {\n")
-
-        for name, conds in selected:
-            code = rule_to_code(name, conds)
-            lines = code.splitlines()
-
-            f.write("        " + lines[0] + "\n")
-            for line in lines[1:]:
-                f.write("        " + line + "\n")
-
-        f.write("    }\n")
-        f.write("    return conditions\n")
-
-    print(f"saved to: {out_path.resolve()}")
-
-
 
 def find_good_rule(m_ratio, m_count):
     df = pd.read_csv(CSV_PATH, low_memory=False)
@@ -520,10 +410,7 @@ def find_good_rule(m_ratio, m_count):
     df["today"] = pd.to_datetime(df["today"], errors="coerce")
     df = df.dropna(subset=["today"])
 
-    train, valid, split_date = split_train_valid_by_date_ratio(
-        df,
-        valid_ratio=VALID_RATIO,
-    )
+    train, valid, split_date = split_train_valid_by_date_ratio(df, valid_ratio=VALID_RATIO)
 
     # 룰 생성은 train으로만 한다
     features = get_features(train)
@@ -752,35 +639,6 @@ def find_good_rule(m_ratio, m_count):
         )
     )
 
-
-
-def split_train_valid_by_date_ratio(df, valid_ratio=0.10):
-    """
-    날짜 기준 train/valid 분리.
-    과거 90%, 최근 10%를 valid로 사용.
-    """
-    df = df.copy()
-    df["today"] = pd.to_datetime(df["today"], errors="coerce")
-    df = df.dropna(subset=["today"])
-    df = df.sort_values("today").reset_index(drop=True)
-
-    unique_dates = np.array(sorted(df["today"].dt.normalize().unique()))
-
-    split_idx = int(len(unique_dates) * (1 - valid_ratio))
-    split_date = unique_dates[split_idx]
-
-    train = df[df["today"] < split_date].copy()
-    valid = df[df["today"] >= split_date].copy()
-
-    print("\n[SPLIT]")
-    print("split_date:", pd.to_datetime(split_date).date())
-    print("train:", len(train), train["today"].min().date(), "~", train["today"].max().date())
-    print("valid:", len(valid), valid["today"].min().date(), "~", valid["today"].max().date())
-
-    print("train target_before_stop_7:", round((train["target_before_stop_7"] == 1).mean() * 100, 2), "%")
-    print("valid target_before_stop_7:", round((valid["target_before_stop_7"] == 1).mean() * 100, 2), "%\n")
-
-    return train, valid, split_date
 
 
 def eval_combined_good_rules(df, selected, title=""):
