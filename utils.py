@@ -306,7 +306,12 @@ def round_float_features(row, decimals=3):
             # float 변환 시도
             fval = float(value)
             # 변환 성공하면 반올림
-            rounded_row[key] = round(fval, decimals)
+            rounded_val = round(fval, decimals)
+            # 0.0은 0으로 처리
+            if rounded_val == 0.0:
+                rounded_row[key] = 0
+            else:
+                rounded_row[key] = rounded_val
         except (ValueError, TypeError):
             # float 변환 불가능하면 원래 값 유지
             rounded_row[key] = value
@@ -1976,3 +1981,263 @@ def safe_read_pickle(path):
     except Exception:
         # 필요하면 로깅
         return None
+
+
+
+def first_reach_day_from_rates(rates, target, mode="up"):
+    """
+    rates: [1일차 수익률, 2일차 수익률, ...]
+    target: 목표 수익률 또는 손절률
+    mode:
+        "up"   -> rate >= target
+        "down" -> rate <= target
+    """
+    for i, r in enumerate(rates, start=1):
+        if pd.isna(r):
+            continue
+
+        if mode == "up" and r >= target:
+            return i
+
+        if mode == "down" and r <= target:
+            return i
+
+    return None  # 도달한적 없음
+
+
+def make_trade_labels(high_rates, low_rates, close_rates, stop_loss):
+    """
+    high_rates  : 고가 기준 일별 수익률 리스트
+    low_rates   : 저가 기준 일별 수익률 리스트
+    close_rates : 종가 기준 일별 수익률 리스트
+    stop_loss   : 예: -4, -5, -6
+    """
+
+    # 목표치 도달일
+    day_to_4 = first_reach_day_from_rates(high_rates, 4, mode="up")
+    day_to_7 = first_reach_day_from_rates(high_rates, 7, mode="up")
+    day_to_12 = first_reach_day_from_rates(high_rates, 12, mode="up")
+
+    # stop_loss 보다 낮아진 날 (이탈한 날)
+    stop_day = first_reach_day_from_rates(low_rates, stop_loss, mode="down")
+
+    def relation(target_day):
+        # 횡보
+        if target_day is None and stop_day is None:
+            return {
+                "target_before_stop": False,    # 이탈 보다 먼저 성공
+                "stop_before_target": False,    # 성공 보다 먼저 이탈
+                "target_stop_same_day": False,  # 이탈과, 성공이 같은 날
+                "no_target_no_stop": True,      # 이탈도 성공도 아닌 횡보
+            }
+
+        # 성공
+        if target_day is not None and stop_day is None:
+            return {
+                "target_before_stop": True,
+                "stop_before_target": False,
+                "target_stop_same_day": False,
+                "no_target_no_stop": False,
+            }
+
+        # 이탈
+        if target_day is None and stop_day is not None:
+            return {
+                "target_before_stop": False,
+                "stop_before_target": True,
+                "target_stop_same_day": False,
+                "no_target_no_stop": False,
+            }
+
+        # 성공
+        if target_day < stop_day:
+            return {
+                "target_before_stop": True,
+                "stop_before_target": False,
+                "target_stop_same_day": False,
+                "no_target_no_stop": False,
+            }
+
+        # 이탈 후 성공
+        if stop_day < target_day:
+            return {
+                "target_before_stop": False,
+                "stop_before_target": True,
+                "target_stop_same_day": False,
+                "no_target_no_stop": False,
+            }
+
+        # 같은 날 이탈 + 성공
+        return {
+            "target_before_stop": False,
+            "stop_before_target": False,
+            "target_stop_same_day": True,
+            "no_target_no_stop": False,
+        }
+
+    rel7 = relation(day_to_7)
+    rel12 = relation(day_to_12)
+
+    labels = {
+        "day_to_4": day_to_4 if day_to_4 is not None else 0,      # 4% 도달 날짜
+        "day_to_7": day_to_7 if day_to_7 is not None else 0,      # 7% 도달 날짜
+        "day_to_12": day_to_12 if day_to_12 is not None else 0,   # 12% 도달 날짜
+        "stop_day": stop_day if stop_day is not None else 0,      # 이탈 발생 날짜
+
+        "target_before_stop_7": rel7["target_before_stop"],
+        "stop_before_target_7": rel7["stop_before_target"],
+        "target_stop_same_day_7": rel7["target_stop_same_day"],
+        "no_target_no_stop_7": rel7["no_target_no_stop"],
+
+        "target_before_stop_12": rel12["target_before_stop"],
+        "stop_before_target_12": rel12["stop_before_target"],
+        "target_stop_same_day_12": rel12["target_stop_same_day"],
+        "no_target_no_stop_12": rel12["no_target_no_stop"],
+
+        # 속도 라벨: 반드시 target_before_stop 조건을 같이 봐야 함
+        "fast_success_7": rel7["target_before_stop"] and day_to_7 is not None and day_to_7 <= 4,
+        "slow_success_7": rel7["target_before_stop"] and day_to_7 is not None and 5 <= day_to_7 <= 7,
+        "fail_success_7": not rel7["target_before_stop"],
+
+        "fast_success_12": rel12["target_before_stop"] and day_to_12 is not None and day_to_12 <= 4,
+        "slow_success_12": rel12["target_before_stop"] and day_to_12 is not None and 5 <= day_to_12 <= 7,
+        "fail_success_12": not rel12["target_before_stop"],
+    }
+
+    return labels
+
+
+def split_train_valid_by_date_ratio(df, valid_ratio=0.10):
+    """
+    날짜 기준 train/valid 분리.
+    과거 90%, 최근 10%를 valid로 사용.
+    """
+    df = df.copy()
+    df["today"] = pd.to_datetime(df["today"], errors="coerce")
+    df = df.dropna(subset=["today"])
+    df = df.sort_values("today").reset_index(drop=True)
+
+    unique_dates = np.array(sorted(df["today"].dt.normalize().unique()))
+
+    split_idx = int(len(unique_dates) * (1 - valid_ratio))
+    split_date = unique_dates[split_idx]
+
+    train = df[df["today"] < split_date].copy()
+    valid = df[df["today"] >= split_date].copy()
+
+    print("\n[SPLIT]")
+    print("split_date:", pd.to_datetime(split_date).date())
+    print("train:", len(train), train["today"].min().date(), "~", train["today"].max().date())
+    print("valid:", len(valid), valid["today"].min().date(), "~", valid["today"].max().date())
+
+    print("train target_before_stop_7:", round((train["target_before_stop_7"] == 1).mean() * 100, 2), "%")
+    print("valid target_before_stop_7:", round((valid["target_before_stop_7"] == 1).mean() * 100, 2), "%\n")
+
+    return train, valid, split_date
+
+
+def build_literals(df, features):
+    """
+    literals(원자 조건)을 만드는 함수: feature <= q or feature > q
+    """
+    literals = []
+    literal_masks = []
+
+    for f in features:
+        col = df[f].astype(float).to_numpy()  # flaat 형변환 >  Series > Numpy 배열
+        col_nonan = col[~np.isnan(col)]       # ~np.isnan() 으로 True 값만 남는다 > NaN 제거
+
+        if len(col_nonan) == 0:
+            continue
+
+        print(f, len(col_nonan), len(np.unique(col_nonan)))
+
+        # 분위수(percentile) 배열 생성 (덜 촘촘하게 = 과적합 방지하면서 빠르게)
+        unique_vals = np.unique(col_nonan)
+
+        if len(unique_vals) < 50:  # quantile 안씀
+            qs = unique_vals
+        else:
+            """
+            0.05, 0.10, 0.15, 0.20, ... 0.95 → 총 19개 threshold
+            0.1, 0.2, 0.3, ... 0.9           → 총 9개 threshold
+            
+            depth4에서 데드캣을 이미 거른 뒤 depth5를 만들 거면 np.linspace(0.2, 0.8, 7) 괜찮음
+            0.05~0.95, 19개	많음	세밀하지만 과적합 위험 큼
+            0.1~0.9, 9개	중간	균형
+            0.2~0.8, 7개	적음	안정적, 룰 적음, 과적합 감소
+            """
+            # n_bins = min(19, len(unique_vals) - 1)
+            # qs = np.unique(np.quantile(col_nonan, np.linspace(0.05, 0.95, n_bins)))
+
+            qs = np.unique(np.quantile(col_nonan, np.linspace(0.05, 0.95, 19)))
+            # qs = np.unique(np.quantile(col_nonan, np.linspace(0.1, 0.9, 9)))
+            # qs = np.unique(np.quantile(col_nonan, np.linspace(0.2, 0.8, 7)))
+
+        for thr in qs:
+            thr = round(float(thr), 4)
+
+            literals.append((f, "<=", thr))
+            literal_masks.append(col <= thr)
+
+            literals.append((f, ">", thr))
+            literal_masks.append(col > thr)
+
+    return literals, literal_masks
+
+
+def make_mask_from_conds(df, conds):
+    mask = np.ones(len(df), dtype=bool)
+
+    for f, op, thr in conds:
+        if op == "<=":
+            mask &= (df[f] <= thr)
+        else:
+            mask &= (df[f] > thr)
+
+    return mask
+
+
+def rule_to_code(name, conds, thr_round=3):
+    lines = [f'    "{name}":']
+    parts = []
+
+    for f, op, thr in conds:
+        thr = float(np.round(thr, thr_round))
+
+        if op == "<=":
+            parts.append(f'(df["{f}"] <= {thr})')
+        else:
+            parts.append(f'(df["{f}"] > {thr})')  # ">": ge로 출력
+
+    joined = " &\n        ".join(parts)
+    lines.append(f"        {joined},")
+
+    return "\n".join(lines)
+
+
+def write_rule_file(out_path, selected, header_comment):
+    with out_path.open("w", encoding="utf-8") as f:
+        f.write(header_comment + "\n")
+        f.write("import numpy as np\n\n")
+
+        f.write("RULE_NAMES = [\n")
+        for name, _ in selected:
+            f.write(f'    "{name}",\n')
+        f.write("]\n\n")
+
+        f.write("def build_conditions(df):\n")
+        f.write("    conditions = {\n")
+
+        for name, conds in selected:
+            code = rule_to_code(name, conds)
+            lines = code.splitlines()
+
+            f.write("        " + lines[0] + "\n")
+            for line in lines[1:]:
+                f.write("        " + line + "\n")
+
+        f.write("    }\n")
+        f.write("    return conditions\n")
+
+    print(f"saved to: {out_path.resolve()}")
