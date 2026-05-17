@@ -26,6 +26,8 @@ from itertools import count
 
 CSV_PATH = "csv/low_result_7_desc.csv"
 
+AVOID_BEAM = 30000
+
 # 고정
 # GOOD_EXPAND_RATIO = [0.45, 0.65, 0.84, 0.90, 0.92]
 GOOD_EXPAND_RATIO = [0.45, 0.63, 0.83, 0.87, 0.90]  # today_pct x depth 5
@@ -814,7 +816,7 @@ def save_avoid_rule_eval(df, selected, out_csv=AVOID_EVAL_PATH):
     print(f"saved avoid eval to: {out_csv.resolve()}")
 
 
-def save_combined_avoid_eval(df, selected, out_csv="combined_avoid_eval.csv"):
+def save_combined_avoid_eval(df, selected):
     avoid_mask = np.zeros(len(df), dtype=bool)
 
     for name, conds in selected:
@@ -860,7 +862,6 @@ def save_combined_avoid_eval(df, selected, out_csv="combined_avoid_eval.csv"):
         "remain_class3_rate": round((remain["target_class"] == 3).mean() * 100, 1),
     }])
 
-    summary.to_csv(out_csv, index=False, encoding="utf-8-sig")
     print(summary.T)
 
 
@@ -992,41 +993,41 @@ def find_good_rule(m_ratio, m_count):
 
 
 def find_avoid_rule():
-    # df = pd.read_csv(CSV_PATH)
     df = pd.read_csv(CSV_PATH, low_memory=False)
-    # df = add_target_class(df)
 
     if "target_class" not in df.columns:
         raise ValueError("target_class 컬럼이 없습니다. 데이터 생성 시 target_class를 먼저 저장하세요.")
 
-    features = get_features(df)
-    literals, literal_masks = build_literals(df, features)
+    train, valid, split_date = split_train_valid_by_date_ratio(df, valid_ratio=VALID_RATIO)
+
+    features = get_features(train)
+    literals, literal_masks = build_literals(train, features)
 
     feature_groups, group_limits = get_feature_groups()
 
-    bad = df["target_class"].to_numpy() == 0
-    protect = df["target_class"].to_numpy() >= 2
-    strong = df["target_class"].to_numpy() == 3
+    train_bad = train["target_class"].to_numpy() == 0
+    train_protect = train["target_class"].to_numpy() >= 2
+    train_strong = train["target_class"].to_numpy() == 3
 
     rules = mine_avoid_rules(
-        df=df,
+        df=train,
         literals=literals,
         literal_masks=literal_masks,
-        bad=bad,
-        protect=protect,
-        strong=strong,
+        bad=train_bad,
+        protect=train_protect,
+        strong=train_strong,
         min_count=MIN_CNT_AVOID,
         max_depth=MAX_DEPTH_AVOID,
-        beam=30000,
+        beam=AVOID_BEAM,
         top_n=AVOID_TOP_N,
         feature_groups=feature_groups,
         group_limits=group_limits,
     )
 
-    selected, avoid_mask = select_avoid_rules_max_class0_under_class3_limit(
-        df=df,
+    selected, train_avoid_mask = select_avoid_rules_max_class0_under_class3_limit(
+        df=train,
         rules=rules,
-        class3_loss_limit=CLASS_3_LOSS_LIMIT,  # 2.5%
+        class3_loss_limit=CLASS_3_LOSS_LIMIT,
         min_count=MIN_CNT_AVOID,
         max_rules=None,
         verbose=True,
@@ -1039,6 +1040,8 @@ def find_avoid_rule():
         selected,
         header_comment=(
             "# auto-generated: lowscan avoid rules for class_0\n"
+            f"# split_date: {pd.to_datetime(split_date).date()}\n"
+            "# generated on train only\n"
             "# usage:\n"
             "#   import lowscan_avoid_rules\n"
             "#    \n"
@@ -1051,8 +1054,11 @@ def find_avoid_rule():
         )
     )
 
-    # save_avoid_rule_eval(df, selected)
-    save_combined_avoid_eval(df, selected)
+    print("[TRAIN]")
+    save_combined_avoid_eval(train, selected)
+
+    print("[VALID]")
+    save_combined_avoid_eval(valid, selected)
 
 
 def select_avoid_rules_max_class0_under_class3_limit(
