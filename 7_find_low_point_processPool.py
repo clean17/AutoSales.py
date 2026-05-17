@@ -348,22 +348,22 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
     """
     rule_features = {
         # 상위 피쳐
-        "vol5": vol5,                                          # 성공군의 단기 변동성이 큼
-        "ATR_pct": ATR_pct,                                    # 성공군의 평균 변동폭이 큼
+        "ATR_pct": ATR_pct,                                    # 성공군의 평균 변동폭이 큼, 대체 불가 핵심 피쳐
+        "vol5": vol5,                                          # 성공군의 단기 변동성이 큼, 핵심 피쳐
+        "vol_ratio_5_15": _vol_ratio_5_15,                     # 성공군의 최근 단기 변동성 확장이 큼, 정밀도를 올려줌, 표본 부족
+        "three_m_cur_max_chg_rate": three_m_cur_max_chg_rate,  # 성공군이 3개월 고점 대비 더 눌림, 정밀도를 올려줌
         "today_pct": today_pct,                                # 성공군의 마지막 날 반등 강도가 큼
         "max_drop_7d": max_drop_7d,                            # 성공군이 더 깊게 빠졌다가 반등
-        "dist_from_low_20d": dist_from_low_20d,                # 성공군이 저점에서 조금 더 반등한 상태
-        "vol_ratio_5_15": _vol_ratio_5_15,                     # 성공군의 최근 단기 변동성 확장이 큼
-        "three_m_cur_max_chg_rate": three_m_cur_max_chg_rate,  # 성공군이 3개월 고점 대비 더 눌림
 
+        "gap_pct": _gap_pct,                                   # gap_pct는 단독 분리력은 약하지만 today_pct와 조합하면 의미가 있을 수 있음, 비단조 주의, 룰 조합에서 강함, 핵심 피쳐
+        "dist_to_ma20": dist_to_ma20,                          # 성공군이 20일선 대비 조금 더 아래, 비단조 주의, 룰 조합에서 강함, 핵심 피쳐
+        "pct_vs_lastweek": result['pct_vs_lastweek'],          # 단독 AUC는 약하지만 룰 조합에서 강함, 없으면 데드캣 상승, 주요 피쳐
+
+        "dist_from_low_20d": dist_from_low_20d,                # 성공군이 저점에서 조금 더 반등한 상태, 대체 가능
 
         # 후순위
-        "gap_pct": _gap_pct,                                   # gap_pct는 단독 분리력은 약하지만 today_pct와 조합하면 의미가 있을 수 있음, 비단조 주의, 룰 조합에서 강함
-        "dist_to_ma20": dist_to_ma20,                          # 성공군이 20일선 대비 조금 더 아래, 비단조 주의, 룰 조합에서 강함
-
-        "dist_to_ma5": dist_to_ma5,                            # dist_from_low_20d, pct_vs_lastweek, dist_to_ma20와 중복이 큼
-        "pct_vs_lastweek": result['pct_vs_lastweek'],          # 단독 AUC는 약하지만 룰 조합에서 강함
-        "ma5_ma20_gap_chg_1d": _ma5_ma20_gap_chg_1d,           # best bin은 괜찮지만 전체 방향성이 거의 없음.. dist_to_ma5, dist_to_ma20, pct_vs_lastweek와 의미가 겹친다
+        "dist_to_ma5": dist_to_ma5,                            # dist_from_low_20d, pct_vs_lastweek, dist_to_ma20와 중복이 큼, 대체 가능
+        "ma5_ma20_gap_chg_1d": _ma5_ma20_gap_chg_1d,           # best bin은 괜찮지만 전체 방향성이 거의 없음.. dist_to_ma5, dist_to_ma20, pct_vs_lastweek와 의미가 겹친다, 대체 가능
 
 
         # 제거 후보
