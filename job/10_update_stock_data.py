@@ -21,10 +21,10 @@ root_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 
 pickle_dir = os.path.join(root_dir, '../pickle')
 os.makedirs(pickle_dir, exist_ok=True) # 없으면 생성
 
-DATA_COLLECTION_PERIOD = 800 # 샘플 수 = 68(100일 기준) - 20 - 4 + 1 = 45
+DATA_COLLECTION_PERIOD = 1000 # 샘플 수 = 68(100일 기준) - 20 - 4 + 1 = 45
 
 today = datetime.today().strftime('%Y%m%d')
-start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y%m%d')
+start_date = (datetime.today() - timedelta(days=DATA_COLLECTION_PERIOD)).strftime('%Y%m%d')  # timedelta(days=n) 달력일 기준
 
 
 # chickchick.com에서 종목 리스트 조회
@@ -57,4 +57,5 @@ hours, remainder = divmod(int(elapsed), 3600)
 minutes, seconds = divmod(remainder, 60)
 
 if elapsed > 20:
-    print(f"[10_update_stock_data.py] 총 소요 시간: {hours}시간 {minutes}분 {seconds}초")
+    nowTime = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
+    print(f'{nowTime} - Complete : 10_update_stock_data.py, 총 소요 시간: {hours}시간 {minutes}분 {seconds}초')
