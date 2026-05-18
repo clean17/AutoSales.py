@@ -1,7 +1,7 @@
 """
 stop_before_target_7 == 1 룰 생성 스크립트 - 적용 버전
 
-여러 시나리오를 비교한 뒤 coverage를 최대한 유지하는 rate-up 조합을 자동 적용한다.
+여러 시나리오와 precision fill을 비교해 coverage를 유지하면서 target_rate를 더 끌어올린다.
 
 기준 결과:
     기존 안정형:
@@ -147,6 +147,52 @@ APPLIED_SCENARIOS = [
         "max_added_gap": 0.20,
         "min_next_valid_rate": 0.605,
         "max_rate_drop": 0.008,
+        "objective": "rate_then_coverage",
+    },
+    {
+        # strict로 시작하되 룰 수를 늘려 coverage를 회복하는 시나리오.
+        # 목표: balanced_more_rules보다 rate를 올리면서 coverage 90% 안팎 유지.
+        "name": "rate_up_strict_more_rules_fill",
+        "max_rules": 18,
+        "min_added_total": 12,
+        "min_added_target": 7,
+        "min_added_valid_total": 6,
+        "min_added_valid_target": 4,
+        "min_train_added_rate": 0.585,
+        "min_valid_added_rate": 0.600,
+        "max_added_gap": 0.18,
+        "min_next_valid_rate": 0.620,
+        "max_rate_drop": 0.003,
+        "objective": "rate_then_coverage",
+    },
+    {
+        # coverage를 더 유지하되, 후반부 fill 룰의 valid precision을 59.5% 이상으로 제한.
+        "name": "rate_up_precision_fill_keep_coverage",
+        "max_rules": 22,
+        "min_added_total": 10,
+        "min_added_target": 6,
+        "min_added_valid_total": 6,
+        "min_added_valid_target": 4,
+        "min_train_added_rate": 0.580,
+        "min_valid_added_rate": 0.595,
+        "max_added_gap": 0.19,
+        "min_next_valid_rate": 0.618,
+        "max_rate_drop": 0.0035,
+        "objective": "rate_then_coverage",
+    },
+    {
+        # 11.5% 이상 coverage 구간에서 rate를 더 밀어보는 시나리오.
+        "name": "rate_up_high_coverage_guard",
+        "max_rules": 24,
+        "min_added_total": 8,
+        "min_added_target": 5,
+        "min_added_valid_total": 6,
+        "min_added_valid_target": 4,
+        "min_train_added_rate": 0.575,
+        "min_valid_added_rate": 0.590,
+        "max_added_gap": 0.20,
+        "min_next_valid_rate": 0.616,
+        "max_rate_drop": 0.003,
         "objective": "rate_then_coverage",
     },
     {
@@ -852,7 +898,7 @@ def select_rules_applied(candidates, y_train, y_valid, scenario=None, verbose=Tr
 def select_best_scenario(candidates, train, valid, y_train, y_valid, scenarios=APPLIED_SCENARIOS):
     """여러 selection 시나리오를 평가하고 최종 조합을 선택한다.
 
-    v2 선택 원칙:
+    v4 선택 원칙:
     - 이전 버전은 절대 coverage floor를 만족하지 못하면 fallback에 큰 보너스를 줘서
       target_rate가 높은 시나리오가 있어도 선택하지 못했다.
     - 이제는 실행된 시나리오 중 valid_coverage가 가장 큰 조합을 coverage baseline으로 잡는다.
@@ -989,29 +1035,39 @@ def select_best_scenario(candidates, train, valid, y_train, y_valid, scenarios=A
         row["score"] = score
 
     if accepted:
-        # 1차 선택: "coverage는 되도록 유지" 조건을 더 강하게 만족하는 rate-up 후보.
-        # - coverage_keep_ratio >= PREFERRED_COVERAGE_KEEP_RATIO
-        # - matched_keep_ratio >= PREFERRED_MATCHED_KEEP_RATIO
-        # 이 그룹 안에서는 valid_rate를 최우선으로 선택한다.
-        preferred = [
-            x for x in accepted
-            if x["row"]["coverage_keep_ratio"] >= PREFERRED_COVERAGE_KEEP_RATIO
-               and x["row"]["matched_keep_ratio"] >= PREFERRED_MATCHED_KEEP_RATIO
+        # v4 선택: coverage를 유지하면서 rate를 더 올리기 위해 coverage bucket을 둔다.
+        # 1) 92% 이상 유지 후보가 있으면 그 안에서 rate 최우선
+        # 2) 없으면 90% 이상 유지 후보
+        # 3) 없으면 기존 accept floor 안에서 rate 최우선
+        # 이렇게 하면 63%대 후보가 coverage를 너무 많이 깎을 때는 배제하고,
+        # 11%대 coverage를 지키는 후보 중 더 높은 precision 조합을 선택한다.
+        bucket_rules = [
+            (0.94, 0.92, "very high coverage-preserving rate-up"),
+            (0.92, 0.90, "high coverage-preserving rate-up"),
+            (PREFERRED_COVERAGE_KEEP_RATIO, PREFERRED_MATCHED_KEEP_RATIO, "preferred coverage-preserving rate-up"),
         ]
 
-        if preferred:
-            best = max(
-                preferred,
-                key=lambda x: (
-                    x["valid_eval"]["target_rate"],
-                    x["valid_eval"]["target_coverage"],
-                    x["valid_eval"]["matched_count"],
-                ),
-            )
-            print(f"[SCENARIO SELECTED] preferred coverage-preserving rate-up: {best['scenario']['name']}")
-        else:
-            # 2차 선택: coverage floor는 만족하지만 선호 coverage 유지율에는 못 미치는 경우.
-            # 여기서는 rate를 우선하되, coverage도 tie-breaker로 둔다.
+        best = None
+        selected_label = None
+        for cov_keep, matched_keep, label in bucket_rules:
+            bucket = [
+                x for x in accepted
+                if x["row"]["coverage_keep_ratio"] >= cov_keep
+                   and x["row"]["matched_keep_ratio"] >= matched_keep
+            ]
+            if bucket:
+                best = max(
+                    bucket,
+                    key=lambda x: (
+                        x["valid_eval"]["target_rate"],
+                        x["valid_eval"]["target_coverage"],
+                        x["valid_eval"]["matched_count"],
+                    ),
+                )
+                selected_label = label
+                break
+
+        if best is None:
             best = max(
                 accepted,
                 key=lambda x: (
@@ -1020,7 +1076,9 @@ def select_best_scenario(candidates, train, valid, y_train, y_valid, scenarios=A
                     x["valid_eval"]["matched_count"],
                 ),
             )
-            print(f"[SCENARIO SELECTED] rate-up accepted: {best['scenario']['name']}")
+            selected_label = "rate-up accepted"
+
+        print(f"[SCENARIO SELECTED] {selected_label}: {best['scenario']['name']}")
     else:
         # rate 개선 후보가 없으면 score 기준으로 선택.
         best = max(
