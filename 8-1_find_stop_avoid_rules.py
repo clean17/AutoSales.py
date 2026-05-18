@@ -1,7 +1,7 @@
 """
 stop_before_target_7 == 1 룰 생성 스크립트 - 적용 버전
 
-이번 결과에서 가장 좋았던 시나리오를 기본 적용한다.
+여러 시나리오를 비교한 뒤 coverage를 최대한 유지하는 rate-up 조합을 자동 적용한다.
 
 기준 결과:
     기존 안정형:
@@ -39,6 +39,7 @@ import pandas as pd
 CSV_PATH = "csv/low_result_7_desc.csv"
 OUT_PATH = Path("lowscan_stop_before_target_7_rules.py")
 REPORT_PATH = Path("lowscan_stop_before_target_7_rule_report.csv")
+SCENARIO_REPORT_PATH = Path("lowscan_stop_before_target_7_scenario_report.csv")
 
 TARGET_COL = "stop_before_target_7"
 TARGET_VALUE = 1
@@ -50,7 +51,7 @@ VALID_RATIO = 0.20
 BEAM = 10000
 TOP_N = 3000
 MIN_CNT = 80
-MAX_DEPTH = 3
+MAX_DEPTH = 4
 
 # 후보 룰 기준: 기존 안정형 유지
 MIN_TARGET_RATE = 0.58
@@ -71,34 +72,124 @@ VALID_WEIGHT = 1.25
 RATE_GAP_PENALTY_POWER = 2.0
 
 # =============================================================================
-# 최종 적용 시나리오: coverage_keep_rate_loose
+# 최종 적용 시나리오: rate_up_keep_coverage 자동 선택
 # =============================================================================
-# 이번 결과에서 둘 다 개선된 시나리오:
-#   valid target_rate      61.54% -> 62.58%
-#   valid target_coverage  9.15%  -> 10.97%
+# 현재 결과가 coverage는 충분히 커졌지만 target_rate가 61% 초반에 머물렀으므로,
+# 단일 loose 시나리오 대신 여러 시나리오를 돌린 뒤 coverage floor를 만족하는 조합 중
+# valid target_rate가 가장 높은 조합을 최종 적용한다.
 
-APPLIED_SCENARIO = {
-    "name": "coverage_keep_rate_loose_applied",
-    "max_rules": 12,
+APPLIED_SCENARIOS = [
+    {
+        "name": "rate_up_strict_keep_coverage",
+        "max_rules": 12,
+        "min_added_total": 18,
+        "min_added_target": 11,
+        "min_added_valid_total": 12,
+        "min_added_valid_target": 7,
+        "min_train_added_rate": 0.595,
+        "min_valid_added_rate": 0.605,
+        "max_added_gap": 0.16,
+        "min_next_valid_rate": 0.615,
+        "max_rate_drop": 0.004,
+        "objective": "rate_then_coverage",
+    },
+    {
+        "name": "rate_up_balanced_keep_coverage",
+        "max_rules": 12,
+        "min_added_total": 16,
+        "min_added_target": 9,
+        "min_added_valid_total": 10,
+        "min_added_valid_target": 6,
+        "min_train_added_rate": 0.585,
+        "min_valid_added_rate": 0.590,
+        "max_added_gap": 0.18,
+        "min_next_valid_rate": 0.610,
+        "max_rate_drop": 0.006,
+        "objective": "rate_then_coverage",
+    },
+    {
+        "name": "rate_up_soft_keep_coverage",
+        "max_rules": 12,
+        "min_added_total": 15,
+        "min_added_target": 8,
+        "min_added_valid_total": 10,
+        "min_added_valid_target": 5,
+        "min_train_added_rate": 0.575,
+        "min_valid_added_rate": 0.580,
+        "max_added_gap": 0.19,
+        "min_next_valid_rate": 0.605,
+        "max_rate_drop": 0.008,
+        "objective": "rate_then_coverage",
+    },
+    {
+        "name": "rate_up_balanced_more_rules",
+        "max_rules": 18,
+        "min_added_total": 14,
+        "min_added_target": 8,
+        "min_added_valid_total": 8,
+        "min_added_valid_target": 5,
+        "min_train_added_rate": 0.580,
+        "min_valid_added_rate": 0.585,
+        "max_added_gap": 0.19,
+        "min_next_valid_rate": 0.608,
+        "max_rate_drop": 0.006,
+        "objective": "rate_then_coverage",
+    },
+    {
+        "name": "rate_up_soft_more_rules",
+        "max_rules": 20,
+        "min_added_total": 12,
+        "min_added_target": 7,
+        "min_added_valid_total": 8,
+        "min_added_valid_target": 5,
+        "min_train_added_rate": 0.570,
+        "min_valid_added_rate": 0.575,
+        "max_added_gap": 0.20,
+        "min_next_valid_rate": 0.605,
+        "max_rate_drop": 0.008,
+        "objective": "rate_then_coverage",
+    },
+    {
+        # fallback: 기존 coverage_keep_rate_loose와 거의 동일
+        "name": "coverage_keep_rate_loose_fallback",
+        "max_rules": 12,
+        "min_added_total": 15,
+        "min_added_target": 8,
+        "min_added_valid_total": 10,
+        "min_added_valid_target": 5,
+        "min_train_added_rate": 0.57,
+        "min_valid_added_rate": 0.565,
+        "max_added_gap": 0.20,
+        "min_next_valid_rate": 0.595,
+        "max_rate_drop": 0.012,
+        "objective": "coverage",
+    },
+]
 
-    # 신규 추가분 최소 크기
-    "min_added_total": 15,
-    "min_added_target": 8,
-    "min_added_valid_total": 10,
-    "min_added_valid_target": 5,
+# 자동 선택 기준.
+# 이전 버전은 coverage floor(0.115 / matched 650)를 못 넘으면 fallback을 고르도록 되어 있어
+# rate-up 시나리오가 실제로는 버려지는 문제가 있었다.
+#
+# 이제는 "최대 coverage 조합"을 baseline으로 잡고,
+# coverage를 일정 비율 이상 유지하면서 rate가 유의미하게 높은 조합을 우선 선택한다.
+# 예: baseline coverage 12.44%라면 0.82 유지 기준은 약 10.20%.
+MIN_RATE_GAIN_OVER_COVERAGE_BASELINE = 0.006
 
-    # 신규 추가분 품질 기준
-    "min_train_added_rate": 0.57,
-    "min_valid_added_rate": 0.565,
-    "max_added_gap": 0.20,
+# 기본 허용 하한: rate-up 후보로 인정할 최소 coverage/matched 유지율.
+MIN_COVERAGE_KEEP_RATIO = 0.82
+MIN_MATCHED_KEEP_RATIO = 0.72
 
-    # 누적 valid 성능 방어선
-    "min_next_valid_rate": 0.595,
-    "max_rate_drop": 0.012,
+# 선호 구간: "coverage는 되도록 유지" 목적에 맞춰,
+# 최대 coverage baseline 대비 90% 이상 유지하는 rate-up 후보를 먼저 고른다.
+# 이번 scenario_report 기준으로는
+#   fallback: 61.42% / coverage 12.44%
+#   balanced_more_rules: 62.80% / coverage 11.49% / keep 92.34%
+# 이 조합이 여기에 들어온다.
+PREFERRED_COVERAGE_KEEP_RATIO = 0.90
+PREFERRED_MATCHED_KEEP_RATIO = 0.88
 
-    # coverage 우선이지만 rate가 무너지지 않도록 균형
-    "objective": "coverage",
-}
+ABS_MIN_VALID_COVERAGE = 0.08
+ABS_MIN_VALID_MATCHED = 300
 
 # 너무 작은 최종 결과 방지용 경고 기준
 WARN_MIN_VALID_MATCHED = 300
@@ -598,7 +689,10 @@ def attach_validation_metrics(train, valid, rules):
 # 적용 시나리오 selection
 # =============================================================================
 
-def select_rules_applied(candidates, y_train, y_valid, scenario=APPLIED_SCENARIO, verbose=True):
+def select_rules_applied(candidates, y_train, y_valid, scenario=None, verbose=True):
+    if scenario is None:
+        scenario = APPLIED_SCENARIOS[0]
+
     usable = [c for c in candidates if c["valid_pass"]]
 
     if not usable:
@@ -675,18 +769,33 @@ def select_rules_applied(candidates, y_train, y_valid, scenario=APPLIED_SCENARIO
             stability = min(train_added_rate, valid_added_rate)
             gap_quality = max(1.0 - added_gap, 0.01)
 
-            # coverage_keep_rate_loose 결과를 재현하는 점수식.
-            # coverage_gain에 큰 가중치를 주되, 낮은 precision 룰이 들어오지 않도록 rate_quality도 반영.
-            score = (
-                    coverage_gain * 2.0
-                    + valid_added_total * 0.15
-                    + rate_quality * 20.0
-                    + stability * 10.0
-                    - valid_false * 0.35
-                    - train_false * 0.10
-                    + cand["stability_score"] * 0.08
-            )
-            score *= gap_quality ** 1.5
+            if scenario.get("objective") == "rate_then_coverage":
+                # target_rate 개선용 점수식.
+                # coverage_gain은 유지하되, valid_added_rate / next_valid_rate / false positive 패널티를 더 크게 둔다.
+                score = (
+                        next_valid_rate * 160.0
+                        + rate_quality * 90.0
+                        + stability * 35.0
+                        + coverage_gain * 1.15
+                        + valid_added_total * 0.05
+                        - valid_false * 0.90
+                        - train_false * 0.14
+                        + cand["stability_score"] * 0.05
+                )
+                score *= gap_quality ** 2.0
+            else:
+                # coverage_keep_rate_loose fallback 점수식.
+                # coverage_gain에 큰 가중치를 주되, 낮은 precision 룰이 들어오지 않도록 rate_quality도 반영.
+                score = (
+                        coverage_gain * 2.0
+                        + valid_added_total * 0.15
+                        + rate_quality * 20.0
+                        + stability * 10.0
+                        - valid_false * 0.35
+                        - train_false * 0.10
+                        + cand["stability_score"] * 0.08
+                )
+                score *= gap_quality ** 1.5
 
             key = (
                 score,
@@ -738,6 +847,197 @@ def select_rules_applied(candidates, y_train, y_valid, scenario=APPLIED_SCENARIO
 
     return selected
 
+
+
+def select_best_scenario(candidates, train, valid, y_train, y_valid, scenarios=APPLIED_SCENARIOS):
+    """여러 selection 시나리오를 평가하고 최종 조합을 선택한다.
+
+    v2 선택 원칙:
+    - 이전 버전은 절대 coverage floor를 만족하지 못하면 fallback에 큰 보너스를 줘서
+      target_rate가 높은 시나리오가 있어도 선택하지 못했다.
+    - 이제는 실행된 시나리오 중 valid_coverage가 가장 큰 조합을 coverage baseline으로 잡는다.
+    - baseline 대비 coverage/matched를 일정 비율 이상 유지하면서 valid_rate가 유의미하게 높으면
+      그 시나리오를 우선 선택한다.
+    - 즉, "coverage는 되도록 유지"하되 "개선이 없으면 fallback"이 아니라
+      실제 rate 개선 조합을 선택한다.
+    """
+    rows = []
+    evaluated = []
+
+    for scenario in scenarios:
+        print(f"\n[SCENARIO RUN] {scenario['name']}")
+        selected = select_rules_applied(
+            candidates=candidates,
+            y_train=y_train,
+            y_valid=y_valid,
+            scenario=scenario,
+            verbose=True,
+        )
+
+        train_mask = combined_mask(train, selected)
+        valid_mask = combined_mask(valid, selected)
+        train_eval = eval_mask(train, train_mask, "TRAIN")
+        valid_eval = eval_mask(valid, valid_mask, "VALID")
+
+        row = {
+            "scenario": scenario["name"],
+            "selected_rules": len(selected),
+            "train_matched": train_eval["matched_count"],
+            "train_target": train_eval["matched_target"],
+            "train_rate": train_eval["target_rate"],
+            "train_coverage": train_eval["target_coverage"],
+            "valid_matched": valid_eval["matched_count"],
+            "valid_target": valid_eval["matched_target"],
+            "valid_rate": valid_eval["target_rate"],
+            "valid_coverage": valid_eval["target_coverage"],
+            "coverage_ok": False,  # 아래에서 baseline 기반으로 다시 계산
+            "rate_gain_vs_coverage_base": 0.0,
+            "coverage_keep_ratio": 0.0,
+            "matched_keep_ratio": 0.0,
+            "score": 0.0,
+        }
+        rows.append(row)
+        evaluated.append({
+            "row": row,
+            "selected": selected,
+            "scenario": scenario,
+            "train_eval": train_eval,
+            "valid_eval": valid_eval,
+        })
+
+        print_eval(train_eval)
+        print_eval(valid_eval)
+
+    if not evaluated:
+        return [], None, pd.DataFrame(rows)
+
+    # coverage가 가장 큰 결과를 현재 coverage baseline으로 본다.
+    coverage_base = max(
+        evaluated,
+        key=lambda x: (
+            x["valid_eval"]["target_coverage"],
+            x["valid_eval"]["matched_count"],
+            x["valid_eval"]["target_rate"],
+        ),
+    )
+    base_valid = coverage_base["valid_eval"]
+    base_rate = base_valid["target_rate"]
+    base_coverage = base_valid["target_coverage"]
+    base_matched = base_valid["matched_count"]
+
+    min_keep_coverage = max(ABS_MIN_VALID_COVERAGE, base_coverage * MIN_COVERAGE_KEEP_RATIO)
+    min_keep_matched = max(ABS_MIN_VALID_MATCHED, int(base_matched * MIN_MATCHED_KEEP_RATIO))
+
+    print("\n[SCENARIO BASELINE]")
+    print(
+        f"coverage_baseline={coverage_base['scenario']['name']} "
+        f"valid_rate={base_rate * 100:.2f}% "
+        f"valid_coverage={base_coverage * 100:.2f}% "
+        f"valid_matched={base_matched}"
+    )
+    print(
+        f"rate-up accept if: valid_rate >= {(base_rate + MIN_RATE_GAIN_OVER_COVERAGE_BASELINE) * 100:.2f}% "
+        f"and valid_coverage >= {min_keep_coverage * 100:.2f}% "
+        f"and valid_matched >= {min_keep_matched}"
+    )
+
+    accepted = []
+    for item in evaluated:
+        valid_eval = item["valid_eval"]
+        row = item["row"]
+
+        rate_gain = valid_eval["target_rate"] - base_rate
+        coverage_keep_ratio = (
+            valid_eval["target_coverage"] / base_coverage
+            if base_coverage else 0.0
+        )
+        matched_keep_ratio = (
+            valid_eval["matched_count"] / base_matched
+            if base_matched else 0.0
+        )
+
+        coverage_ok = (
+                valid_eval["target_coverage"] >= min_keep_coverage
+                and valid_eval["matched_count"] >= min_keep_matched
+        )
+        rate_up_ok = rate_gain >= MIN_RATE_GAIN_OVER_COVERAGE_BASELINE
+
+        row["coverage_ok"] = coverage_ok
+        row["rate_gain_vs_coverage_base"] = rate_gain
+        row["coverage_keep_ratio"] = coverage_keep_ratio
+        row["matched_keep_ratio"] = matched_keep_ratio
+
+        # target_rate 개선을 가장 크게 보되, coverage/matched도 보상.
+        # coverage baseline 자체는 개선이 없으면 안전 fallback으로 남게 한다.
+        score = (
+                valid_eval["target_rate"] * 100000.0
+                + valid_eval["target_coverage"] * 5000.0
+                + np.log1p(valid_eval["matched_count"]) * 100.0
+        )
+
+        if coverage_ok:
+            score += 50000.0
+        else:
+            score -= max(0.0, min_keep_coverage - valid_eval["target_coverage"]) * 200000.0
+            score -= max(0, min_keep_matched - valid_eval["matched_count"]) * 5.0
+
+        if coverage_ok and rate_up_ok:
+            # 실제 개선 후보에는 큰 보너스. 이전 버전과 달리 fallback이 압도하지 못하게 한다.
+            score += 200000.0 + rate_gain * 500000.0
+            accepted.append(item)
+
+        row["score"] = score
+
+    if accepted:
+        # 1차 선택: "coverage는 되도록 유지" 조건을 더 강하게 만족하는 rate-up 후보.
+        # - coverage_keep_ratio >= PREFERRED_COVERAGE_KEEP_RATIO
+        # - matched_keep_ratio >= PREFERRED_MATCHED_KEEP_RATIO
+        # 이 그룹 안에서는 valid_rate를 최우선으로 선택한다.
+        preferred = [
+            x for x in accepted
+            if x["row"]["coverage_keep_ratio"] >= PREFERRED_COVERAGE_KEEP_RATIO
+               and x["row"]["matched_keep_ratio"] >= PREFERRED_MATCHED_KEEP_RATIO
+        ]
+
+        if preferred:
+            best = max(
+                preferred,
+                key=lambda x: (
+                    x["valid_eval"]["target_rate"],
+                    x["valid_eval"]["target_coverage"],
+                    x["valid_eval"]["matched_count"],
+                ),
+            )
+            print(f"[SCENARIO SELECTED] preferred coverage-preserving rate-up: {best['scenario']['name']}")
+        else:
+            # 2차 선택: coverage floor는 만족하지만 선호 coverage 유지율에는 못 미치는 경우.
+            # 여기서는 rate를 우선하되, coverage도 tie-breaker로 둔다.
+            best = max(
+                accepted,
+                key=lambda x: (
+                    x["valid_eval"]["target_rate"],
+                    x["valid_eval"]["target_coverage"],
+                    x["valid_eval"]["matched_count"],
+                ),
+            )
+            print(f"[SCENARIO SELECTED] rate-up accepted: {best['scenario']['name']}")
+    else:
+        # rate 개선 후보가 없으면 score 기준으로 선택.
+        best = max(
+            evaluated,
+            key=lambda x: (
+                x["row"]["score"],
+                x["valid_eval"]["target_rate"],
+                x["valid_eval"]["target_coverage"],
+            ),
+        )
+        print(f"[SCENARIO SELECTED] fallback by score: {best['scenario']['name']}")
+
+    summary = pd.DataFrame(rows).sort_values(
+        ["score", "valid_rate", "valid_coverage"],
+        ascending=[False, False, False],
+    )
+    return best["selected"], best["scenario"], summary
 
 # =============================================================================
 # 리포트
@@ -806,7 +1106,7 @@ def find_stop_before_target_7_rules(csv_path=CSV_PATH, out_path=OUT_PATH, report
     print(f"[DATA] split_date={pd.to_datetime(split_date).date()}")
     print(f"[DATA] train target rate={y_train.mean() * 100:.2f}%")
     print(f"[DATA] valid target rate={y_valid.mean() * 100:.2f}%")
-    print(f"[APPLIED_SCENARIO] {APPLIED_SCENARIO['name']}")
+    print("[APPLIED_SCENARIOS]", ", ".join(s["name"] for s in APPLIED_SCENARIOS))
 
     features = get_features(train)
     print(f"[FEATURES] {len(features)} features")
@@ -845,14 +1145,20 @@ def find_stop_before_target_7_rules(csv_path=CSV_PATH, out_path=OUT_PATH, report
     if not preview_df.empty:
         print(preview_df[preview_cols].to_string(index=False))
 
-    selected = select_rules_applied(
+    selected, selected_scenario, scenario_summary = select_best_scenario(
         candidates=candidates,
+        train=train,
+        valid=valid,
         y_train=y_train,
         y_valid=y_valid,
-        scenario=APPLIED_SCENARIO,
-        verbose=True,
+        scenarios=APPLIED_SCENARIOS,
     )
 
+    print("\n[SCENARIO SUMMARY]")
+    if not scenario_summary.empty:
+        print(scenario_summary.to_string(index=False))
+
+    print(f"[SELECTED_SCENARIO] {selected_scenario['name'] if selected_scenario else 'NONE'}")
     print(f"[SELECT] selected={len(selected)}")
 
     train_final_mask = combined_mask(train, selected)
@@ -869,12 +1175,16 @@ def find_stop_before_target_7_rules(csv_path=CSV_PATH, out_path=OUT_PATH, report
     report_df.to_csv(report_path, index=False, encoding="utf-8-sig")
     print(f"[REPORT SAVED] {Path(report_path).resolve()}")
 
+    scenario_report_path = Path(report_path).with_name(SCENARIO_REPORT_PATH.name)
+    scenario_summary.to_csv(scenario_report_path, index=False, encoding="utf-8-sig")
+    print(f"[SCENARIO REPORT SAVED] {scenario_report_path.resolve()}")
+
     header_comment = (
-        "# auto-generated: applied coverage_keep_rate_loose rules for stop_before_target_7 == 1\n"
+        "# auto-generated: rate-up keep-coverage rules for stop_before_target_7 == 1\n"
         f"# target: {TARGET_COL} == {TARGET_VALUE}\n"
         f"# split_date: {pd.to_datetime(split_date).date()}\n"
-        f"# applied_scenario: {APPLIED_SCENARIO['name']}\n"
-        "# expected from previous run: valid target_rate around 62.58%, target_coverage around 10.97%\n"
+        f"# applied_scenario: {selected_scenario['name'] if selected_scenario else 'NONE'}\n"
+        "# selected by scenario sweep: maximize valid target_rate while preserving coverage floor when possible\n"
         "# usage:\n"
         "#   import numpy as np\n"
         "#   import lowscan_stop_before_target_7_rules\n"
