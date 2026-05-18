@@ -38,8 +38,8 @@ import pandas as pd
 
 CSV_PATH = "csv/low_result_7_desc.csv"
 OUT_PATH = Path("lowscan_stop_before_target_7_rules.py")
-REPORT_PATH = Path("lowscan_stop_before_target_7_rule_report.csv")
-SCENARIO_REPORT_PATH = Path("lowscan_stop_before_target_7_scenario_report.csv")
+REPORT_PATH = Path("csv/lowscan_stop_before_target_7_rule_report.csv")
+SCENARIO_REPORT_PATH = Path("csv/lowscan_stop_before_target_7_scenario_report.csv")
 
 TARGET_COL = "stop_before_target_7"
 TARGET_VALUE = 1

@@ -47,16 +47,24 @@ import pandas as pd
 # =============================================================================
 # CONFIG: 여기 상수만 바꿔서 실험
 #
-# [REBALANCED VERSION]
-# 이전 fast 버전은 train 후보는 나오지만 valid filter 통과가 0개가 될 수 있었음.
-# 이 버전은 속도는 원본보다 줄이되, 검증 후보가 살아남도록 탐색/검증 기준을 재균형화.
-# - N_QUANTILES: 22 -> 16
-# - BEAM       : 10000 -> 5000
-# - TOP_N      : 3000 -> 2500
-# - MIN_CNT    : 45 -> 60
-# - MAX_DEPTH  : 5 유지
-# - MAX_RULES  : None -> 35
-# - VALID 조건은 strict 기준보다 완화하되, class0_rate 60% 이상을 기본 목표로 유지.
+# [COVERAGE-FIRST VERSION]
+# 목적:
+# - 이전 coverage-balanced 버전은 strict tier에서 멈춰 coverage가 오히려 줄었음.
+# - 이 버전은 strict / coverage_expand / coverage_rescue 후보를 모두 합쳐서 선택한다.
+# - selection도 precision 우선이 아니라 valid_added_class0, selected_gain 등 coverage_gain을 우선한다.
+#
+# 목표 예시:
+# - valid class0_rate      : 58~65% 이상
+# - valid class0_coverage  : 6~10% 이상
+# - valid selected_count   : 150~300개
+# - valid class3_rate      : 30% 이하
+#
+# 주요 변경:
+# - tier 후보 전체 병합
+# - valid_added_total == 0 룰 선택 금지
+# - valid_added_class0 < 2 룰 선택 금지
+# - coverage_gain 중심 score 사용
+# - MAX_RULES 80, TOP_N 5000으로 확대
 # =============================================================================
 
 CSV_PATH = "csv/low_result_7_desc.csv"
@@ -69,31 +77,31 @@ VALID_RATIO = 0.10
 DATE_COL = "today"
 
 # 리터럴 생성: 숫자형 feature별 분위수 threshold 개수
-N_QUANTILES = 16
+N_QUANTILES = 18
 MIN_UNIQUE_VALUES = 8
 
 # Beam search
-BEAM = 5000
-TOP_N = 2500
-MIN_CNT = 60
+BEAM = 7000
+TOP_N = 5000
+MIN_CNT = 45
 MAX_DEPTH = 5
 
 # 최종 후보 룰: train 기준
-MIN_CLASS0_RATE = 0.66
-MIN_LIFT = 1.55
-MIN_WILSON_LOW = 0.58
+MIN_CLASS0_RATE = 0.58
+MIN_LIFT = 1.20
+MIN_WILSON_LOW = 0.46
 
 # validation 필터: 과최적화 제거용
-VALID_MIN_CNT = 20
-VALID_MIN_CLASS0_RATE = 0.60
-VALID_MIN_LIFT = 1.30
-VALID_MIN_WILSON_LOW = 0.47
+VALID_MIN_CNT = 15
+VALID_MIN_CLASS0_RATE = 0.52
+VALID_MIN_LIFT = 1.05
+VALID_MIN_WILSON_LOW = 0.34
 
 # 좋은 class 혼입 제한. 필요 없으면 1.0 으로 완화.
-MAX_VALID_CLASS1_RATE = 0.34
-MAX_VALID_CLASS2_RATE = 0.24
-MAX_VALID_CLASS3_RATE = 0.24
-MAX_VALID_CLASS23_RATE = 0.38
+MAX_VALID_CLASS1_RATE = 0.45
+MAX_VALID_CLASS2_RATE = 0.35
+MAX_VALID_CLASS3_RATE = 0.30
+MAX_VALID_CLASS23_RATE = 0.55
 
 # beam 확장 조건: depth별로 점점 엄격하게
 # 부족하면 마지막 값을 재사용
@@ -101,9 +109,9 @@ EXPAND_MIN_CLASS0_RATE = [0.38, 0.46, 0.54, 0.60, 0.64]
 EXPAND_MIN_LIFT = [0.90, 1.08, 1.25, 1.38, 1.48]
 
 # greedy rule selection
-MAX_RULES = 35
-MIN_NEW_CLASS0_CNT = 4
-MIN_NEW_CLASS0_RATE = 0.56
+MAX_RULES = 80
+MIN_NEW_CLASS0_CNT = 2
+MIN_NEW_CLASS0_RATE = 0.48
 
 # 점수 가중치
 PRECISION_POWER = 3.2
@@ -118,37 +126,37 @@ CLASS3_PENALTY = 2.4
 # tier 순서대로만 완화하므로, strict 후보가 있으면 strict만 사용한다.
 VALID_FILTER_TIERS = [
     {
-        "name": "strict",
-        "min_cnt": VALID_MIN_CNT,
-        "min_class0_rate": VALID_MIN_CLASS0_RATE,
-        "min_lift": VALID_MIN_LIFT,
-        "min_wilson_low": VALID_MIN_WILSON_LOW,
-        "max_class1_rate": MAX_VALID_CLASS1_RATE,
-        "max_class2_rate": MAX_VALID_CLASS2_RATE,
-        "max_class3_rate": MAX_VALID_CLASS3_RATE,
-        "max_class23_rate": MAX_VALID_CLASS23_RATE,
+        "name": "strict_precision",
+        "min_cnt": 15,
+        "min_class0_rate": 0.60,
+        "min_lift": 1.20,
+        "min_wilson_low": 0.42,
+        "max_class1_rate": 0.40,
+        "max_class2_rate": 0.30,
+        "max_class3_rate": 0.24,
+        "max_class23_rate": 0.45,
     },
     {
-        "name": "balanced_relaxed",
-        "min_cnt": max(15, VALID_MIN_CNT - 5),
-        "min_class0_rate": 0.58,
-        "min_lift": 1.22,
-        "min_wilson_low": 0.44,
-        "max_class1_rate": 0.38,
-        "max_class2_rate": 0.27,
-        "max_class3_rate": 0.27,
-        "max_class23_rate": 0.42,
+        "name": "coverage_expand",
+        "min_cnt": 12,
+        "min_class0_rate": 0.54,
+        "min_lift": 1.10,
+        "min_wilson_low": 0.36,
+        "max_class1_rate": 0.45,
+        "max_class2_rate": 0.36,
+        "max_class3_rate": 0.30,
+        "max_class23_rate": 0.55,
     },
     {
         "name": "coverage_rescue",
-        "min_cnt": 12,
-        "min_class0_rate": 0.56,
-        "min_lift": 1.15,
-        "min_wilson_low": 0.40,
-        "max_class1_rate": 0.42,
-        "max_class2_rate": 0.30,
-        "max_class3_rate": 0.30,
-        "max_class23_rate": 0.46,
+        "min_cnt": 8,
+        "min_class0_rate": 0.50,
+        "min_lift": 1.02,
+        "min_wilson_low": 0.30,
+        "max_class1_rate": 0.50,
+        "max_class2_rate": 0.40,
+        "max_class3_rate": 0.34,
+        "max_class23_rate": 0.62,
     },
 ]
 
@@ -613,6 +621,13 @@ def validation_fail_reasons(ev: dict, tier: dict) -> list[str]:
 
 
 def select_rules_with_validation(train: pd.DataFrame, valid: pd.DataFrame, rules, max_rules: int | None = MAX_RULES):
+    """Select rules with coverage-first objective.
+
+    Key changes vs precision-first version:
+    - All validation tiers are merged, not only the first non-empty tier.
+    - A selected rule must add real new validation coverage.
+    - The score prioritizes valid_added_class0 and valid_added_total, while still penalizing false positives and class3.
+    """
     train_class0 = train["target_class"].to_numpy() == TARGET_CLASS
     valid_class0 = valid["target_class"].to_numpy() == TARGET_CLASS
     train_base = train_class0.mean()
@@ -621,7 +636,7 @@ def select_rules_with_validation(train: pd.DataFrame, valid: pd.DataFrame, rules
     all_evaluated = []
     for i, (cnt, class0_cnt, class0_rate, lift, wilson, c1_rate, c2_rate, c3_rate, conds, score) in enumerate(rules, start=1):
         name = (
-            f"target0_highprob_{i:04d}"
+            f"target0_covfirst_{i:04d}"
             f"_s{score:.2f}"
             f"_tr{class0_rate:.3f}"
             f"_wl{wilson:.3f}"
@@ -653,15 +668,27 @@ def select_rules_with_validation(train: pd.DataFrame, valid: pd.DataFrame, rules
 
     print("\n[EVALUATED TRAIN-PASS RULES]", len(all_evaluated))
 
-    candidates = []
-    selected_tier = None
-    for tier in VALID_FILTER_TIERS:
-        tier_candidates = [c for c in all_evaluated if pass_valid_filter(c["valid_eval"], tier)]
+    # Merge all validation tiers instead of stopping at the first tier.
+    candidates_by_name = {}
+    tier_counts = {}
+    for tier_idx, tier in enumerate(VALID_FILTER_TIERS):
+        tier_candidates = []
+        for c in all_evaluated:
+            if pass_valid_filter(c["valid_eval"], tier):
+                cc = dict(c)
+                cc["valid_tier"] = tier["name"]
+                cc["valid_tier_idx"] = tier_idx
+                tier_candidates.append(cc)
+
+                old = candidates_by_name.get(cc["name"])
+                if old is None or tier_idx < old["valid_tier_idx"]:
+                    candidates_by_name[cc["name"]] = cc
+
+        tier_counts[tier["name"]] = len(tier_candidates)
         print(f"[VALID FILTER:{tier['name']}] passed={len(tier_candidates)} / {len(all_evaluated)}")
-        if tier_candidates:
-            candidates = tier_candidates
-            selected_tier = tier
-            break
+
+    candidates = list(candidates_by_name.values())
+    print("[CANDIDATES AFTER MERGED VALID FILTER]", len(candidates))
 
     if not candidates:
         print("\n[VALID FILTER DIAGNOSTIC] no candidates passed. Top valid candidates by class0_rate:")
@@ -674,7 +701,7 @@ def select_rules_with_validation(train: pd.DataFrame, valid: pd.DataFrame, rules
             ),
             reverse=True,
         )[:20]
-        strict = VALID_FILTER_TIERS[0]
+        strict = VALID_FILTER_TIERS[-1]
         for c in top_debug:
             va = c["valid_eval"]
             reasons = "; ".join(validation_fail_reasons(va, strict))
@@ -691,82 +718,113 @@ def select_rules_with_validation(train: pd.DataFrame, valid: pd.DataFrame, rules
             )
         return [], np.zeros(len(train), dtype=bool), np.zeros(len(valid), dtype=bool)
 
-    print(f"[VALID FILTER SELECTED TIER] {selected_tier['name']}")
-    print("[CANDIDATES AFTER VALID FILTER]", len(candidates))
-
     selected = []
     combined_train_mask = np.zeros(len(train), dtype=bool)
     combined_valid_mask = np.zeros(len(valid), dtype=bool)
 
+    # Coverage checkpoints for logging.
+    target_valid_class0_count = int(valid_class0.sum())
+    print(
+        "[COVERAGE TARGETS]",
+        f"valid_class0_total={target_valid_class0_count}",
+        f"6pct={int(target_valid_class0_count * 0.06)}",
+        f"8pct={int(target_valid_class0_count * 0.08)}",
+        f"10pct={int(target_valid_class0_count * 0.10)}",
+    )
+
     while True:
         best = None
+
+        current_valid_eval = eval_mask(valid, combined_valid_mask, label="VALID COMBINED")
+        current_rate = current_valid_eval["class0_rate"]
+        current_coverage = current_valid_eval["class0_coverage"]
 
         for cand in candidates:
             new_train = cand["train_mask"] & ~combined_train_mask
             new_valid = cand["valid_mask"] & ~combined_valid_mask
-            if not new_train.any():
-                continue
 
             train_added_total = int(new_train.sum())
-            train_added_class0 = int((new_train & train_class0).sum())
-            train_added_rate = train_added_class0 / train_added_total if train_added_total else 0.0
-            train_added_lift = train_added_rate / train_base if train_base else 0.0
-            train_added_wilson = wilson_lower_bound(train_added_class0, train_added_total)
-
             valid_added_total = int(new_valid.sum())
+
+            # coverage-first: must add real validation coverage.
+            if valid_added_total < 5:
+                continue
+
+            train_added_class0 = int((new_train & train_class0).sum())
             valid_added_class0 = int((new_valid & valid_class0).sum())
-            valid_added_rate = valid_added_class0 / valid_added_total if valid_added_total else 0.0
-            valid_added_lift = valid_added_rate / valid_base if valid_base else 0.0
-            valid_added_wilson = wilson_lower_bound(valid_added_class0, valid_added_total)
 
             if train_added_class0 < MIN_NEW_CLASS0_CNT:
                 continue
+            if valid_added_class0 < 2:
+                continue
+
+            train_added_rate = train_added_class0 / train_added_total if train_added_total else 0.0
+            valid_added_rate = valid_added_class0 / valid_added_total if valid_added_total else 0.0
+            train_added_wilson = wilson_lower_bound(train_added_class0, train_added_total)
+            valid_added_wilson = wilson_lower_bound(valid_added_class0, valid_added_total)
+
+            # Allow lower incremental precision while expanding coverage, but avoid obvious noise.
             if train_added_rate < MIN_NEW_CLASS0_RATE:
                 continue
-
-            # 신규 valid가 충분히 있으면 tier 기준으로 확인.
-            # 신규 valid가 작으면 전체 rule valid 성능을 보조지표로 쓰되, 신규 class0가 0이면 배제.
-            if valid_added_total >= selected_tier["min_cnt"]:
-                if (
-                        valid_added_rate < max(0.54, selected_tier["min_class0_rate"] - 0.04)
-                        or valid_added_wilson < max(0.36, selected_tier["min_wilson_low"] - 0.06)
-                ):
-                    continue
-            elif valid_added_total > 0 and valid_added_class0 == 0:
+            if valid_added_rate < 0.45:
                 continue
 
-            valid_component = valid_added_rate if valid_added_total >= selected_tier["min_cnt"] else cand["valid_eval"]["class0_rate"]
-            valid_wilson_component = valid_added_wilson if valid_added_total >= selected_tier["min_cnt"] else cand["valid_eval"]["class0_wilson_low"]
+            next_valid_target = current_valid_eval["class0_count"] + valid_added_class0
+            next_valid_selected = current_valid_eval["selected_count"] + valid_added_total
+            next_valid_rate = next_valid_target / next_valid_selected if next_valid_selected else 0.0
+            next_valid_coverage = next_valid_target / target_valid_class0_count if target_valid_class0_count else 0.0
+
+            # Do not allow combined precision to collapse.
+            # Before reaching 6% coverage, allow rate down to 55%.
+            # After 6%, require combined rate to stay at least 58%.
+            min_combined_rate = 0.55 if next_valid_coverage < 0.06 else 0.58
+            if next_valid_rate < min_combined_rate:
+                continue
 
             valid_false = valid_added_total - valid_added_class0
-            class3_penalty = cand["valid_eval"]["class3_rate"]
+            tier_bonus = max(0, 2 - cand.get("valid_tier_idx", 2)) * 3.0
+
+            # Coverage-first score.
+            # More valid class0 additions are strongly preferred.
+            # False positives and class3 are penalized, but not so much that coverage cannot grow.
+            score = (
+                    valid_added_class0 * 12.0
+                    + valid_added_total * 1.2
+                    + valid_added_rate * 18.0
+                    + valid_added_wilson * 8.0
+                    + next_valid_coverage * 300.0
+                    + train_added_class0 * 0.8
+                    + tier_bonus
+                    - valid_false * 2.2
+                    - cand["valid_eval"]["class3_rate"] * 10.0
+                    - cand["valid_eval"]["class23_rate"] * 3.0
+            )
 
             key = (
-                valid_component,
-                valid_wilson_component,
-                train_added_rate,
-                train_added_wilson,
+                score,
                 valid_added_class0,
+                next_valid_coverage,
+                next_valid_rate,
+                valid_added_total,
                 -valid_false,
-                -class3_penalty,
-                train_added_class0,
                 cand["stable_score"],
             )
 
             if best is None or key > best["key"]:
                 best = {
                     "key": key,
+                    "score": score,
                     "cand": cand,
                     "train_added_total": train_added_total,
                     "train_added_class0": train_added_class0,
                     "train_added_rate": train_added_rate,
-                    "train_added_lift": train_added_lift,
                     "train_added_wilson": train_added_wilson,
                     "valid_added_total": valid_added_total,
                     "valid_added_class0": valid_added_class0,
                     "valid_added_rate": valid_added_rate,
-                    "valid_added_lift": valid_added_lift,
                     "valid_added_wilson": valid_added_wilson,
+                    "next_valid_rate": next_valid_rate,
+                    "next_valid_coverage": next_valid_coverage,
                 }
 
         if best is None:
@@ -782,9 +840,10 @@ def select_rules_with_validation(train: pd.DataFrame, valid: pd.DataFrame, rules
             "[SELECT]",
             f"{len(selected):03d}",
             cand["name"],
+            f"tier={cand.get('valid_tier', 'NA')}",
+            f"score={best['score']:.2f}",
             f"train_add={best['train_added_class0']}/{best['train_added_total']} ({best['train_added_rate'] * 100:.2f}%)",
             f"valid_add={best['valid_added_class0']}/{best['valid_added_total']} ({best['valid_added_rate'] * 100:.2f}%)",
-            f"valid_rule={cand['valid_eval']['class0_rate'] * 100:.2f}%",
             f"combined_valid_class0_rate={combined_valid_eval['class0_rate'] * 100:.2f}%",
             f"combined_valid_class0_coverage={combined_valid_eval['class0_coverage'] * 100:.2f}%",
             f"combined_valid_class3_rate={combined_valid_eval['class3_rate'] * 100:.2f}%",
@@ -964,7 +1023,9 @@ def find_target0_highprob_rules(csv_path: str | Path = CSV_PATH, out_path: str |
     save_monthly_report(monthly_path, valid, valid_mask)
 
     print_eval(eval_mask(train, train_mask, label="TRAIN COMBINED"))
-    print_eval(eval_mask(valid, valid_mask, label="VALID COMBINED"))
+    valid_final_eval = eval_mask(valid, valid_mask, label="VALID COMBINED")
+    print_eval(valid_final_eval)
+    interpret_final_result(valid_final_eval)
 
     print("\n[OUTPUT]")
     print("rule_file:", out_path)
@@ -972,6 +1033,40 @@ def find_target0_highprob_rules(csv_path: str | Path = CSV_PATH, out_path: str |
     print("monthly_report:", monthly_path)
 
     return selected, train_mask, valid_mask
+
+
+def interpret_final_result(valid_eval: dict):
+    """최종 valid 결과를 운영 관점에서 간단히 해석한다."""
+    print("\n[INTERPRETATION]")
+    rate = valid_eval["class0_rate"]
+    coverage = valid_eval["class0_coverage"]
+    selected = valid_eval["selected_count"]
+    class3 = valid_eval["class3_rate"]
+
+    if rate >= 0.68 and coverage < 0.05:
+        print("type: high-precision narrow filter")
+        print("해석: class0 확률은 매우 높지만 coverage가 낮습니다. 확실한 일부 구간만 잡습니다.")
+    elif rate >= 0.60 and coverage >= 0.06:
+        print("type: balanced coverage candidate")
+        print("해석: precision을 일부 양보하고 coverage를 확대한 실전 후보입니다.")
+    elif rate >= 0.55 and coverage >= 0.08:
+        print("type: coverage-expanded candidate")
+        print("해석: coverage는 넓어졌지만 precision 저하와 class3 혼입을 확인해야 합니다.")
+    else:
+        print("type: weak or too narrow candidate")
+        print("해석: class0_rate 또는 coverage 중 하나가 부족합니다. 기준 조정이 필요합니다.")
+
+    print(f"valid_selected_count : {selected}")
+    print(f"valid_class0_rate    : {rate * 100:.2f}%")
+    print(f"valid_class0_coverage: {coverage * 100:.2f}%")
+    print(f"valid_class3_rate    : {class3 * 100:.2f}%")
+
+    if selected < 150:
+        print("[NOTE] selected_count가 150 미만입니다. 아직 좁은 필터일 수 있습니다.")
+    if coverage < 0.06:
+        print("[NOTE] class0_coverage가 6% 미만입니다. coverage 확대 목표에는 부족합니다.")
+    if class3 > 0.30:
+        print("[WARN] class3_rate가 30%를 넘습니다. class3 혼입 방지 기준을 강화하세요.")
 
 
 def parse_args():
