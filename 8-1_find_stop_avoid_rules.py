@@ -1,33 +1,26 @@
 """
-stop_before_target_7 == 1 을 찾는 룰 생성 스크립트 - 개선 버전
+stop_before_target_7 == 1 룰 생성 스크립트 - 적용 버전
 
-개선 포인트:
-1) train에서 과도하게 잘 맞는 작은 룰을 줄이기 위해 MIN_CNT / MAX_DEPTH를 보수적으로 조정
-2) train 후보 룰을 valid에서 먼저 안정성 필터링
-3) train_rate와 valid_rate 차이가 큰 룰 제거
-4) greedy selection도 train 성능만 보지 않고 valid 성능, rate gap, 신규 매칭 수를 같이 반영
-5) 최종 저장 전 train / valid combined 성능과 개별 룰 리포트 출력
+이번 결과에서 가장 좋았던 시나리오를 기본 적용한다.
 
-사용 예:
-    python find_stop_before_target_7_rules_improved.py
-    python find_stop_before_target_7_rules_improved.py --csv csv/low_result_7_desc.csv
+기준 결과:
+    기존 안정형:
+        VALID matched=546, target=336, target_rate=61.54%, target_coverage=9.15%
+    적용 시나리오 coverage_keep_rate_loose:
+        VALID matched=644, target=403, target_rate=62.58%, target_coverage=10.97%
 
-생성 파일:
+목표:
+    - target_rate를 유지/소폭 개선
+    - target_coverage를 확대
+    - 너무 얇은 70%대 소표본 룰로 과최적화하지 않음
+
+사용:
+    python find_stop_before_target_7_rules_applied.py
+    python find_stop_before_target_7_rules_applied.py --csv csv/low_result_7_desc.csv
+
+생성:
     lowscan_stop_before_target_7_rules.py
-
-생성 파일 사용 예:
-    import numpy as np
-    import pandas as pd
-    import lowscan_stop_before_target_7_rules
-
-    df = pd.read_csv("csv/low_result_7_desc.csv", low_memory=False)
-    conditions = lowscan_stop_before_target_7_rules.build_conditions(df)
-
-    rule_mask = np.zeros(len(df), dtype=bool)
-    for cond in conditions.values():
-        rule_mask |= cond
-
-    matched = df[rule_mask].copy()
+    lowscan_stop_before_target_7_rule_report.csv
 """
 
 import argparse
@@ -39,9 +32,9 @@ import numpy as np
 import pandas as pd
 
 
-# -----------------------------------------------------------------------------
+# =============================================================================
 # 기본 설정
-# -----------------------------------------------------------------------------
+# =============================================================================
 
 CSV_PATH = "csv/low_result_7_desc.csv"
 OUT_PATH = Path("lowscan_stop_before_target_7_rules.py")
@@ -51,60 +44,76 @@ TARGET_COL = "stop_before_target_7"
 TARGET_VALUE = 1
 DATE_COL = "today"
 
-# 이전 결과에서 valid 구간의 base rate가 train과 꽤 달랐으므로 valid를 더 크게 잡는다.
 VALID_RATIO = 0.20
 
-# 룰 탐색 파라미터: 과적합 방지를 위해 기존보다 보수적으로 조정
+# 후보 탐색 파라미터: 기존 안정형 유지
 BEAM = 10000
 TOP_N = 3000
 MIN_CNT = 80
 MAX_DEPTH = 3
 
-# 룰 후보 기준
+# 후보 룰 기준: 기존 안정형 유지
 MIN_TARGET_RATE = 0.58
 MIN_LIFT = 1.25
 
-# valid 안정성 기준
+# valid 후보 통과 기준: 너무 빡세게 올리면 selected=0 위험
 VALID_MIN_RATE = 0.57
 VALID_MIN_CNT = 30
 MAX_RATE_GAP = 0.18
+VALID_MIN_LIFT = 1.10
 
-# 최종 greedy selection 기준
-MAX_RULES = 10
-MIN_ADDED_TOTAL = 20
-MIN_ADDED_TARGET = 10
-MIN_ADDED_VALID_TOTAL = 10
-MIN_ADDED_VALID_TARGET = 5
-
-# 리터럴 생성 설정
+# literal 생성 설정
 N_QUANTILES = 10
 MAX_UNIQUE_FOR_EQ = 8
 
-# 점수 가중치
-FALSE_POSITIVE_PENALTY = 0.70
-RATE_GAP_PENALTY_POWER = 2.0
+# stability 점수 가중치
 VALID_WEIGHT = 1.25
+RATE_GAP_PENALTY_POWER = 2.0
+
+# =============================================================================
+# 최종 적용 시나리오: coverage_keep_rate_loose
+# =============================================================================
+# 이번 결과에서 둘 다 개선된 시나리오:
+#   valid target_rate      61.54% -> 62.58%
+#   valid target_coverage  9.15%  -> 10.97%
+
+APPLIED_SCENARIO = {
+    "name": "coverage_keep_rate_loose_applied",
+    "max_rules": 12,
+
+    # 신규 추가분 최소 크기
+    "min_added_total": 15,
+    "min_added_target": 8,
+    "min_added_valid_total": 10,
+    "min_added_valid_target": 5,
+
+    # 신규 추가분 품질 기준
+    "min_train_added_rate": 0.57,
+    "min_valid_added_rate": 0.565,
+    "max_added_gap": 0.20,
+
+    # 누적 valid 성능 방어선
+    "min_next_valid_rate": 0.595,
+    "max_rate_drop": 0.012,
+
+    # coverage 우선이지만 rate가 무너지지 않도록 균형
+    "objective": "coverage",
+}
+
+# 너무 작은 최종 결과 방지용 경고 기준
+WARN_MIN_VALID_MATCHED = 300
+WARN_MIN_VALID_COVERAGE = 0.08
+WARN_MIN_VALID_RATE = 0.60
 
 
-# -----------------------------------------------------------------------------
-# 피쳐 / 데이터 유틸
-# -----------------------------------------------------------------------------
-
+# =============================================================================
+# 데이터 / 피쳐 유틸
+# =============================================================================
 
 def get_exclude_columns(df=None):
-    """
-    룰 조건 후보에서 제외할 컬럼.
-    TARGET_COL은 label이므로 반드시 제외.
-    validation_* / target_before_stop_* / stop_before_target_* 등 미래 결과성 컬럼은 전부 제외한다.
-    """
     exclude = {
-        # 식별자 / 메타
         "ticker", "stock_name", "today", "idx",
-
-        # stop / target / label
         "stop_loss", "stop_day", "target_pct", "target_class",
-
-        # 과거 실험용 / raw 후보
         "_close_pos_20d", "_tr_value_ratio", "_tr_value_ratio_5d",
         "_dist_to_high_20d", "_BB_perc", "_UltimateOsc", "_CCI14",
         "_ADX14", "_gap_pct", "_vol_ratio_15_60", "_RSI_rebound",
@@ -140,10 +149,6 @@ def get_features(df):
 
 
 def get_feature_groups():
-    """
-    한 룰 안에서 비슷한 성격의 피쳐가 과도하게 중복되는 것을 막기 위한 그룹 제한.
-    없는 피쳐는 그룹 제한을 적용하지 않는다.
-    """
     feature_groups = {
         "today_pct": "PRICE",
         "max_drop_7d": "DROP",
@@ -180,7 +185,7 @@ def get_feature_groups():
 
 def split_train_valid_by_date_ratio(df, valid_ratio=VALID_RATIO, date_col=DATE_COL):
     if date_col not in df.columns:
-        raise ValueError(f"{date_col} 컬럼이 없습니다. 날짜 기준 train/valid 분리가 필요합니다.")
+        raise ValueError(f"{date_col} 컬럼이 없습니다.")
 
     out = df.copy()
     out[date_col] = pd.to_datetime(out[date_col])
@@ -201,11 +206,6 @@ def split_train_valid_by_date_ratio(df, valid_ratio=VALID_RATIO, date_col=DATE_C
 
 
 def build_literals(df, features, min_count=MIN_CNT, n_quantiles=N_QUANTILES):
-    """
-    숫자형 피쳐로부터 단순 조건 literal을 만든다.
-    - unique 값이 적으면 == 조건
-    - 일반 연속형은 분위수 기준 <=, >= 조건
-    """
     literals = []
     literal_masks = []
 
@@ -254,6 +254,10 @@ def make_mask_from_conds(df, conds):
     mask = np.ones(len(df), dtype=bool)
 
     for feat, op, val in conds:
+        if feat not in df.columns:
+            mask &= False
+            continue
+
         s = pd.to_numeric(df[feat], errors="coerce")
         arr = s.to_numpy()
         notna = ~pd.isna(arr)
@@ -270,19 +274,20 @@ def make_mask_from_conds(df, conds):
     return mask
 
 
-# -----------------------------------------------------------------------------
+# =============================================================================
 # 룰 파일 출력
-# -----------------------------------------------------------------------------
-
+# =============================================================================
 
 def _cond_to_code(cond):
     feat, op, val = cond
+
     if op == "<=":
         return f'(pd.to_numeric(df[{feat!r}], errors="coerce") <= {val:.10g})'
     if op == ">=":
         return f'(pd.to_numeric(df[{feat!r}], errors="coerce") >= {val:.10g})'
     if op == "==":
         return f'(pd.to_numeric(df[{feat!r}], errors="coerce") == {val:.10g})'
+
     raise ValueError(f"지원하지 않는 op: {op}")
 
 
@@ -304,24 +309,25 @@ def write_rule_file(path, selected, header_comment=""):
             conds = rule["conds"]
             expr = " & ".join(_cond_to_code(c) for c in conds)
             lines.append(f"    conditions[{name!r}] = {expr}")
+
         lines.append("    return conditions")
 
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-# -----------------------------------------------------------------------------
+# =============================================================================
 # 평가 유틸
-# -----------------------------------------------------------------------------
-
+# =============================================================================
 
 def eval_mask(df, mask, label=""):
     y = (df[TARGET_COL] == TARGET_VALUE).to_numpy()
+
     matched_count = int(mask.sum())
     matched_target = int((mask & y).sum())
     total_target = int(y.sum())
 
     target_rate = matched_target / matched_count if matched_count else 0.0
-    coverage = matched_target / total_target if total_target else 0.0
+    target_coverage = matched_target / total_target if total_target else 0.0
 
     return {
         "label": label,
@@ -330,7 +336,7 @@ def eval_mask(df, mask, label=""):
         "matched_count": matched_count,
         "matched_target": matched_target,
         "target_rate": target_rate,
-        "target_coverage": coverage,
+        "target_coverage": target_coverage,
     }
 
 
@@ -346,8 +352,10 @@ def print_eval(row):
 
 def combined_mask(df, selected):
     mask = np.zeros(len(df), dtype=bool)
+
     for rule in selected:
         mask |= make_mask_from_conds(df, rule["conds"])
+
     return mask
 
 
@@ -355,10 +363,9 @@ def _rule_key_from_conds(conds):
     return tuple(sorted((c[0], c[1], round(float(c[2]), 6)) for c in conds))
 
 
-# -----------------------------------------------------------------------------
-# Train 후보 룰 탐색
-# -----------------------------------------------------------------------------
-
+# =============================================================================
+# 룰 탐색
+# =============================================================================
 
 def mine_target_rules(
         df,
@@ -372,10 +379,6 @@ def mine_target_rules(
         feature_groups=None,
         group_limits=None,
 ):
-    """
-    train 데이터에서 TARGET_COL == TARGET_VALUE 비율이 높은 conjunction rule을 탐색한다.
-    여기서는 후보를 넓게 만들되, MIN_CNT / MAX_DEPTH를 보수적으로 둬 과도한 조각화를 줄인다.
-    """
     beams = [(np.ones(len(df), dtype=bool), [])]
     good = {}
 
@@ -442,12 +445,7 @@ def mine_target_rules(
                 target_rate = target_cnt / cnt
                 lift = target_rate / base_rate if base_rate else 0.0
 
-                score = (
-                        (target_rate ** 2.0)
-                        * np.log1p(cnt)
-                        * max(lift, 0.01)
-                )
-
+                score = (target_rate ** 2.0) * np.log1p(cnt) * max(lift, 0.01)
                 new_conds = conds + [lit]
 
                 if target_rate >= min_rate:
@@ -489,9 +487,12 @@ def mine_target_rules(
 
         tail = new[-1]
         print(
-            "[TARGET] tail rate:", round(tail[4], 3),
-            "cnt:", tail[5],
-            "conds:", tail[3],
+            "[TARGET] tail rate:",
+            round(tail[4], 3),
+            "cnt:",
+            tail[5],
+            "conds:",
+            tail[3],
         )
 
         beams = [(m, conds) for _, _, m, conds, _, _ in new]
@@ -507,15 +508,11 @@ def mine_target_rules(
     return out
 
 
-# -----------------------------------------------------------------------------
-# Valid 안정성 평가 및 selection
-# -----------------------------------------------------------------------------
-
+# =============================================================================
+# Valid 평가
+# =============================================================================
 
 def attach_validation_metrics(train, valid, rules):
-    """
-    train 후보 룰에 valid 성능을 붙인다.
-    """
     train_base = float((train[TARGET_COL] == TARGET_VALUE).mean())
     valid_base = float((valid[TARGET_COL] == TARGET_VALUE).mean())
 
@@ -523,6 +520,7 @@ def attach_validation_metrics(train, valid, rules):
 
     for i, rule in enumerate(rules, start=1):
         conds = rule["conds"]
+
         train_mask = make_mask_from_conds(train, conds)
         valid_mask = make_mask_from_conds(valid, conds)
 
@@ -551,7 +549,7 @@ def attach_validation_metrics(train, valid, rules):
                 and train_rate >= MIN_TARGET_RATE
                 and valid_rate >= VALID_MIN_RATE
                 and train_lift >= MIN_LIFT
-                and valid_lift >= 1.10
+                and valid_lift >= VALID_MIN_LIFT
                 and rate_gap <= MAX_RATE_GAP
         )
 
@@ -564,7 +562,7 @@ def attach_validation_metrics(train, valid, rules):
             f"_v{va['matched_count']}"
         )
 
-        row = {
+        out.append({
             "name": name,
             "conds": conds,
             "train_mask": train_mask,
@@ -583,80 +581,120 @@ def attach_validation_metrics(train, valid, rules):
             "generalized_rate": generalized_rate,
             "stability_score": stability_score,
             "valid_pass": valid_pass,
-        }
-        out.append(row)
+        })
 
-    out.sort(key=lambda x: (-x["stability_score"], -x["generalized_rate"], -x["valid_count"]))
+    out.sort(
+        key=lambda x: (
+            -x["stability_score"],
+            -x["generalized_rate"],
+            -x["valid_count"],
+        )
+    )
+
     return out
 
 
-def select_rules_stable_greedy(candidates, max_rules=MAX_RULES, verbose=True):
-    """
-    valid를 통과한 후보 중에서 train/valid 양쪽의 신규 효과가 좋은 룰을 greedy하게 선택한다.
-    """
-    candidates = [c for c in candidates if c["valid_pass"]]
+# =============================================================================
+# 적용 시나리오 selection
+# =============================================================================
 
-    if not candidates:
+def select_rules_applied(candidates, y_train, y_valid, scenario=APPLIED_SCENARIO, verbose=True):
+    usable = [c for c in candidates if c["valid_pass"]]
+
+    if not usable:
         return []
 
-    n_train = len(candidates[0]["train_mask"])
-    n_valid = len(candidates[0]["valid_mask"])
+    n_train = len(usable[0]["train_mask"])
+    n_valid = len(usable[0]["valid_mask"])
 
     train_combined = np.zeros(n_train, dtype=bool)
     valid_combined = np.zeros(n_valid, dtype=bool)
+
     selected = []
+    selected_names = set()
 
     while True:
         best = None
 
-        for cand in candidates:
+        current_valid_target = int((valid_combined & y_valid).sum())
+        current_valid_total = int(valid_combined.sum())
+        current_valid_rate = (
+            current_valid_target / current_valid_total
+            if current_valid_total
+            else 0.0
+        )
+
+        for cand in usable:
+            if cand["name"] in selected_names:
+                continue
+
             train_new = cand["train_mask"] & ~train_combined
             valid_new = cand["valid_mask"] & ~valid_combined
 
             train_added_total = int(train_new.sum())
             valid_added_total = int(valid_new.sum())
 
-            if train_added_total < MIN_ADDED_TOTAL:
+            if train_added_total < scenario["min_added_total"]:
                 continue
-            if valid_added_total < MIN_ADDED_VALID_TOTAL:
+            if valid_added_total < scenario["min_added_valid_total"]:
                 continue
 
-            train_added_target = int((train_new & cand["y_train"]).sum())
-            valid_added_target = int((valid_new & cand["y_valid"]).sum())
+            train_added_target = int((train_new & y_train).sum())
+            valid_added_target = int((valid_new & y_valid).sum())
 
-            if train_added_target < MIN_ADDED_TARGET:
+            if train_added_target < scenario["min_added_target"]:
                 continue
-            if valid_added_target < MIN_ADDED_VALID_TARGET:
+            if valid_added_target < scenario["min_added_valid_target"]:
                 continue
 
             train_added_rate = train_added_target / train_added_total
             valid_added_rate = valid_added_target / valid_added_total
             added_gap = abs(train_added_rate - valid_added_rate)
 
-            if train_added_rate < MIN_TARGET_RATE:
+            if train_added_rate < scenario["min_train_added_rate"]:
                 continue
-            if valid_added_rate < VALID_MIN_RATE:
+            if valid_added_rate < scenario["min_valid_added_rate"]:
                 continue
-            if added_gap > MAX_RATE_GAP:
+            if added_gap > scenario["max_added_gap"]:
+                continue
+
+            next_valid_target = current_valid_target + valid_added_target
+            next_valid_total = current_valid_total + valid_added_total
+            next_valid_rate = next_valid_target / next_valid_total if next_valid_total else 0.0
+
+            if next_valid_rate < scenario["min_next_valid_rate"]:
+                continue
+            if selected and next_valid_rate < current_valid_rate - scenario["max_rate_drop"]:
                 continue
 
             train_false = train_added_total - train_added_target
             valid_false = valid_added_total - valid_added_target
 
-            efficiency = (
-                    train_added_target
-                    + VALID_WEIGHT * valid_added_target
-                    - FALSE_POSITIVE_PENALTY * train_false
-                    - FALSE_POSITIVE_PENALTY * VALID_WEIGHT * valid_false
+            coverage_gain = valid_added_target
+            rate_quality = valid_added_rate
+            stability = min(train_added_rate, valid_added_rate)
+            gap_quality = max(1.0 - added_gap, 0.01)
+
+            # coverage_keep_rate_loose 결과를 재현하는 점수식.
+            # coverage_gain에 큰 가중치를 주되, 낮은 precision 룰이 들어오지 않도록 rate_quality도 반영.
+            score = (
+                    coverage_gain * 2.0
+                    + valid_added_total * 0.15
+                    + rate_quality * 20.0
+                    + stability * 10.0
+                    - valid_false * 0.35
+                    - train_false * 0.10
+                    + cand["stability_score"] * 0.08
             )
+            score *= gap_quality ** 1.5
 
             key = (
-                efficiency,
-                min(train_added_rate, valid_added_rate),
+                score,
+                next_valid_rate,
+                valid_added_rate,
                 valid_added_target,
-                train_added_target,
+                -valid_false,
                 cand["stability_score"],
-                -added_gap,
             )
 
             if best is None or key > best["key"]:
@@ -670,15 +708,19 @@ def select_rules_stable_greedy(candidates, max_rules=MAX_RULES, verbose=True):
                     "valid_added_target": valid_added_target,
                     "valid_added_rate": valid_added_rate,
                     "added_gap": added_gap,
+                    "next_valid_rate": next_valid_rate,
                 }
 
         if best is None:
             break
 
         cand = best["cand"]
+
         train_combined |= cand["train_mask"]
         valid_combined |= cand["valid_mask"]
+
         selected.append(cand)
+        selected_names.add(cand["name"])
 
         if verbose:
             print(
@@ -687,18 +729,24 @@ def select_rules_stable_greedy(candidates, max_rules=MAX_RULES, verbose=True):
                 f"({best['train_added_rate'] * 100:.2f}%) "
                 f"valid_add={best['valid_added_target']}/{best['valid_added_total']} "
                 f"({best['valid_added_rate'] * 100:.2f}%) "
+                f"next_valid_rate={best['next_valid_rate'] * 100:.2f}% "
                 f"gap={best['added_gap']:.3f}"
             )
 
-        if max_rules is not None and len(selected) >= max_rules:
+        if len(selected) >= scenario["max_rules"]:
             break
 
     return selected
 
 
+# =============================================================================
+# 리포트
+# =============================================================================
+
 def make_report_df(candidates, selected):
     selected_names = {r["name"] for r in selected}
     rows = []
+
     for c in candidates:
         rows.append({
             "selected": c["name"] in selected_names,
@@ -708,22 +756,37 @@ def make_report_df(candidates, selected):
             "train_target": c["train_target"],
             "train_rate": c["train_rate"],
             "train_lift": c["train_lift"],
+            "train_coverage": c["train_coverage"],
             "valid_count": c["valid_count"],
             "valid_target": c["valid_target"],
             "valid_rate": c["valid_rate"],
             "valid_lift": c["valid_lift"],
+            "valid_coverage": c["valid_coverage"],
             "rate_gap": c["rate_gap"],
             "generalized_rate": c["generalized_rate"],
             "stability_score": c["stability_score"],
             "conds": repr(c["conds"]),
         })
+
     return pd.DataFrame(rows)
 
 
-# -----------------------------------------------------------------------------
-# 메인
-# -----------------------------------------------------------------------------
+def warn_if_needed(valid_eval):
+    warnings = []
+    if valid_eval["matched_count"] < WARN_MIN_VALID_MATCHED:
+        warnings.append(f"valid matched가 작습니다: {valid_eval['matched_count']} < {WARN_MIN_VALID_MATCHED}")
+    if valid_eval["target_rate"] < WARN_MIN_VALID_RATE:
+        warnings.append(f"valid target_rate가 낮습니다: {valid_eval['target_rate'] * 100:.2f}%")
+    if valid_eval["target_coverage"] < WARN_MIN_VALID_COVERAGE:
+        warnings.append(f"valid target_coverage가 낮습니다: {valid_eval['target_coverage'] * 100:.2f}%")
 
+    for w in warnings:
+        print(f"[WARN] {w}")
+
+
+# =============================================================================
+# 메인
+# =============================================================================
 
 def find_stop_before_target_7_rules(csv_path=CSV_PATH, out_path=OUT_PATH, report_path=REPORT_PATH):
     df = pd.read_csv(csv_path, low_memory=False)
@@ -743,6 +806,7 @@ def find_stop_before_target_7_rules(csv_path=CSV_PATH, out_path=OUT_PATH, report
     print(f"[DATA] split_date={pd.to_datetime(split_date).date()}")
     print(f"[DATA] train target rate={y_train.mean() * 100:.2f}%")
     print(f"[DATA] valid target rate={y_valid.mean() * 100:.2f}%")
+    print(f"[APPLIED_SCENARIO] {APPLIED_SCENARIO['name']}")
 
     features = get_features(train)
     print(f"[FEATURES] {len(features)} features")
@@ -769,14 +833,10 @@ def find_stop_before_target_7_rules(csv_path=CSV_PATH, out_path=OUT_PATH, report
     print(f"[RULES] mined={len(rules)}")
 
     candidates = attach_validation_metrics(train, valid, rules)
-    for c in candidates:
-        c["y_train"] = y_train
-        c["y_valid"] = y_valid
-
     passed = [c for c in candidates if c["valid_pass"]]
     print(f"[VALID FILTER] passed={len(passed)} / {len(candidates)}")
 
-    print("\n[TOP STABLE CANDIDATES]")
+    print("\n[TOP CANDIDATES]")
     preview_cols = [
         "valid_pass", "name", "train_count", "train_rate", "valid_count",
         "valid_rate", "rate_gap", "stability_score", "conds",
@@ -785,28 +845,36 @@ def find_stop_before_target_7_rules(csv_path=CSV_PATH, out_path=OUT_PATH, report
     if not preview_df.empty:
         print(preview_df[preview_cols].to_string(index=False))
 
-    selected = select_rules_stable_greedy(passed, max_rules=MAX_RULES, verbose=True)
+    selected = select_rules_applied(
+        candidates=candidates,
+        y_train=y_train,
+        y_valid=y_valid,
+        scenario=APPLIED_SCENARIO,
+        verbose=True,
+    )
+
     print(f"[SELECT] selected={len(selected)}")
 
     train_final_mask = combined_mask(train, selected)
     valid_final_mask = combined_mask(valid, selected)
 
     print("\n[COMBINED EVAL]")
-    print_eval(eval_mask(train, train_final_mask, "TRAIN"))
-    print_eval(eval_mask(valid, valid_final_mask, "VALID"))
+    train_eval = eval_mask(train, train_final_mask, "TRAIN")
+    valid_eval = eval_mask(valid, valid_final_mask, "VALID")
+    print_eval(train_eval)
+    print_eval(valid_eval)
+    warn_if_needed(valid_eval)
 
     report_df = make_report_df(candidates, selected)
     report_df.to_csv(report_path, index=False, encoding="utf-8-sig")
     print(f"[REPORT SAVED] {Path(report_path).resolve()}")
 
     header_comment = (
-        "# auto-generated: stable rules for stop_before_target_7 == 1\n"
+        "# auto-generated: applied coverage_keep_rate_loose rules for stop_before_target_7 == 1\n"
         f"# target: {TARGET_COL} == {TARGET_VALUE}\n"
         f"# split_date: {pd.to_datetime(split_date).date()}\n"
-        "# rules mined on train, filtered/scored on validation\n"
-        f"# constants: VALID_RATIO={VALID_RATIO}, MIN_CNT={MIN_CNT}, MAX_DEPTH={MAX_DEPTH}, "
-        f"MIN_TARGET_RATE={MIN_TARGET_RATE}, VALID_MIN_RATE={VALID_MIN_RATE}, "
-        f"VALID_MIN_CNT={VALID_MIN_CNT}, MAX_RATE_GAP={MAX_RATE_GAP}, MAX_RULES={MAX_RULES}\n"
+        f"# applied_scenario: {APPLIED_SCENARIO['name']}\n"
+        "# expected from previous run: valid target_rate around 62.58%, target_coverage around 10.97%\n"
         "# usage:\n"
         "#   import numpy as np\n"
         "#   import lowscan_stop_before_target_7_rules\n"
@@ -826,13 +894,18 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--csv", default=CSV_PATH, help="input csv path")
     parser.add_argument("--out", default=str(OUT_PATH), help="output python rule file path")
-    parser.add_argument("--report", default=str(REPORT_PATH), help="output csv report path")
+    parser.add_argument("--report", default=str(REPORT_PATH), help="output csv rule report path")
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    find_stop_before_target_7_rules(args.csv, Path(args.out), Path(args.report))
+
+    find_stop_before_target_7_rules(
+        csv_path=args.csv,
+        out_path=Path(args.out),
+        report_path=Path(args.report),
+    )
 
     try:
         import winsound
@@ -840,4 +913,3 @@ if __name__ == "__main__":
         winsound.Beep(1000, 500)
     except ImportError:
         pass
-
