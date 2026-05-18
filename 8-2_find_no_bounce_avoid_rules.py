@@ -47,25 +47,25 @@ import pandas as pd
 # =============================================================================
 # CONFIG: 여기 상수만 바꿔서 실험
 #
-# [CLASS0 SAFE COVERAGE PARETO VERSION]
+# [CLASS23 LOW-CORRELATION COVERAGE VERSION]
 # 목적:
-# - 기존 방식은 class0 후보를 만든 뒤 class23를 사후 패널티로만 처리해서,
-#   coverage를 올리면 class23도 같이 올라가고, class23를 낮추면 coverage가 막혔음.
-# - 이 버전은 여러 목적을 동시에 평가한다.
+# - 기존 pareto_sweep 결과는 class23_rate 16.67%까지 낮췄지만 coverage가 5.03%에서 멈췄음.
+# - 이유: 후보 생성 단계가 class0 고확률 후보 위주라서, 추가 coverage를 만들 수 있는
+#   "class23는 낮지만 class0_rate는 중간 이상"인 넓은 룰이 후보에서 부족했음.
 #
-# 핵심:
-# 1) 후보 룰 자체는 class0가 높거나 class23가 낮은 룰을 모두 후보로 둔다.
-# 2) 선택 단계에서 다음 4개 시나리오를 모두 실행한다.
-#    - precision_safe
-#    - class23_safe
-#    - balanced_safe_coverage
-#    - coverage_push_with_class23_cap
-# 3) 최종 결과를 시나리오별로 비교 출력한다.
+# 핵심 개선:
+# 1) 후보 생성 기준을 더 넓힘: MIN_CLASS0_RATE / MIN_LIFT / MIN_WILSON_LOW 완화
+# 2) valid pool에 low_class23_recovery_pool 추가
+# 3) scenario에 low_class23_coverage_recover 추가
+#    - 추가 룰의 class0_rate는 다소 낮아도 허용
+#    - 단 추가 class23_rate는 매우 낮아야 함
+#    - combined class0_rate가 무너지는 것은 방어
 #
-# 중요한 현실:
-# - 현재 로그 기준으로 class0_rate 상승 + coverage 상승 + class23_rate 하락을 동시에 만족하는
-#   추가 룰이 충분하지 않을 수 있음.
-# - 그 경우 이 코드는 억지로 나쁜 룰을 붙이지 않고, Pareto 후보를 보여준다.
+# 목표:
+# - valid_class0_rate      : 68% 이상 선호
+# - valid_class0_coverage  : 5.3~5.8% 이상 시도
+# - valid_class23_rate     : 16.5~18.5% 이하 유지
+# - valid_class3_rate      : 8~12% 이하 유지
 #
 # =============================================================================
 
@@ -83,21 +83,21 @@ N_QUANTILES = 18
 MIN_UNIQUE_VALUES = 8
 
 # Beam search
-BEAM = 9000
-TOP_N = 7000
-MIN_CNT = 40
+BEAM = 12000
+TOP_N = 12000
+MIN_CNT = 35
 MAX_DEPTH = 5
 
 # 최종 후보 룰: train 기준
-MIN_CLASS0_RATE = 0.54
-MIN_LIFT = 1.08
-MIN_WILSON_LOW = 0.40
+MIN_CLASS0_RATE = 0.46
+MIN_LIFT = 0.95
+MIN_WILSON_LOW = 0.300
 
 # validation 필터: 과최적화 제거용
 VALID_MIN_CNT = 10
-VALID_MIN_CLASS0_RATE = 0.48
-VALID_MIN_LIFT = 1.00
-VALID_MIN_WILSON_LOW = 0.28
+VALID_MIN_CLASS0_RATE = 0.38
+VALID_MIN_LIFT = 0.90
+VALID_MIN_WILSON_LOW = 0.22
 
 # 좋은 class 혼입 제한. 필요 없으면 1.0 으로 완화.
 MAX_VALID_CLASS1_RATE = 0.52
@@ -141,24 +141,35 @@ VALID_FILTER_TIERS = [
     {
         "name": "balanced_safe_pool",
         "min_cnt": 7,
-        "min_class0_rate": 0.52,
-        "min_lift": 1.02,
-        "min_wilson_low": 0.28,
+        "min_class0_rate": 0.50,
+        "min_lift": 1.00,
+        "min_wilson_low": 0.26,
         "max_class1_rate": 0.58,
         "max_class2_rate": 0.40,
         "max_class3_rate": 0.32,
         "max_class23_rate": 0.58,
     },
     {
+        "name": "low_class23_recovery_pool",
+        "min_cnt": 5,
+        "min_class0_rate": 0.36,
+        "min_lift": 0.85,
+        "min_wilson_low": 0.18,
+        "max_class1_rate": 0.70,
+        "max_class2_rate": 0.24,
+        "max_class3_rate": 0.18,
+        "max_class23_rate": 0.32,
+    },
+    {
         "name": "coverage_diagnostic_pool",
         "min_cnt": 5,
-        "min_class0_rate": 0.46,
-        "min_lift": 0.92,
-        "min_wilson_low": 0.22,
-        "max_class1_rate": 0.68,
-        "max_class2_rate": 0.48,
-        "max_class3_rate": 0.40,
-        "max_class23_rate": 0.68,
+        "min_class0_rate": 0.42,
+        "min_lift": 0.88,
+        "min_wilson_low": 0.18,
+        "max_class1_rate": 0.72,
+        "max_class2_rate": 0.50,
+        "max_class3_rate": 0.42,
+        "max_class23_rate": 0.70,
     },
 ]
 
@@ -703,6 +714,24 @@ def select_rules_with_validation(train: pd.DataFrame, valid: pd.DataFrame, rules
 
     scenarios = [
         {
+            "name": "low_class23_coverage_recover",
+            "target_coverage": 0.058,
+            "soft_coverage": 0.052,
+            "max_class23": 0.185,
+            "max_class3": 0.120,
+            "min_rate_pre": 0.66,
+            "min_rate_post": 0.67,
+            "min_added_rate": 0.34,
+            "min_added_rate_fill": 0.28,
+            "max_added_c23": 0.22,
+            "max_added_c23_fill": 0.18,
+            "coverage_w": 720.0,
+            "class0_w": 10.0,
+            "c23_penalty": 130.0,
+            "c3_penalty": 105.0,
+            "added_c23_penalty": 12.0,
+        },
+        {
             "name": "precision_safe",
             "target_coverage": 0.050,
             "soft_coverage": 0.048,
@@ -821,7 +850,7 @@ def select_rules_with_validation(train: pd.DataFrame, valid: pd.DataFrame, rules
 
                 if valid_added_rate < min_added:
                     continue
-                if train_added_rate < max(0.30, min_added - 0.06):
+                if train_added_rate < max(0.24, min_added - 0.10):
                     continue
                 if added_c23_rate > max_added_c23:
                     continue
@@ -856,6 +885,7 @@ def select_rules_with_validation(train: pd.DataFrame, valid: pd.DataFrame, rules
                         + valid_added_rate * (24.0 if stage == "primary" else 12.0)
                         + added_wilson * 8.0
                         + next_cov * scenario["coverage_w"]
+                        + (0.03 - min(next_c23_rate, 0.03)) * 250.0
                         + tr0 * 0.35
                         - false_add * (2.0 if stage == "primary" else 1.25)
                         - va23 * scenario["added_c23_penalty"]
