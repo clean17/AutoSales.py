@@ -66,7 +66,8 @@ VALIDATION_DAYS = 7
 STOP_LOSS = -6
 render_graph = 0
 
-TEST_OFFSET = 90      # 2026부터 테스트
+# TEST_OFFSET = 90      # 2026부터 테스트
+TEST_OFFSET = 0
 START_OFFSET = 7      # 1이면 어제 기준부터 검증 가능.. 7일 검증을 사용하려면 7사용
 END_OFFSET = 600      # 2024년 ~ 2025년 학습
 
@@ -87,8 +88,8 @@ def process_ticker(ticker, tickers_dict, i):
 
     df = safe_read_pickle(filepath)
 
-    if render_graph == 0:
-        df = df[:-TEST_OFFSET]  # 검증 데이터 분리 테스트
+    # if render_graph == 0:
+    #     df = df[:-TEST_OFFSET]  # 검증 데이터 분리 테스트
 
     # 데이터가 부족하면 패스
     if df is None or df.empty or len(df) < 70:
@@ -369,14 +370,13 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
         # 제거 후보
         # "ma5_recovery_rate_3d": ma5_recovery_rate_3d,          # _ma5_ma20_gap_chg_1d, dist_to_ma20 겹침 (AUC 0.525)
         # "ma5_chg_rate": ma5_chg_rate,                          # _ma5_ma20_gap_chg_1d 상관 0.930, 중복이므로 정리, 룰 조합에서 강함
-        # "MACD_hist_3d": MACD_hist_3d,                          # 기술적 모멘텀 신호로는 약함, AUC가 0.517, IV가 0.016으로 매우 약함
-        # "log_tr_value_ratio_5d": log_tr_value_ratio_5d,        # 약함, 다른 변동성계열 피쳐 설명이 더 좋음
+        "MACD_hist_3d": MACD_hist_3d,                          # 기술적 모멘텀 신호로는 약함, AUC가 0.517, IV가 0.016으로 매우 약함
 
         # 거래대금 지표
-        # "today_tr_val_eok": today_tr_val_eok,
+        "today_tr_val_eok": today_tr_val_eok,
         # "mean_prev5_eok": _mean_prev5_eok,
-        # "tr_val_rank_20d": tr_val_rank_20d,                    # 분리력 약함, 성공률 상승폭 작음
-        # "tr_value_ratio_5d": _tr_value_ratio_5d,               # 단일 AUC 0.528, IV 0.023으로 약함. vol5, vol_ratio_5_15가 있으면 우선순위 낮음
+        "tr_val_rank_20d": tr_val_rank_20d,                    # 분리력 약함, 성공률 상승폭 작음
+        "tr_value_ratio_5d": _tr_value_ratio_5d,               # 단일 AUC 0.528, IV 0.023으로 약함. vol5, vol_ratio_5_15가 있으면 우선순위 낮음
 
         # 이전 피쳐
         # "vol15": vol15,
