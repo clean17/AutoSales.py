@@ -1,110 +1,122 @@
 """
-생성한 csv 파일을 가지고 저점 조건을 찾는 스크립트
+stop_before_target_7 == 1 을 찾는 룰 생성 스크립트 - 개선 버전
 
-사용할 때는
+개선 포인트:
+1) train에서 과도하게 잘 맞는 작은 룰을 줄이기 위해 MIN_CNT / MAX_DEPTH를 보수적으로 조정
+2) train 후보 룰을 valid에서 먼저 안정성 필터링
+3) train_rate와 valid_rate 차이가 큰 룰 제거
+4) greedy selection도 train 성능만 보지 않고 valid 성능, rate gap, 신규 매칭 수를 같이 반영
+5) 최종 저장 전 train / valid combined 성능과 개별 룰 리포트 출력
 
-buy_conditions = lowscan_rules.build_conditions(df)
-avoid_conditions = lowscan_avoid_rules.build_conditions(df)
+사용 예:
+    python find_stop_before_target_7_rules_improved.py
+    python find_stop_before_target_7_rules_improved.py --csv csv/low_result_7_desc.csv
 
-buy_mask = np.zeros(len(df), dtype=bool)
-for cond in buy_conditions.values():
-    buy_mask |= cond
+생성 파일:
+    lowscan_stop_before_target_7_rules.py
 
-avoid_mask = np.zeros(len(df), dtype=bool)
-for cond in avoid_conditions.values():
-    avoid_mask |= cond
+생성 파일 사용 예:
+    import numpy as np
+    import pandas as pd
+    import lowscan_stop_before_target_7_rules
 
-final_buy_mask = buy_mask & ~avoid_mask
+    df = pd.read_csv("csv/low_result_7_desc.csv", low_memory=False)
+    conditions = lowscan_stop_before_target_7_rules.build_conditions(df)
+
+    rule_mask = np.zeros(len(df), dtype=bool)
+    for cond in conditions.values():
+        rule_mask |= cond
+
+    matched = df[rule_mask].copy()
 """
 
-import pandas as pd
-import numpy as np
-from pathlib import Path
+import argparse
 import heapq
 from itertools import count
+from pathlib import Path
 
-from utils import make_mask_from_conds, write_rule_file, split_train_valid_by_date_ratio, build_literals
+import numpy as np
+import pandas as pd
+
+
+# -----------------------------------------------------------------------------
+# 기본 설정
+# -----------------------------------------------------------------------------
 
 CSV_PATH = "csv/low_result_7_desc.csv"
-AVOID_OUT_PATH = Path("lowscan_avoid_rules.py")
+OUT_PATH = Path("lowscan_stop_before_target_7_rules.py")
+REPORT_PATH = Path("lowscan_stop_before_target_7_rule_report.csv")
+
+TARGET_COL = "stop_before_target_7"
+TARGET_VALUE = 1
+DATE_COL = "today"
+
+# 이전 결과에서 valid 구간의 base rate가 train과 꽤 달랐으므로 valid를 더 크게 잡는다.
+VALID_RATIO = 0.20
+
+# 룰 탐색 파라미터: 과적합 방지를 위해 기존보다 보수적으로 조정
+BEAM = 10000
+TOP_N = 3000
+MIN_CNT = 80
+MAX_DEPTH = 3
+
+# 룰 후보 기준
+MIN_TARGET_RATE = 0.58
+MIN_LIFT = 1.25
+
+# valid 안정성 기준
+VALID_MIN_RATE = 0.57
+VALID_MIN_CNT = 30
+MAX_RATE_GAP = 0.18
+
+# 최종 greedy selection 기준
+MAX_RULES = 10
+MIN_ADDED_TOTAL = 20
+MIN_ADDED_TARGET = 10
+MIN_ADDED_VALID_TOTAL = 10
+MIN_ADDED_VALID_TARGET = 5
+
+# 리터럴 생성 설정
+N_QUANTILES = 10
+MAX_UNIQUE_FOR_EQ = 8
+
+# 점수 가중치
+FALSE_POSITIVE_PENALTY = 0.70
+RATE_GAP_PENALTY_POWER = 2.0
+VALID_WEIGHT = 1.25
 
 
-AVOID_BEAM = 30000
-AVOID_TOP_N = 5000
-
-AVOID_MIN_CNT   = 30
-AVOID_MAX_DEPTH = 5
-
-VALID_MIN_RATE = 0.80
-VALID_MIN_CNT = 15
-VALID_RATIO = 0.10
-
-"""
-MIN_BAD_RATE = 0.50      # 룰에 걸린 종목 중 class_0이 최소 55% 이상이어야 저장
-MAX_PROTECT_RATE = 0.40  # 룰에 걸린 종목 중 class_2+3이 35% 이하여야 저장
-MAX_STRONG_RATE = 0.20   # 룰에 걸린 종목 중 class_3이 25% 이하여야 저장
-AVOID_EXPAND_BAD_RATIO   # 해당 룰에 걸린 종목 중 class0 비율이 최소 몇 % 이상이어야 다음 단계로 확장할지
-AVOID_EXPAND_MAX_STRONG_RATE # 해당 룰에 걸린 종목 중 class3 비율이 최대 몇 % 이하여야 다음 단계로 확장할지
-"""
-
-MIN_BAD_RATE = 0.60
-MAX_PROTECT_RATE = 0.25
-MAX_STRONG_RATE = 0.20
-
-AVOID_EXPAND_BAD_RATIO = [0.33, 0.45, 0.58, 0.68, 0.78]
-AVOID_EXPAND_MAX_STRONG_RATE = [0.50, 0.40, 0.30, 0.20, 0.12]
-AVOID_EXPAND_MAX_PROTECT_RATE = [0.65, 0.55, 0.42, 0.32, 0.22]
-
-CLASS_2_SCORE = 2.0
-CLASS_3_SCORE = 2.5
-CLASS_3_LOSS_LIMIT = 0.013
-
-
-
-
-
-
+# -----------------------------------------------------------------------------
+# 피쳐 / 데이터 유틸
+# -----------------------------------------------------------------------------
 
 
 def get_exclude_columns(df=None):
     """
-    제외할 피쳐 Set
-
-    df를 넘기면 패턴 기반으로 실제 존재하는 컬럼까지 자동 제외.
-    df를 안 넘겨도 기본 제외 컬럼 set 반환.
+    룰 조건 후보에서 제외할 컬럼.
+    TARGET_COL은 label이므로 반드시 제외.
+    validation_* / target_before_stop_* / stop_before_target_* 등 미래 결과성 컬럼은 전부 제외한다.
     """
     exclude = {
         # 식별자 / 메타
         "ticker", "stock_name", "today", "idx",
 
         # stop / target / label
-        "stop_loss",
-        "stop_day",
-        "target_pct",
-        "target_class",
+        "stop_loss", "stop_day", "target_pct", "target_class",
 
         # 과거 실험용 / raw 후보
-        "_close_pos_20d",
-        "_tr_value_ratio",
-        "_tr_value_ratio_5d",
-        "_dist_to_high_20d",
-        "_BB_perc",
-        "_UltimateOsc",
-        "_CCI14",
-        "_ADX14",
-        "_gap_pct",
-        "_vol_ratio_15_60",
-        "_RSI_rebound",
-        "_rebound_power",
-        "_MACD_hist_1d",
-        "_MACD_acc",
+        "_close_pos_20d", "_tr_value_ratio", "_tr_value_ratio_5d",
+        "_dist_to_high_20d", "_BB_perc", "_UltimateOsc", "_CCI14",
+        "_ADX14", "_gap_pct", "_vol_ratio_15_60", "_RSI_rebound",
+        "_rebound_power", "_MACD_hist_1d", "_MACD_acc",
         "_MACD_hist_3d_close_norm",
     }
 
     if df is not None:
         for c in df.columns:
             if (
-                    c.startswith("validation_")
+                    c == TARGET_COL
+                    or c.startswith("validation_")
                     or c.startswith("day_to_")
                     or c.startswith("target_before_stop_")
                     or c.startswith("stop_before_target_")
@@ -121,35 +133,34 @@ def get_exclude_columns(df=None):
 
 def get_features(df):
     exclude = get_exclude_columns(df)
-    return [c for c in df.columns if c not in exclude]
+    return [
+        c for c in df.columns
+        if c not in exclude and pd.api.types.is_numeric_dtype(df[c])
+    ]
 
 
 def get_feature_groups():
+    """
+    한 룰 안에서 비슷한 성격의 피쳐가 과도하게 중복되는 것을 막기 위한 그룹 제한.
+    없는 피쳐는 그룹 제한을 적용하지 않는다.
+    """
     feature_groups = {
         "today_pct": "PRICE",
-
         "max_drop_7d": "DROP",
-
         "dist_from_low_20d": "POSITION",
-        "three_m_cur_max_chg_rate": "POSITION",  #
-        "dist_to_ma5": "POSITION",  #
-        "dist_to_ma20": "POSITION",  #
-
-        "pct_vs_lastweek": "WEEK_POSITION",  #
-
+        "three_m_cur_max_chg_rate": "POSITION",
+        "dist_to_ma5": "POSITION",
+        "dist_to_ma20": "POSITION",
+        "pct_vs_lastweek": "WEEK_POSITION",
         "ma5_ma20_gap_chg_1d": "TREND",
-
-        "gap_pct": "GAP",  #
-
+        "gap_pct": "GAP",
         "today_tr_val_eok": "VOLUME",
         "tr_val_rank_20d": "VOLUME",
-        "tr_value_ratio_5d": "VOLUME",  #
-
+        "tr_value_ratio_5d": "VOLUME",
         "MACD_hist_3d": "MACD",
-
-        "vol5": "VOLATILITY",  #
+        "vol5": "VOLATILITY",
         "ATR_pct": "VOLATILITY",
-        "vol_ratio_5_15": "VOLATILITY",  #
+        "vol_ratio_5_15": "VOLATILITY",
     }
 
     group_limits = {
@@ -167,37 +178,221 @@ def get_feature_groups():
     return feature_groups, group_limits
 
 
-def mine_avoid_rules(
+def split_train_valid_by_date_ratio(df, valid_ratio=VALID_RATIO, date_col=DATE_COL):
+    if date_col not in df.columns:
+        raise ValueError(f"{date_col} 컬럼이 없습니다. 날짜 기준 train/valid 분리가 필요합니다.")
+
+    out = df.copy()
+    out[date_col] = pd.to_datetime(out[date_col])
+    out = out.sort_values(date_col).reset_index(drop=True)
+
+    unique_dates = np.array(sorted(out[date_col].dropna().unique()))
+    if len(unique_dates) < 2:
+        raise ValueError("날짜 종류가 너무 적어서 train/valid 분리를 할 수 없습니다.")
+
+    split_idx = int(len(unique_dates) * (1 - valid_ratio))
+    split_idx = min(max(split_idx, 1), len(unique_dates) - 1)
+    split_date = unique_dates[split_idx]
+
+    train = out[out[date_col] < split_date].reset_index(drop=True)
+    valid = out[out[date_col] >= split_date].reset_index(drop=True)
+
+    return train, valid, split_date
+
+
+def build_literals(df, features, min_count=MIN_CNT, n_quantiles=N_QUANTILES):
+    """
+    숫자형 피쳐로부터 단순 조건 literal을 만든다.
+    - unique 값이 적으면 == 조건
+    - 일반 연속형은 분위수 기준 <=, >= 조건
+    """
+    literals = []
+    literal_masks = []
+
+    for feat in features:
+        s = pd.to_numeric(df[feat], errors="coerce")
+        arr = s.to_numpy()
+        notna = ~pd.isna(arr)
+
+        if not notna.any():
+            continue
+
+        uniq = np.sort(pd.unique(s.dropna()))
+        uniq = uniq[np.isfinite(uniq)]
+
+        if len(uniq) == 0:
+            continue
+
+        if len(uniq) <= MAX_UNIQUE_FOR_EQ:
+            for v in uniq:
+                mask = notna & (arr == v)
+                if int(mask.sum()) >= min_count:
+                    literals.append((feat, "==", float(v)))
+                    literal_masks.append(mask)
+            continue
+
+        qs = np.linspace(0.10, 0.90, n_quantiles - 1)
+        thresholds = np.unique(np.nanquantile(arr, qs))
+        thresholds = thresholds[np.isfinite(thresholds)]
+
+        for t in thresholds:
+            le_mask = notna & (arr <= t)
+            ge_mask = notna & (arr >= t)
+
+            if int(le_mask.sum()) >= min_count:
+                literals.append((feat, "<=", float(t)))
+                literal_masks.append(le_mask)
+
+            if int(ge_mask.sum()) >= min_count:
+                literals.append((feat, ">=", float(t)))
+                literal_masks.append(ge_mask)
+
+    return literals, literal_masks
+
+
+def make_mask_from_conds(df, conds):
+    mask = np.ones(len(df), dtype=bool)
+
+    for feat, op, val in conds:
+        s = pd.to_numeric(df[feat], errors="coerce")
+        arr = s.to_numpy()
+        notna = ~pd.isna(arr)
+
+        if op == "<=":
+            mask &= notna & (arr <= val)
+        elif op == ">=":
+            mask &= notna & (arr >= val)
+        elif op == "==":
+            mask &= notna & (arr == val)
+        else:
+            raise ValueError(f"지원하지 않는 op: {op}")
+
+    return mask
+
+
+# -----------------------------------------------------------------------------
+# 룰 파일 출력
+# -----------------------------------------------------------------------------
+
+
+def _cond_to_code(cond):
+    feat, op, val = cond
+    if op == "<=":
+        return f'(pd.to_numeric(df[{feat!r}], errors="coerce") <= {val:.10g})'
+    if op == ">=":
+        return f'(pd.to_numeric(df[{feat!r}], errors="coerce") >= {val:.10g})'
+    if op == "==":
+        return f'(pd.to_numeric(df[{feat!r}], errors="coerce") == {val:.10g})'
+    raise ValueError(f"지원하지 않는 op: {op}")
+
+
+def write_rule_file(path, selected, header_comment=""):
+    lines = []
+    lines.append(header_comment.rstrip())
+    lines.append("")
+    lines.append("import pandas as pd")
+    lines.append("")
+    lines.append("")
+    lines.append("def build_conditions(df):")
+    lines.append("    conditions = {}")
+
+    if not selected:
+        lines.append("    return conditions")
+    else:
+        for rule in selected:
+            name = rule["name"]
+            conds = rule["conds"]
+            expr = " & ".join(_cond_to_code(c) for c in conds)
+            lines.append(f"    conditions[{name!r}] = {expr}")
+        lines.append("    return conditions")
+
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+# -----------------------------------------------------------------------------
+# 평가 유틸
+# -----------------------------------------------------------------------------
+
+
+def eval_mask(df, mask, label=""):
+    y = (df[TARGET_COL] == TARGET_VALUE).to_numpy()
+    matched_count = int(mask.sum())
+    matched_target = int((mask & y).sum())
+    total_target = int(y.sum())
+
+    target_rate = matched_target / matched_count if matched_count else 0.0
+    coverage = matched_target / total_target if total_target else 0.0
+
+    return {
+        "label": label,
+        "total_count": int(len(df)),
+        "total_target": total_target,
+        "matched_count": matched_count,
+        "matched_target": matched_target,
+        "target_rate": target_rate,
+        "target_coverage": coverage,
+    }
+
+
+def print_eval(row):
+    print(
+        f"[{row['label']}] "
+        f"matched={row['matched_count']}/{row['total_count']} "
+        f"target={row['matched_target']}/{row['total_target']} "
+        f"target_rate={row['target_rate'] * 100:.2f}% "
+        f"target_coverage={row['target_coverage'] * 100:.2f}%"
+    )
+
+
+def combined_mask(df, selected):
+    mask = np.zeros(len(df), dtype=bool)
+    for rule in selected:
+        mask |= make_mask_from_conds(df, rule["conds"])
+    return mask
+
+
+def _rule_key_from_conds(conds):
+    return tuple(sorted((c[0], c[1], round(float(c[2]), 6)) for c in conds))
+
+
+# -----------------------------------------------------------------------------
+# Train 후보 룰 탐색
+# -----------------------------------------------------------------------------
+
+
+def mine_target_rules(
         df,
         literals,
         literal_masks,
-        bad,
-        protect,
-        strong,
-        min_count=25,
-        max_depth=4,
-        beam=30000,
-        top_n=1000,
+        y,
+        min_count=MIN_CNT,
+        max_depth=MAX_DEPTH,
+        beam=BEAM,
+        top_n=TOP_N,
         feature_groups=None,
         group_limits=None,
 ):
+    """
+    train 데이터에서 TARGET_COL == TARGET_VALUE 비율이 높은 conjunction rule을 탐색한다.
+    여기서는 후보를 넓게 만들되, MIN_CNT / MAX_DEPTH를 보수적으로 둬 과도한 조각화를 줄인다.
+    """
     beams = [(np.ones(len(df), dtype=bool), [])]
     good = {}
 
+    base_rate = float(y.mean()) if len(y) else 0.0
+    min_rate = max(MIN_TARGET_RATE, base_rate * MIN_LIFT)
+
     print(
-        "\nbeam", beam,
-        "\ntop_n", top_n,
-        "\nmin_count", min_count,
-        "\nmax_depth", max_depth,
-        "\nexpand_bad_ratio", AVOID_EXPAND_BAD_RATIO,
-        "\navoid_expand_max_protect_rate", AVOID_EXPAND_MAX_PROTECT_RATE,
-        "\nexpand_max_strong_rate", AVOID_EXPAND_MAX_STRONG_RATE,
-        "\nmin_bad_rate", MIN_BAD_RATE,
-        "\nmax_protect_rate", MAX_PROTECT_RATE,
-        "\nmax_strong_rate", MAX_STRONG_RATE,
-        "\nclass_3_loss_limit", CLASS_3_LOSS_LIMIT,
-        "\nclass_2_score", CLASS_2_SCORE,
-        "\nclass_3_score", CLASS_3_SCORE,
+        "\n[TARGET RULE MINING]"
+        f"\ntarget: {TARGET_COL} == {TARGET_VALUE}"
+        f"\nbase_rate: {base_rate:.4f}"
+        f"\nbeam: {beam}"
+        f"\ntop_n: {top_n}"
+        f"\nmin_count: {min_count}"
+        f"\nmax_depth: {max_depth}"
+        f"\nmin_target_rate: {MIN_TARGET_RATE}"
+        f"\nmin_lift: {MIN_LIFT}"
+        f"\neffective_min_rate: {min_rate:.4f}"
         "\n"
     )
 
@@ -211,7 +406,7 @@ def mine_avoid_rules(
 
     for depth in range(max_depth):
         print("----------------------------------")
-        print("[AVOID] depth", depth)
+        print("[TARGET] depth", depth + 1)
 
         heap = []
         uid = count()
@@ -243,52 +438,40 @@ def mine_avoid_rules(
                 if cnt < min_count:
                     continue
 
-                bad_cnt = int((m & bad).sum())
-                protect_cnt = int((m & protect).sum())
-                strong_cnt = int((m & strong).sum())
-
-                bad_rate = bad_cnt / cnt
-                protect_rate = protect_cnt / cnt
-                strong_rate = strong_cnt / cnt
+                target_cnt = int((m & y).sum())
+                target_rate = target_cnt / cnt
+                lift = target_rate / base_rate if base_rate else 0.0
 
                 score = (
-                        (bad_rate ** 2.5)
+                        (target_rate ** 2.0)
                         * np.log1p(cnt)
-                        * ((1 - protect_rate) ** 1.5)
-                        * ((1 - strong_rate) ** 2.0)
+                        * max(lift, 0.01)
                 )
 
-                if (
-                        bad_rate >= MIN_BAD_RATE
-                        and protect_rate <= MAX_PROTECT_RATE
-                        and strong_rate <= MAX_STRONG_RATE
-                ):
-                    key2 = tuple(sorted(
-                        (c[0], c[1], round(float(c[2]), 6))
-                        for c in (conds + [lit])
-                    ))
+                new_conds = conds + [lit]
 
+                if target_rate >= min_rate:
+                    key2 = _rule_key_from_conds(new_conds)
                     prev = good.get(key2)
-                    if prev is None or score > prev[8]:
-                        good[key2] = (
-                            cnt,
-                            bad_cnt,
-                            bad_rate,
-                            protect_cnt,
-                            protect_rate,
-                            strong_cnt,
-                            strong_rate,
-                            conds + [lit],
-                            score,
-                        )
+                    if prev is None or score > prev["train_score"]:
+                        good[key2] = {
+                            "train_count": cnt,
+                            "train_target": target_cnt,
+                            "train_rate": target_rate,
+                            "train_lift": lift,
+                            "conds": new_conds,
+                            "train_score": score,
+                        }
 
-                if (
-                        bad_rate >= AVOID_EXPAND_BAD_RATIO[depth]
-                        and protect_rate <= AVOID_EXPAND_MAX_PROTECT_RATE[depth]
-                        and strong_rate <= AVOID_EXPAND_MAX_STRONG_RATE[depth]
-                ):
-                    k = (score, bad_rate, -strong_rate, -protect_rate, cnt)
-                    item = (k, next(uid), m, conds + [lit], bad_rate, cnt)
+                expand_min_rate = max(
+                    base_rate * (1.08 + depth * 0.08),
+                    base_rate + 0.04 + depth * 0.04,
+                    )
+                expand_min_rate = min(expand_min_rate, min_rate)
+
+                if target_rate >= expand_min_rate:
+                    k = (score, target_rate, target_cnt, cnt)
+                    item = (k, next(uid), m, new_conds, target_rate, cnt)
 
                     if len(heap) < beam:
                         heapq.heappush(heap, item)
@@ -298,22 +481,25 @@ def mine_avoid_rules(
                         heapq.heapreplace(heap, item)
 
         new = sorted(heap, key=lambda x: x[0], reverse=True)
-        print("[AVOID] new", len(new))
+        print("[TARGET] expandable candidates:", len(new))
 
         if not new:
-            print("[AVOID] no expandable candidates; stopping.")
+            print("[TARGET] no expandable candidates; stopping.")
             break
 
         tail = new[-1]
-        print("[AVOID] tail bad_rate:", round(tail[4], 3), "cnt:", tail[5], "conds:", tail[3])
+        print(
+            "[TARGET] tail rate:", round(tail[4], 3),
+            "cnt:", tail[5],
+            "conds:", tail[3],
+        )
 
         beams = [(m, conds) for _, _, m, conds, _, _ in new]
 
-    def out_key(x):
-        cnt, bad_cnt, bad_rate, protect_cnt, protect_rate, strong_cnt, strong_rate, conds, score = x
-        return (-score, -bad_rate, strong_rate, protect_rate, -cnt)
-
-    out = sorted(good.values(), key=out_key)
+    out = sorted(
+        good.values(),
+        key=lambda x: (-x["train_score"], -x["train_rate"], -x["train_count"]),
+    )
 
     if top_n is not None:
         out = out[:top_n]
@@ -321,340 +507,337 @@ def mine_avoid_rules(
     return out
 
 
-
-def test_avoid_condition(name, cond, df, min_count=25, verbose=False):
-    sub = df[cond]
-
-    if len(sub) == 0:
-        return False
-
-    cnt = len(sub)
-
-    class0_cnt = int((sub["target_class"] == 0).sum())
-    class2_cnt = int((sub["target_class"] == 2).sum())
-    class3_cnt = int((sub["target_class"] == 3).sum())
-
-    class0_rate = class0_cnt / cnt
-    protect_rate = (class2_cnt + class3_cnt) / cnt
-    class3_rate = class3_cnt / cnt
-
-    # 전체 class별 총량 대비 얼마나 제거했는지도 중요
-    total_class0 = int((df["target_class"] == 0).sum())
-    total_class2 = int((df["target_class"] == 2).sum())
-    total_class3 = int((df["target_class"] == 3).sum())
-
-    class0_remove_rate = class0_cnt / total_class0 if total_class0 else 0
-    class2_loss_rate = class2_cnt / total_class2 if total_class2 else 0
-    class3_loss_rate = class3_cnt / total_class3 if total_class3 else 0
-
-    # 핵심: class_0은 많이 제거하고 class_2/3은 적게 잃는 룰
-    score = (
-            class0_remove_rate
-            - class2_loss_rate
-            - class3_loss_rate * 1.5
-    )
-
-    if cnt < min_count:
-        return False
-
-    # 룰 subset 내부가 class_0 위주여야 함
-    if class0_rate < MIN_BAD_RATE:
-        return False
-
-    # 좋은 종목이 너무 많이 섞이면 제외 룰로 부적합
-    if protect_rate > MAX_PROTECT_RATE:
-        return False
-
-    # class_3 손실은 특히 제한
-    if class3_rate > MAX_STRONG_RATE:
-        return False
-
-    # 전체 기준으로도 의미 있는 제거 성능이 있어야 함
-    if score <= 0:
-        return False
-
-    if verbose:
-        print(f"\n=== {name} ===")
-        print(f"선택된 행 수: {cnt}")
-        print(f"class_0 비율: {class0_rate:.3f}")
-        print(f"class_2+3 비율: {protect_rate:.3f}")
-        print(f"class_0 제거율: {class0_remove_rate:.3f}")
-        print(f"class_2 손실률: {class2_loss_rate:.3f}")
-        print(f"class_3 손실률: {class3_loss_rate:.3f}")
-        print(f"score: {score:.3f}")
-
-    return True
+# -----------------------------------------------------------------------------
+# Valid 안정성 평가 및 selection
+# -----------------------------------------------------------------------------
 
 
+def attach_validation_metrics(train, valid, rules):
+    """
+    train 후보 룰에 valid 성능을 붙인다.
+    """
+    train_base = float((train[TARGET_COL] == TARGET_VALUE).mean())
+    valid_base = float((valid[TARGET_COL] == TARGET_VALUE).mean())
 
-def save_combined_avoid_eval(df, selected):
-    avoid_mask = np.zeros(len(df), dtype=bool)
+    out = []
 
-    for name, conds in selected:
-        avoid_mask |= make_mask_from_conds(df, conds)
+    for i, rule in enumerate(rules, start=1):
+        conds = rule["conds"]
+        train_mask = make_mask_from_conds(train, conds)
+        valid_mask = make_mask_from_conds(valid, conds)
 
-    removed = df[avoid_mask]
-    remain = df[~avoid_mask]
+        tr = eval_mask(train, train_mask, "train")
+        va = eval_mask(valid, valid_mask, "valid")
 
-    total0 = (df["target_class"] == 0).sum()
-    total1 = (df["target_class"] == 1).sum()
-    total2 = (df["target_class"] == 2).sum()
-    total3 = (df["target_class"] == 3).sum()
+        train_rate = tr["target_rate"]
+        valid_rate = va["target_rate"]
+        rate_gap = abs(train_rate - valid_rate)
+        generalized_rate = min(train_rate, valid_rate)
+        valid_lift = valid_rate / valid_base if valid_base else 0.0
+        train_lift = train_rate / train_base if train_base else 0.0
 
-    c0 = (removed["target_class"] == 0).sum()
-    c1 = (removed["target_class"] == 1).sum()
-    c2 = (removed["target_class"] == 2).sum()
-    c3 = (removed["target_class"] == 3).sum()
-
-    summary = pd.DataFrame([{
-        "total_count": len(df),
-        "removed_count": len(removed),
-        "remain_count": len(remain),
-        "removed_rate": round(len(removed) / len(df) * 100, 1),
-
-        "removed_class0": int(c0),
-        "removed_class1": int(c1),
-        "removed_class2": int(c2),
-        "removed_class3": int(c3),
-
-        "class0_remove_rate": round(c0 / total0 * 100, 1) if total0 else 0,
-        "class1_remove_rate": round(c1 / total1 * 100, 1) if total1 else 0,
-        "class2_loss_rate": round(c2 / total2 * 100, 1) if total2 else 0,
-        "class3_loss_rate": round(c3 / total3 * 100, 1) if total3 else 0,
-
-        "removed_class0_rate": round((removed["target_class"] == 0).mean() * 100, 1),
-        "removed_class1_rate": round((removed["target_class"] == 1).mean() * 100, 1),
-        "removed_class2_rate": round((removed["target_class"] == 2).mean() * 100, 1),
-        "removed_class3_rate": round((removed["target_class"] == 3).mean() * 100, 1),
-
-        "remain_class0_rate": round((remain["target_class"] == 0).mean() * 100, 1),
-        "remain_class1_rate": round((remain["target_class"] == 1).mean() * 100, 1),
-        "remain_class2_rate": round((remain["target_class"] == 2).mean() * 100, 1),
-        "remain_class3_rate": round((remain["target_class"] == 3).mean() * 100, 1),
-    }])
-
-    print(summary.T)
-
-
-def find_avoid_rule():
-    df = pd.read_csv(CSV_PATH, low_memory=False)
-
-    if "target_class" not in df.columns:
-        raise ValueError("target_class 컬럼이 없습니다. 데이터 생성 시 target_class를 먼저 저장하세요.")
-
-    train, valid, split_date = split_train_valid_by_date_ratio(df, valid_ratio=VALID_RATIO)
-
-    features = get_features(train)
-    literals, literal_masks = build_literals(train, features)
-
-    feature_groups, group_limits = get_feature_groups()
-
-    train_bad = train["target_class"].to_numpy() == 0
-    train_protect = train["target_class"].to_numpy() >= 2
-    train_strong = train["target_class"].to_numpy() == 3
-
-    rules = mine_avoid_rules(
-        df=train,
-        literals=literals,
-        literal_masks=literal_masks,
-        bad=train_bad,
-        protect=train_protect,
-        strong=train_strong,
-        min_count=AVOID_MIN_CNT,
-        max_depth=AVOID_MAX_DEPTH,
-        beam=AVOID_BEAM,
-        top_n=AVOID_TOP_N,
-        feature_groups=feature_groups,
-        group_limits=group_limits,
-    )
-
-    selected, train_avoid_mask = select_avoid_rules_max_class0_under_class3_limit(
-        df=train,
-        rules=rules,
-        class3_loss_limit=CLASS_3_LOSS_LIMIT,
-        min_count=AVOID_MIN_CNT,
-        max_rules=None,
-        verbose=True,
-    )
-
-    print(f"[AVOID] 통과 룰 개수: {len(selected)} / {len(rules)}")
-
-    write_rule_file(
-        AVOID_OUT_PATH,
-        selected,
-        header_comment=(
-            "# auto-generated: lowscan avoid rules for class_0\n"
-            f"# split_date: {pd.to_datetime(split_date).date()}\n"
-            "# generated on train only\n"
-            "# usage:\n"
-            "#   import lowscan_avoid_rules\n"
-            "#    \n"
-            "#   avoid_conditions = lowscan_avoid_rules.build_conditions(df)\n"
-            "#   avoid_mask = np.zeros(len(df), dtype=bool)\n"
-            "#   for cond in avoid_conditions.values():\n"
-            "#       avoid_mask |= cond\n"
-            "#    \n"
-            "#   df = df[~avoid_mask].copy()\n"
+        stability_score = (
+                generalized_rate
+                * np.log1p(tr["matched_count"])
+                * np.log1p(va["matched_count"])
+                * max(train_lift, 0.01)
+                * max(valid_lift, 0.01) ** VALID_WEIGHT
+                * max(1.0 - rate_gap, 0.01) ** RATE_GAP_PENALTY_POWER
         )
-    )
 
-    print("[TRAIN]")
-    save_combined_avoid_eval(train, selected)
-
-    print("[VALID]")
-    save_combined_avoid_eval(valid, selected)
-
-
-def select_avoid_rules_max_class0_under_class3_limit(
-        df,
-        rules,
-        class3_loss_limit=0.025,
-        min_count=40,
-        max_rules=None,
-        verbose=True,
-):
-    total_class3 = int((df["target_class"] == 3).sum())
-    class3_limit_count = int(total_class3 * class3_loss_limit)
-
-    avoid_mask = np.zeros(len(df), dtype=bool)
-    selected = []
-
-    used_class3 = 0
-
-    # 후보 룰을 먼저 만들어둠
-    candidates = []
-
-    for i, (
-            cnt,
-            bad_cnt,
-            bad_rate,
-            protect_cnt,
-            protect_rate,
-            strong_cnt,
-            strong_rate,
-            conds,
-            score,
-    ) in enumerate(rules, start=1):
+        valid_pass = (
+                tr["matched_count"] >= MIN_CNT
+                and va["matched_count"] >= VALID_MIN_CNT
+                and train_rate >= MIN_TARGET_RATE
+                and valid_rate >= VALID_MIN_RATE
+                and train_lift >= MIN_LIFT
+                and valid_lift >= 1.10
+                and rate_gap <= MAX_RATE_GAP
+        )
 
         name = (
-            f"avoid_{i:03d}"
-            f"_s{score:.2f}"
-            f"_n{cnt}"
-            f"_bad{bad_rate:.3f}"
-            f"_p{protect_rate:.3f}"
-            f"_strong{strong_rate:.3f}"
+            f"rule_{i:03d}"
+            f"_st{stability_score:.2f}"
+            f"_tr{train_rate:.3f}"
+            f"_va{valid_rate:.3f}"
+            f"_n{tr['matched_count']}"
+            f"_v{va['matched_count']}"
         )
 
-        rule_mask = make_mask_from_conds(df, conds)
-
-        if not test_avoid_condition(name, rule_mask, df, min_count=min_count, verbose=False):
-            continue
-
-        candidates.append({
+        row = {
             "name": name,
             "conds": conds,
-            "rule_mask": rule_mask,
-            "score": score,
-            "bad_rate": bad_rate,
-            "protect_rate": protect_rate,
-            "strong_rate": strong_rate,
-        })
+            "train_mask": train_mask,
+            "valid_mask": valid_mask,
+            "train_count": tr["matched_count"],
+            "train_target": tr["matched_target"],
+            "train_rate": train_rate,
+            "train_lift": train_lift,
+            "train_coverage": tr["target_coverage"],
+            "valid_count": va["matched_count"],
+            "valid_target": va["matched_target"],
+            "valid_rate": valid_rate,
+            "valid_lift": valid_lift,
+            "valid_coverage": va["target_coverage"],
+            "rate_gap": rate_gap,
+            "generalized_rate": generalized_rate,
+            "stability_score": stability_score,
+            "valid_pass": valid_pass,
+        }
+        out.append(row)
 
-    # 매번 "현재 avoid_mask 기준으로" 추가 효율이 가장 좋은 룰을 고름
+    out.sort(key=lambda x: (-x["stability_score"], -x["generalized_rate"], -x["valid_count"]))
+    return out
+
+
+def select_rules_stable_greedy(candidates, max_rules=MAX_RULES, verbose=True):
+    """
+    valid를 통과한 후보 중에서 train/valid 양쪽의 신규 효과가 좋은 룰을 greedy하게 선택한다.
+    """
+    candidates = [c for c in candidates if c["valid_pass"]]
+
+    if not candidates:
+        return []
+
+    n_train = len(candidates[0]["train_mask"])
+    n_valid = len(candidates[0]["valid_mask"])
+
+    train_combined = np.zeros(n_train, dtype=bool)
+    valid_combined = np.zeros(n_valid, dtype=bool)
+    selected = []
+
     while True:
         best = None
 
         for cand in candidates:
-            rule_mask = cand["rule_mask"]
-            new_remove = rule_mask & ~avoid_mask
+            train_new = cand["train_mask"] & ~train_combined
+            valid_new = cand["valid_mask"] & ~valid_combined
 
-            if not new_remove.any():
+            train_added_total = int(train_new.sum())
+            valid_added_total = int(valid_new.sum())
+
+            if train_added_total < MIN_ADDED_TOTAL:
+                continue
+            if valid_added_total < MIN_ADDED_VALID_TOTAL:
                 continue
 
-            added_class0 = int(((df["target_class"] == 0) & new_remove).sum())
-            added_class2 = int(((df["target_class"] == 2) & new_remove).sum())
-            added_class3 = int(((df["target_class"] == 3) & new_remove).sum())
-            added_total = int(new_remove.sum())
+            train_added_target = int((train_new & cand["y_train"]).sum())
+            valid_added_target = int((valid_new & cand["y_valid"]).sum())
 
-            if added_class0 <= 0:
+            if train_added_target < MIN_ADDED_TARGET:
+                continue
+            if valid_added_target < MIN_ADDED_VALID_TARGET:
                 continue
 
-            if used_class3 + added_class3 > class3_limit_count:
+            train_added_rate = train_added_target / train_added_total
+            valid_added_rate = valid_added_target / valid_added_total
+            added_gap = abs(train_added_rate - valid_added_rate)
+
+            if train_added_rate < MIN_TARGET_RATE:
+                continue
+            if valid_added_rate < VALID_MIN_RATE:
+                continue
+            if added_gap > MAX_RATE_GAP:
                 continue
 
-            # 핵심 점수:
-            # class0 추가 제거를 크게 보상
-            # class3 추가 제거를 강하게 패널티
-            # class2도 보호해야 하므로 약하게 패널티
+            train_false = train_added_total - train_added_target
+            valid_false = valid_added_total - valid_added_target
+
             efficiency = (
-                    added_class0
-                    - CLASS_3_SCORE * added_class3
-                    - CLASS_2_SCORE * added_class2
+                    train_added_target
+                    + VALID_WEIGHT * valid_added_target
+                    - FALSE_POSITIVE_PENALTY * train_false
+                    - FALSE_POSITIVE_PENALTY * VALID_WEIGHT * valid_false
             )
-
-            # 너무 작은 추가 효과는 제외
-            if added_total < 5:
-                continue
-
-            # 동률이면 class0 순도 높은 것 우대
-            added_class0_rate = added_class0 / added_total
 
             key = (
                 efficiency,
-                added_class0,
-                added_class0_rate,
-                -added_class3,
-                cand["score"],
+                min(train_added_rate, valid_added_rate),
+                valid_added_target,
+                train_added_target,
+                cand["stability_score"],
+                -added_gap,
             )
 
             if best is None or key > best["key"]:
                 best = {
                     "key": key,
                     "cand": cand,
-                    "added_class0": added_class0,
-                    "added_class2": added_class2,
-                    "added_class3": added_class3,
-                    "added_total": added_total,
+                    "train_added_total": train_added_total,
+                    "train_added_target": train_added_target,
+                    "train_added_rate": train_added_rate,
+                    "valid_added_total": valid_added_total,
+                    "valid_added_target": valid_added_target,
+                    "valid_added_rate": valid_added_rate,
+                    "added_gap": added_gap,
                 }
 
         if best is None:
             break
 
         cand = best["cand"]
-        avoid_mask |= cand["rule_mask"]
-        selected.append((cand["name"], cand["conds"]))
-        used_class3 += best["added_class3"]
+        train_combined |= cand["train_mask"]
+        valid_combined |= cand["valid_mask"]
+        selected.append(cand)
+
+        if verbose:
+            print(
+                f"[SELECT] {len(selected):03d} {cand['name']} "
+                f"train_add={best['train_added_target']}/{best['train_added_total']} "
+                f"({best['train_added_rate'] * 100:.2f}%) "
+                f"valid_add={best['valid_added_target']}/{best['valid_added_total']} "
+                f"({best['valid_added_rate'] * 100:.2f}%) "
+                f"gap={best['added_gap']:.3f}"
+            )
 
         if max_rules is not None and len(selected) >= max_rules:
             break
 
-    if verbose:
-        removed = df[avoid_mask]
-        total0 = int((df["target_class"] == 0).sum())
-        total2 = int((df["target_class"] == 2).sum())
+    return selected
 
-        c0 = int((removed["target_class"] == 0).sum())
-        c2 = int((removed["target_class"] == 2).sum())
-        c3 = int((removed["target_class"] == 3).sum())
 
-        print(
-            f"[CLASS3_LIMIT] selected={len(selected)}, "
-            f"class0_remove_rate={c0 / total0 * 100:.2f}%, "
-            f"class2_loss_rate={c2 / total2 * 100:.2f}%, "
-            f"class3_loss_rate={c3 / total_class3 * 100:.2f}% "
-            f"({c3}/{class3_limit_count})"
-        )
+def make_report_df(candidates, selected):
+    selected_names = {r["name"] for r in selected}
+    rows = []
+    for c in candidates:
+        rows.append({
+            "selected": c["name"] in selected_names,
+            "valid_pass": c["valid_pass"],
+            "name": c["name"],
+            "train_count": c["train_count"],
+            "train_target": c["train_target"],
+            "train_rate": c["train_rate"],
+            "train_lift": c["train_lift"],
+            "valid_count": c["valid_count"],
+            "valid_target": c["valid_target"],
+            "valid_rate": c["valid_rate"],
+            "valid_lift": c["valid_lift"],
+            "rate_gap": c["rate_gap"],
+            "generalized_rate": c["generalized_rate"],
+            "stability_score": c["stability_score"],
+            "conds": repr(c["conds"]),
+        })
+    return pd.DataFrame(rows)
 
-    return selected, avoid_mask
 
+# -----------------------------------------------------------------------------
+# 메인
+# -----------------------------------------------------------------------------
+
+
+def find_stop_before_target_7_rules(csv_path=CSV_PATH, out_path=OUT_PATH, report_path=REPORT_PATH):
+    df = pd.read_csv(csv_path, low_memory=False)
+
+    if TARGET_COL not in df.columns:
+        raise ValueError(f"{TARGET_COL} 컬럼이 없습니다.")
+
+    df = df[df[TARGET_COL].notna()].copy()
+    df[TARGET_COL] = df[TARGET_COL].astype(int)
+
+    train, valid, split_date = split_train_valid_by_date_ratio(df, valid_ratio=VALID_RATIO)
+
+    y_train = (train[TARGET_COL] == TARGET_VALUE).to_numpy()
+    y_valid = (valid[TARGET_COL] == TARGET_VALUE).to_numpy()
+
+    print(f"[DATA] total={len(df)}, train={len(train)}, valid={len(valid)}")
+    print(f"[DATA] split_date={pd.to_datetime(split_date).date()}")
+    print(f"[DATA] train target rate={y_train.mean() * 100:.2f}%")
+    print(f"[DATA] valid target rate={y_valid.mean() * 100:.2f}%")
+
+    features = get_features(train)
+    print(f"[FEATURES] {len(features)} features")
+    print(features)
+
+    literals, literal_masks = build_literals(train, features, min_count=MIN_CNT)
+    print(f"[LITERALS] {len(literals)} literals")
+
+    feature_groups, group_limits = get_feature_groups()
+
+    rules = mine_target_rules(
+        df=train,
+        literals=literals,
+        literal_masks=literal_masks,
+        y=y_train,
+        min_count=MIN_CNT,
+        max_depth=MAX_DEPTH,
+        beam=BEAM,
+        top_n=TOP_N,
+        feature_groups=feature_groups,
+        group_limits=group_limits,
+    )
+
+    print(f"[RULES] mined={len(rules)}")
+
+    candidates = attach_validation_metrics(train, valid, rules)
+    for c in candidates:
+        c["y_train"] = y_train
+        c["y_valid"] = y_valid
+
+    passed = [c for c in candidates if c["valid_pass"]]
+    print(f"[VALID FILTER] passed={len(passed)} / {len(candidates)}")
+
+    print("\n[TOP STABLE CANDIDATES]")
+    preview_cols = [
+        "valid_pass", "name", "train_count", "train_rate", "valid_count",
+        "valid_rate", "rate_gap", "stability_score", "conds",
+    ]
+    preview_df = make_report_df(candidates[:30], [])
+    if not preview_df.empty:
+        print(preview_df[preview_cols].to_string(index=False))
+
+    selected = select_rules_stable_greedy(passed, max_rules=MAX_RULES, verbose=True)
+    print(f"[SELECT] selected={len(selected)}")
+
+    train_final_mask = combined_mask(train, selected)
+    valid_final_mask = combined_mask(valid, selected)
+
+    print("\n[COMBINED EVAL]")
+    print_eval(eval_mask(train, train_final_mask, "TRAIN"))
+    print_eval(eval_mask(valid, valid_final_mask, "VALID"))
+
+    report_df = make_report_df(candidates, selected)
+    report_df.to_csv(report_path, index=False, encoding="utf-8-sig")
+    print(f"[REPORT SAVED] {Path(report_path).resolve()}")
+
+    header_comment = (
+        "# auto-generated: stable rules for stop_before_target_7 == 1\n"
+        f"# target: {TARGET_COL} == {TARGET_VALUE}\n"
+        f"# split_date: {pd.to_datetime(split_date).date()}\n"
+        "# rules mined on train, filtered/scored on validation\n"
+        f"# constants: VALID_RATIO={VALID_RATIO}, MIN_CNT={MIN_CNT}, MAX_DEPTH={MAX_DEPTH}, "
+        f"MIN_TARGET_RATE={MIN_TARGET_RATE}, VALID_MIN_RATE={VALID_MIN_RATE}, "
+        f"VALID_MIN_CNT={VALID_MIN_CNT}, MAX_RATE_GAP={MAX_RATE_GAP}, MAX_RULES={MAX_RULES}\n"
+        "# usage:\n"
+        "#   import numpy as np\n"
+        "#   import lowscan_stop_before_target_7_rules\n"
+        "#   conditions = lowscan_stop_before_target_7_rules.build_conditions(df)\n"
+        "#   rule_mask = np.zeros(len(df), dtype=bool)\n"
+        "#   for cond in conditions.values():\n"
+        "#       rule_mask |= cond\n"
+    )
+
+    write_rule_file(Path(out_path), selected, header_comment=header_comment)
+    print(f"[SAVED] {Path(out_path).resolve()}")
+
+    return selected, report_df
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--csv", default=CSV_PATH, help="input csv path")
+    parser.add_argument("--out", default=str(OUT_PATH), help="output python rule file path")
+    parser.add_argument("--report", default=str(REPORT_PATH), help="output csv report path")
+    return parser.parse_args()
 
 
 if __name__ == "__main__":
-    find_avoid_rule()
+    args = parse_args()
+    find_stop_before_target_7_rules(args.csv, Path(args.out), Path(args.report))
 
     try:
         import winsound
-        winsound.Beep(1500, 500)  # 1000Hz, 0.5초
-        winsound.Beep(1000, 500)  # 1000Hz, 0.5초
+        winsound.Beep(1500, 500)
+        winsound.Beep(1000, 500)
     except ImportError:
         pass
+
