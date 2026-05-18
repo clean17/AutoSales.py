@@ -46,6 +46,17 @@ import pandas as pd
 
 # =============================================================================
 # CONFIG: 여기 상수만 바꿔서 실험
+#
+# [REBALANCED VERSION]
+# 이전 fast 버전은 train 후보는 나오지만 valid filter 통과가 0개가 될 수 있었음.
+# 이 버전은 속도는 원본보다 줄이되, 검증 후보가 살아남도록 탐색/검증 기준을 재균형화.
+# - N_QUANTILES: 22 -> 16
+# - BEAM       : 10000 -> 5000
+# - TOP_N      : 3000 -> 2500
+# - MIN_CNT    : 45 -> 60
+# - MAX_DEPTH  : 5 유지
+# - MAX_RULES  : None -> 35
+# - VALID 조건은 strict 기준보다 완화하되, class0_rate 60% 이상을 기본 목표로 유지.
 # =============================================================================
 
 CSV_PATH = "csv/low_result_7_desc.csv"
@@ -58,13 +69,13 @@ VALID_RATIO = 0.10
 DATE_COL = "today"
 
 # 리터럴 생성: 숫자형 feature별 분위수 threshold 개수
-N_QUANTILES = 22
+N_QUANTILES = 16
 MIN_UNIQUE_VALUES = 8
 
 # Beam search
-BEAM = 40000
-TOP_N = 8000
-MIN_CNT = 45
+BEAM = 5000
+TOP_N = 2500
+MIN_CNT = 60
 MAX_DEPTH = 5
 
 # 최종 후보 룰: train 기준
@@ -73,16 +84,16 @@ MIN_LIFT = 1.55
 MIN_WILSON_LOW = 0.58
 
 # validation 필터: 과최적화 제거용
-VALID_MIN_CNT = 25
-VALID_MIN_CLASS0_RATE = 0.62
-VALID_MIN_LIFT = 1.45
-VALID_MIN_WILSON_LOW = 0.52
+VALID_MIN_CNT = 20
+VALID_MIN_CLASS0_RATE = 0.60
+VALID_MIN_LIFT = 1.30
+VALID_MIN_WILSON_LOW = 0.47
 
 # 좋은 class 혼입 제한. 필요 없으면 1.0 으로 완화.
-MAX_VALID_CLASS1_RATE = 0.28
-MAX_VALID_CLASS2_RATE = 0.18
-MAX_VALID_CLASS3_RATE = 0.15
-MAX_VALID_CLASS23_RATE = 0.25
+MAX_VALID_CLASS1_RATE = 0.34
+MAX_VALID_CLASS2_RATE = 0.24
+MAX_VALID_CLASS3_RATE = 0.24
+MAX_VALID_CLASS23_RATE = 0.38
 
 # beam 확장 조건: depth별로 점점 엄격하게
 # 부족하면 마지막 값을 재사용
@@ -90,9 +101,9 @@ EXPAND_MIN_CLASS0_RATE = [0.38, 0.46, 0.54, 0.60, 0.64]
 EXPAND_MIN_LIFT = [0.90, 1.08, 1.25, 1.38, 1.48]
 
 # greedy rule selection
-MAX_RULES = None
-MIN_NEW_CLASS0_CNT = 5
-MIN_NEW_CLASS0_RATE = 0.58
+MAX_RULES = 35
+MIN_NEW_CLASS0_CNT = 4
+MIN_NEW_CLASS0_RATE = 0.56
 
 # 점수 가중치
 PRECISION_POWER = 3.2
@@ -102,6 +113,44 @@ COVERAGE_POWER = 0.55
 CLASS1_PENALTY = 0.8
 CLASS2_PENALTY = 1.6
 CLASS3_PENALTY = 2.4
+
+# valid strict 조건을 통과하는 후보가 0개일 때를 대비한 완화 tier.
+# tier 순서대로만 완화하므로, strict 후보가 있으면 strict만 사용한다.
+VALID_FILTER_TIERS = [
+    {
+        "name": "strict",
+        "min_cnt": VALID_MIN_CNT,
+        "min_class0_rate": VALID_MIN_CLASS0_RATE,
+        "min_lift": VALID_MIN_LIFT,
+        "min_wilson_low": VALID_MIN_WILSON_LOW,
+        "max_class1_rate": MAX_VALID_CLASS1_RATE,
+        "max_class2_rate": MAX_VALID_CLASS2_RATE,
+        "max_class3_rate": MAX_VALID_CLASS3_RATE,
+        "max_class23_rate": MAX_VALID_CLASS23_RATE,
+    },
+    {
+        "name": "balanced_relaxed",
+        "min_cnt": max(15, VALID_MIN_CNT - 5),
+        "min_class0_rate": 0.58,
+        "min_lift": 1.22,
+        "min_wilson_low": 0.44,
+        "max_class1_rate": 0.38,
+        "max_class2_rate": 0.27,
+        "max_class3_rate": 0.27,
+        "max_class23_rate": 0.42,
+    },
+    {
+        "name": "coverage_rescue",
+        "min_cnt": 12,
+        "min_class0_rate": 0.56,
+        "min_lift": 1.15,
+        "min_wilson_low": 0.40,
+        "max_class1_rate": 0.42,
+        "max_class2_rate": 0.30,
+        "max_class3_rate": 0.30,
+        "max_class23_rate": 0.46,
+    },
+]
 
 # feature group 제한: 유사 feature가 한 룰에 과도하게 중복되는 것을 방지
 USE_FEATURE_GROUP_LIMITS = True
@@ -528,17 +577,39 @@ def mine_class0_rules(
 # Selection / output
 # =============================================================================
 
-def pass_valid_filter(ev: dict) -> bool:
+def pass_valid_filter(ev: dict, tier: dict | None = None) -> bool:
+    if tier is None:
+        tier = VALID_FILTER_TIERS[0]
     return (
-            ev["selected_count"] >= VALID_MIN_CNT
-            and ev["class0_rate"] >= VALID_MIN_CLASS0_RATE
-            and ev["class0_lift"] >= VALID_MIN_LIFT
-            and ev["class0_wilson_low"] >= VALID_MIN_WILSON_LOW
-            and ev["class1_rate"] <= MAX_VALID_CLASS1_RATE
-            and ev["class2_rate"] <= MAX_VALID_CLASS2_RATE
-            and ev["class3_rate"] <= MAX_VALID_CLASS3_RATE
-            and ev["class23_rate"] <= MAX_VALID_CLASS23_RATE
+            ev["selected_count"] >= tier["min_cnt"]
+            and ev["class0_rate"] >= tier["min_class0_rate"]
+            and ev["class0_lift"] >= tier["min_lift"]
+            and ev["class0_wilson_low"] >= tier["min_wilson_low"]
+            and ev["class1_rate"] <= tier["max_class1_rate"]
+            and ev["class2_rate"] <= tier["max_class2_rate"]
+            and ev["class3_rate"] <= tier["max_class3_rate"]
+            and ev["class23_rate"] <= tier["max_class23_rate"]
     )
+
+
+def validation_fail_reasons(ev: dict, tier: dict) -> list[str]:
+    reasons = []
+    checks = [
+        ("cnt", ev["selected_count"], ">=", tier["min_cnt"]),
+        ("class0_rate", ev["class0_rate"], ">=", tier["min_class0_rate"]),
+        ("lift", ev["class0_lift"], ">=", tier["min_lift"]),
+        ("wilson", ev["class0_wilson_low"], ">=", tier["min_wilson_low"]),
+        ("class1_rate", ev["class1_rate"], "<=", tier["max_class1_rate"]),
+        ("class2_rate", ev["class2_rate"], "<=", tier["max_class2_rate"]),
+        ("class3_rate", ev["class3_rate"], "<=", tier["max_class3_rate"]),
+        ("class23_rate", ev["class23_rate"], "<=", tier["max_class23_rate"]),
+    ]
+    for name, value, op, threshold in checks:
+        if op == ">=" and value < threshold:
+            reasons.append(f"{name} {value:.4f} < {threshold:.4f}")
+        elif op == "<=" and value > threshold:
+            reasons.append(f"{name} {value:.4f} > {threshold:.4f}")
+    return reasons
 
 
 def select_rules_with_validation(train: pd.DataFrame, valid: pd.DataFrame, rules, max_rules: int | None = MAX_RULES):
@@ -547,7 +618,7 @@ def select_rules_with_validation(train: pd.DataFrame, valid: pd.DataFrame, rules
     train_base = train_class0.mean()
     valid_base = valid_class0.mean()
 
-    candidates = []
+    all_evaluated = []
     for i, (cnt, class0_cnt, class0_rate, lift, wilson, c1_rate, c2_rate, c3_rate, conds, score) in enumerate(rules, start=1):
         name = (
             f"target0_highprob_{i:04d}"
@@ -565,14 +636,11 @@ def select_rules_with_validation(train: pd.DataFrame, valid: pd.DataFrame, rules
             continue
         if tr["class0_rate"] < MIN_CLASS0_RATE or tr["class0_lift"] < MIN_LIFT or tr["class0_wilson_low"] < MIN_WILSON_LOW:
             continue
-        if not pass_valid_filter(va):
-            continue
 
-        # train 과 valid 의 괴리가 큰 룰은 감점
         stability_gap = abs(tr["class0_rate"] - va["class0_rate"])
         stable_score = score * (1.0 - min(stability_gap, 0.35))
 
-        candidates.append({
+        all_evaluated.append({
             "name": name,
             "conds": conds,
             "train_mask": train_mask,
@@ -583,7 +651,48 @@ def select_rules_with_validation(train: pd.DataFrame, valid: pd.DataFrame, rules
             "valid_eval": va,
         })
 
-    print("\n[CANDIDATES AFTER VALID FILTER]", len(candidates))
+    print("\n[EVALUATED TRAIN-PASS RULES]", len(all_evaluated))
+
+    candidates = []
+    selected_tier = None
+    for tier in VALID_FILTER_TIERS:
+        tier_candidates = [c for c in all_evaluated if pass_valid_filter(c["valid_eval"], tier)]
+        print(f"[VALID FILTER:{tier['name']}] passed={len(tier_candidates)} / {len(all_evaluated)}")
+        if tier_candidates:
+            candidates = tier_candidates
+            selected_tier = tier
+            break
+
+    if not candidates:
+        print("\n[VALID FILTER DIAGNOSTIC] no candidates passed. Top valid candidates by class0_rate:")
+        top_debug = sorted(
+            all_evaluated,
+            key=lambda c: (
+                c["valid_eval"]["class0_rate"],
+                c["valid_eval"]["class0_wilson_low"],
+                c["valid_eval"]["selected_count"],
+            ),
+            reverse=True,
+        )[:20]
+        strict = VALID_FILTER_TIERS[0]
+        for c in top_debug:
+            va = c["valid_eval"]
+            reasons = "; ".join(validation_fail_reasons(va, strict))
+            print(
+                c["name"],
+                f"valid_n={va['selected_count']}",
+                f"class0={va['class0_rate'] * 100:.2f}%",
+                f"wilson={va['class0_wilson_low'] * 100:.2f}%",
+                f"lift={va['class0_lift']:.2f}",
+                f"c1={va['class1_rate'] * 100:.1f}%",
+                f"c2={va['class2_rate'] * 100:.1f}%",
+                f"c3={va['class3_rate'] * 100:.1f}%",
+                "fail:", reasons,
+            )
+        return [], np.zeros(len(train), dtype=bool), np.zeros(len(valid), dtype=bool)
+
+    print(f"[VALID FILTER SELECTED TIER] {selected_tier['name']}")
+    print("[CANDIDATES AFTER VALID FILTER]", len(candidates))
 
     selected = []
     combined_train_mask = np.zeros(len(train), dtype=bool)
@@ -614,22 +723,33 @@ def select_rules_with_validation(train: pd.DataFrame, valid: pd.DataFrame, rules
                 continue
             if train_added_rate < MIN_NEW_CLASS0_RATE:
                 continue
-            if valid_added_total >= VALID_MIN_CNT:
-                if valid_added_rate < VALID_MIN_CLASS0_RATE or valid_added_wilson < VALID_MIN_WILSON_LOW:
-                    continue
 
-            # 새로 추가되는 부분 기준으로도 고확률인 룰을 우선 선택
-            # valid 신규 표본이 너무 작으면 룰 전체 valid 성능을 보조지표로 사용
-            valid_component = valid_added_rate if valid_added_total >= VALID_MIN_CNT else cand["valid_eval"]["class0_rate"]
-            valid_wilson_component = valid_added_wilson if valid_added_total >= VALID_MIN_CNT else cand["valid_eval"]["class0_wilson_low"]
+            # 신규 valid가 충분히 있으면 tier 기준으로 확인.
+            # 신규 valid가 작으면 전체 rule valid 성능을 보조지표로 쓰되, 신규 class0가 0이면 배제.
+            if valid_added_total >= selected_tier["min_cnt"]:
+                if (
+                        valid_added_rate < max(0.54, selected_tier["min_class0_rate"] - 0.04)
+                        or valid_added_wilson < max(0.36, selected_tier["min_wilson_low"] - 0.06)
+                ):
+                    continue
+            elif valid_added_total > 0 and valid_added_class0 == 0:
+                continue
+
+            valid_component = valid_added_rate if valid_added_total >= selected_tier["min_cnt"] else cand["valid_eval"]["class0_rate"]
+            valid_wilson_component = valid_added_wilson if valid_added_total >= selected_tier["min_cnt"] else cand["valid_eval"]["class0_wilson_low"]
+
+            valid_false = valid_added_total - valid_added_class0
+            class3_penalty = cand["valid_eval"]["class3_rate"]
 
             key = (
-                train_added_rate,
-                train_added_wilson,
                 valid_component,
                 valid_wilson_component,
-                train_added_class0,
+                train_added_rate,
+                train_added_wilson,
                 valid_added_class0,
+                -valid_false,
+                -class3_penalty,
+                train_added_class0,
                 cand["stable_score"],
             )
 
