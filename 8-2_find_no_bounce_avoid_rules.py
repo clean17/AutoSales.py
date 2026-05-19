@@ -47,24 +47,22 @@ import pandas as pd
 # =============================================================================
 # CONFIG: 여기 상수만 바꿔서 실험
 #
-# [CLASS23 UNDER 15 COVERAGE MAX VERSION]
+# [CLASS23 UNDER 15 CHECKPOINT BEST VERSION]
 # 목적:
-# - class23_under15 결과는 class23 12.93%, class0_rate 77.59%로 좋았지만 coverage가 5.08%였음.
-# - 실행 로그상 compare_class23_safe_cap의 중간 12번째 지점에서
-#   coverage 5.59%, class23 14.71%가 가능했음.
-# - 이 버전은 class23 <= 15%를 유지하면서 coverage를 최대화하는 전용 시나리오를 추가한다.
+# - class23 15% 이하를 유지하면서 coverage를 최대화한다.
+# - 이전 실행 로그에서 compare_class23_safe_cap의 12번째 중간 지점은
+#   coverage 5.59%, class23 14.71%, class0_rate 72.79%로 최종 선택보다 목적에 더 맞았다.
 #
-# 핵심:
-# - under15_coverage_max 시나리오 추가
-# - class23 hard cap 15%
-# - target_coverage 5.5%
-# - class0_rate 67% 이상 방어
-# - class3 10% 이하 방어
+# 핵심 개선:
+# - 시나리오의 마지막 결과만 비교하지 않는다.
+# - 각 룰 추가 후 checkpoint를 저장한다.
+# - class23 <= 15%, class0_rate >= 68%, class3 <= 10% 조건을 만족하는 checkpoint 중
+#   coverage와 class0_rate가 가장 좋은 지점을 최종 후보로 선택한다.
 #
-# 기대:
-# - valid_class0_rate      : 70~74%
-# - valid_class0_coverage  : 5.5% 전후
+# 목표:
 # - valid_class23_rate     : 15% 이하
+# - valid_class0_coverage  : 5.5% 이상 우선
+# - valid_class0_rate      : 68% 이상
 # - valid_class3_rate      : 10% 이하
 #
 # =============================================================================
@@ -719,6 +717,26 @@ def select_rules_with_validation(train: pd.DataFrame, valid: pd.DataFrame, rules
 
     scenarios = [
         {
+            "name": "under15_checkpoint_covermax",  ##############  채택
+            "target_coverage": 0.058,
+            "soft_coverage": 0.055,
+            "max_class23": 0.150,
+            "max_class3": 0.100,
+            "max_class2": 0.105,
+            "min_rate_pre": 0.67,
+            "min_rate_post": 0.68,
+            "min_added_rate": 0.40,
+            "min_added_rate_fill": 0.34,
+            "max_added_c23": 0.36,
+            "max_added_c23_fill": 0.30,
+            "max_added_c3": 0.18,
+            "coverage_w": 900.0,
+            "class0_w": 11.0,
+            "c23_penalty": 145.0,
+            "c3_penalty": 105.0,
+            "added_c23_penalty": 9.0,
+        },
+        {
             "name": "under15_coverage_max",
             "target_coverage": 0.055,
             "soft_coverage": 0.052,
@@ -825,6 +843,46 @@ def select_rules_with_validation(train: pd.DataFrame, valid: pd.DataFrame, rules
         selected_names = set()
         train_mask = np.zeros(len(train), dtype=bool)
         valid_mask = np.zeros(len(valid), dtype=bool)
+
+        best_checkpoint = None
+
+        def checkpoint_score(ev: dict) -> float:
+            score = (
+                    ev["class0_coverage"] * 1000000.0
+                    + ev["class0_rate"] * 120000.0
+                    - ev["class23_rate"] * 180000.0
+                    - ev["class3_rate"] * 90000.0
+                    + np.log1p(ev["selected_count"]) * 1000.0
+            )
+            if ev["class23_rate"] <= 0.150:
+                score += 120000.0
+            if ev["class0_coverage"] >= 0.055:
+                score += 80000.0
+            if ev["class0_rate"] >= 0.700:
+                score += 25000.0
+            if ev["class3_rate"] <= 0.100:
+                score += 25000.0
+            return score
+
+        def maybe_update_checkpoint():
+            nonlocal best_checkpoint
+            ev = eval_mask(valid, valid_mask, label="VALID")
+            if (
+                    ev["selected_count"] >= 100
+                    and ev["class23_rate"] <= 0.150
+                    and ev["class0_rate"] >= 0.680
+                    and ev["class3_rate"] <= 0.100
+            ):
+                sc = checkpoint_score(ev)
+                if best_checkpoint is None or sc > best_checkpoint["score"]:
+                    best_checkpoint = {
+                        "score": sc,
+                        "selected": list(selected),
+                        "train_mask": train_mask.copy(),
+                        "valid_mask": valid_mask.copy(),
+                        "train_eval": eval_mask(train, train_mask, label="TRAIN"),
+                        "valid_eval": ev,
+                    }
 
         def choose_best(stage: str):
             cur = eval_mask(valid, valid_mask, label="VALID")
@@ -985,6 +1043,7 @@ def select_rules_with_validation(train: pd.DataFrame, valid: pd.DataFrame, rules
                 valid_mask |= cand["valid_mask"]
                 selected.append((cand["name"], cand["conds"]))
                 selected_names.add(cand["name"])
+                maybe_update_checkpoint()
 
                 if verbose:
                     ev = eval_mask(valid, valid_mask, label="VALID")
@@ -1003,6 +1062,27 @@ def select_rules_with_validation(train: pd.DataFrame, valid: pd.DataFrame, rules
 
         tr_eval = eval_mask(train, train_mask, label="TRAIN")
         va_eval = eval_mask(valid, valid_mask, label="VALID")
+
+        if best_checkpoint is not None:
+            if verbose:
+                b = best_checkpoint["valid_eval"]
+                print(
+                    f"[{scenario['name']}] [CHECKPOINT BEST] "
+                    f"selected={b['selected_count']} "
+                    f"class0_rate={b['class0_rate'] * 100:.2f}% "
+                    f"coverage={b['class0_coverage'] * 100:.2f}% "
+                    f"class23={b['class23_rate'] * 100:.2f}% "
+                    f"class3={b['class3_rate'] * 100:.2f}% "
+                    f"checkpoint_score={best_checkpoint['score']:.2f}"
+                )
+            return (
+                best_checkpoint["selected"],
+                best_checkpoint["train_mask"],
+                best_checkpoint["valid_mask"],
+                best_checkpoint["train_eval"],
+                best_checkpoint["valid_eval"],
+            )
+
         return selected, train_mask, valid_mask, tr_eval, va_eval
 
     results = []
@@ -1019,18 +1099,18 @@ def select_rules_with_validation(train: pd.DataFrame, valid: pd.DataFrame, rules
                 - va["class3_rate"] * 65000
         )
         if va["class23_rate"] <= 0.150:
-            score += 60000
+            score += 90000
         elif va["class23_rate"] <= 0.160:
             score += 25000
         elif va["class23_rate"] <= 0.170:
             score += 12000
 
         if va["class0_coverage"] >= 0.050:
-            score += 6000
+            score += 10000
         if va["class0_coverage"] >= 0.055:
-            score += 35000
+            score += 90000
         if va["class0_coverage"] >= 0.060:
-            score += 7000
+            score += 12000
         if va["class0_rate"] >= 0.70:
             score += 10000
         if va["class3_rate"] <= 0.10:
