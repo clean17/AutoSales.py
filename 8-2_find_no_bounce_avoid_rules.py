@@ -47,25 +47,25 @@ import pandas as pd
 # =============================================================================
 # CONFIG: 여기 상수만 바꿔서 실험
 #
-# [CLASS23 LOW-CORRELATION COVERAGE VERSION]
+# [CLASS23 UNDER 15 COVERAGE MAX VERSION]
 # 목적:
-# - 기존 pareto_sweep 결과는 class23_rate 16.67%까지 낮췄지만 coverage가 5.03%에서 멈췄음.
-# - 이유: 후보 생성 단계가 class0 고확률 후보 위주라서, 추가 coverage를 만들 수 있는
-#   "class23는 낮지만 class0_rate는 중간 이상"인 넓은 룰이 후보에서 부족했음.
+# - class23_under15 결과는 class23 12.93%, class0_rate 77.59%로 좋았지만 coverage가 5.08%였음.
+# - 실행 로그상 compare_class23_safe_cap의 중간 12번째 지점에서
+#   coverage 5.59%, class23 14.71%가 가능했음.
+# - 이 버전은 class23 <= 15%를 유지하면서 coverage를 최대화하는 전용 시나리오를 추가한다.
 #
-# 핵심 개선:
-# 1) 후보 생성 기준을 더 넓힘: MIN_CLASS0_RATE / MIN_LIFT / MIN_WILSON_LOW 완화
-# 2) valid pool에 low_class23_recovery_pool 추가
-# 3) scenario에 low_class23_coverage_recover 추가
-#    - 추가 룰의 class0_rate는 다소 낮아도 허용
-#    - 단 추가 class23_rate는 매우 낮아야 함
-#    - combined class0_rate가 무너지는 것은 방어
+# 핵심:
+# - under15_coverage_max 시나리오 추가
+# - class23 hard cap 15%
+# - target_coverage 5.5%
+# - class0_rate 67% 이상 방어
+# - class3 10% 이하 방어
 #
-# 목표:
-# - valid_class0_rate      : 68% 이상 선호
-# - valid_class0_coverage  : 5.3~5.8% 이상 시도
-# - valid_class23_rate     : 16.5~18.5% 이하 유지
-# - valid_class3_rate      : 8~12% 이하 유지
+# 기대:
+# - valid_class0_rate      : 70~74%
+# - valid_class0_coverage  : 5.5% 전후
+# - valid_class23_rate     : 15% 이하
+# - valid_class3_rate      : 10% 이하
 #
 # =============================================================================
 
@@ -128,47 +128,47 @@ CLASS3_PENALTY = 3.2
 # tier 순서대로만 완화하므로, strict 후보가 있으면 strict만 사용한다.
 VALID_FILTER_TIERS = [
     {
-        "name": "precision_safe_pool",
-        "min_cnt": 10,
-        "min_class0_rate": 0.58,
-        "min_lift": 1.12,
-        "min_wilson_low": 0.36,
-        "max_class1_rate": 0.50,
-        "max_class2_rate": 0.32,
-        "max_class3_rate": 0.24,
-        "max_class23_rate": 0.42,
+        "name": "ultra_low_class23_pool",
+        "min_cnt": 5,
+        "min_class0_rate": 0.40,
+        "min_lift": 0.88,
+        "min_wilson_low": 0.18,
+        "max_class1_rate": 0.72,
+        "max_class2_rate": 0.20,
+        "max_class3_rate": 0.12,
+        "max_class23_rate": 0.24,
     },
     {
-        "name": "balanced_safe_pool",
-        "min_cnt": 7,
-        "min_class0_rate": 0.50,
-        "min_lift": 1.00,
-        "min_wilson_low": 0.26,
+        "name": "low_class23_precision_pool",
+        "min_cnt": 8,
+        "min_class0_rate": 0.55,
+        "min_lift": 1.08,
+        "min_wilson_low": 0.32,
         "max_class1_rate": 0.58,
-        "max_class2_rate": 0.40,
-        "max_class3_rate": 0.32,
-        "max_class23_rate": 0.58,
+        "max_class2_rate": 0.26,
+        "max_class3_rate": 0.18,
+        "max_class23_rate": 0.34,
     },
     {
         "name": "low_class23_recovery_pool",
         "min_cnt": 5,
         "min_class0_rate": 0.36,
-        "min_lift": 0.85,
-        "min_wilson_low": 0.18,
-        "max_class1_rate": 0.70,
+        "min_lift": 0.82,
+        "min_wilson_low": 0.16,
+        "max_class1_rate": 0.76,
         "max_class2_rate": 0.24,
-        "max_class3_rate": 0.18,
-        "max_class23_rate": 0.32,
+        "max_class3_rate": 0.16,
+        "max_class23_rate": 0.30,
     },
     {
-        "name": "coverage_diagnostic_pool",
+        "name": "diagnostic_pool",
         "min_cnt": 5,
         "min_class0_rate": 0.42,
         "min_lift": 0.88,
         "min_wilson_low": 0.18,
         "max_class1_rate": 0.72,
-        "max_class2_rate": 0.50,
-        "max_class3_rate": 0.42,
+        "max_class2_rate": 0.48,
+        "max_class3_rate": 0.40,
         "max_class23_rate": 0.70,
     },
 ]
@@ -634,22 +634,23 @@ def validation_fail_reasons(ev: dict, tier: dict) -> list[str]:
 
 
 def select_rules_with_validation(train: pd.DataFrame, valid: pd.DataFrame, rules, max_rules: int | None = MAX_RULES):
-    """Pareto/scenario selection for class0 coverage with class23 protection.
+    """Scenario selection with hard preference for valid class23_rate < 15%.
 
-    이 함수는 단일 결과만 억지로 만들지 않고, 여러 시나리오를 실행한 뒤 가장 균형 좋은 결과를 선택한다.
+    목표:
+    - class23_safe의 18.52%보다 class23를 확실히 낮춘다.
+    - class23 <= 15% 후보를 우선 선택한다.
+    - coverage는 5.0~5.8% 범위에서 최대한 회복한다.
     """
     train_class0 = train["target_class"].to_numpy() == TARGET_CLASS
     valid_y = valid["target_class"].to_numpy()
     valid_class0 = valid_y == TARGET_CLASS
-    valid_class1 = valid_y == 1
     valid_class2 = valid_y == 2
     valid_class3 = valid_y == 3
-    valid_class23 = valid_class2 | valid_class3
 
     all_evaluated = []
     for i, (cnt, class0_cnt, class0_rate, lift, wilson, c1_rate, c2_rate, c3_rate, conds, score) in enumerate(rules, start=1):
         name = (
-            f"target0_pareto_{i:04d}"
+            f"target0_under15_{i:04d}"
             f"_s{score:.2f}"
             f"_tr{class0_rate:.3f}"
             f"_wl{wilson:.3f}"
@@ -666,8 +667,12 @@ def select_rules_with_validation(train: pd.DataFrame, valid: pd.DataFrame, rules
             continue
 
         stability_gap = abs(tr["class0_rate"] - va["class0_rate"])
-        # class23 penalty is strong, but not a hard exclusion here.
-        stable_score = score * (1.0 - min(stability_gap, 0.45)) * max(0.12, 1.0 - va["class23_rate"] * 0.55 - va["class3_rate"] * 0.40)
+        # class23/class3 are strongly penalized from the start.
+        stable_score = (
+                score
+                * (1.0 - min(stability_gap, 0.45))
+                * max(0.08, 1.0 - va["class23_rate"] * 0.90 - va["class3_rate"] * 0.65)
+        )
 
         all_evaluated.append({
             "name": name,
@@ -714,116 +719,128 @@ def select_rules_with_validation(train: pd.DataFrame, valid: pd.DataFrame, rules
 
     scenarios = [
         {
-            "name": "low_class23_coverage_recover",
-            "target_coverage": 0.058,
-            "soft_coverage": 0.052,
-            "max_class23": 0.185,
-            "max_class3": 0.120,
-            "min_rate_pre": 0.66,
-            "min_rate_post": 0.67,
-            "min_added_rate": 0.34,
-            "min_added_rate_fill": 0.28,
-            "max_added_c23": 0.22,
-            "max_added_c23_fill": 0.18,
-            "coverage_w": 720.0,
-            "class0_w": 10.0,
-            "c23_penalty": 130.0,
-            "c3_penalty": 105.0,
-            "added_c23_penalty": 12.0,
-        },
-        {
-            "name": "precision_safe",
-            "target_coverage": 0.050,
-            "soft_coverage": 0.048,
-            "max_class23": 0.180,
-            "max_class3": 0.120,
-            "min_rate_pre": 0.68,
-            "min_rate_post": 0.68,
-            "min_added_rate": 0.48,
-            "min_added_rate_fill": 0.45,
-            "max_added_c23": 0.34,
-            "max_added_c23_fill": 0.38,
-            "coverage_w": 250.0,
-            "class0_w": 18.0,
-            "c23_penalty": 105.0,
-            "c3_penalty": 82.0,
-            "added_c23_penalty": 8.5,
-        },
-        {
-            "name": "class23_safe",
-            "target_coverage": 0.053,
-            "soft_coverage": 0.050,
-            "max_class23": 0.190,
-            "max_class3": 0.135,
-            "min_rate_pre": 0.65,
-            "min_rate_post": 0.66,
-            "min_added_rate": 0.44,
-            "min_added_rate_fill": 0.40,
-            "max_added_c23": 0.38,
-            "max_added_c23_fill": 0.44,
-            "coverage_w": 330.0,
-            "class0_w": 16.0,
-            "c23_penalty": 88.0,
-            "c3_penalty": 68.0,
-            "added_c23_penalty": 6.8,
-        },
-        {
-            "name": "balanced_safe_coverage",
+            "name": "under15_coverage_max",
             "target_coverage": 0.055,
             "soft_coverage": 0.052,
-            "max_class23": 0.205,
-            "max_class3": 0.155,
-            "min_rate_pre": 0.62,
-            "min_rate_post": 0.63,
+            "max_class23": 0.150,
+            "max_class3": 0.100,
+            "max_class2": 0.105,
+            "min_rate_pre": 0.67,
+            "min_rate_post": 0.67,
             "min_added_rate": 0.40,
-            "min_added_rate_fill": 0.36,
-            "max_added_c23": 0.44,
-            "max_added_c23_fill": 0.52,
-            "coverage_w": 430.0,
-            "class0_w": 14.0,
-            "c23_penalty": 70.0,
-            "c3_penalty": 52.0,
-            "added_c23_penalty": 5.0,
+            "min_added_rate_fill": 0.34,
+            "max_added_c23": 0.34,
+            "max_added_c23_fill": 0.28,
+            "max_added_c3": 0.16,
+            "coverage_w": 760.0,
+            "class0_w": 12.0,
+            "c23_penalty": 150.0,
+            "c3_penalty": 110.0,
+            "added_c23_penalty": 10.0,
         },
         {
-            "name": "coverage_push_with_cap",
+            "name": "under15_strict",
+            "target_coverage": 0.050,
+            "soft_coverage": 0.048,
+            "max_class23": 0.150,
+            "max_class3": 0.090,
+            "max_class2": 0.090,
+            "min_rate_pre": 0.70,
+            "min_rate_post": 0.70,
+            "min_added_rate": 0.50,
+            "min_added_rate_fill": 0.42,
+            "max_added_c23": 0.20,
+            "max_added_c23_fill": 0.16,
+            "max_added_c3": 0.12,
+            "coverage_w": 260.0,
+            "class0_w": 18.0,
+            "c23_penalty": 170.0,
+            "c3_penalty": 125.0,
+            "added_c23_penalty": 16.0,
+        },
+        {
+            "name": "under15_balanced",
+            "target_coverage": 0.055,
+            "soft_coverage": 0.050,
+            "max_class23": 0.155,
+            "max_class3": 0.100,
+            "max_class2": 0.100,
+            "min_rate_pre": 0.68,
+            "min_rate_post": 0.68,
+            "min_added_rate": 0.44,
+            "min_added_rate_fill": 0.36,
+            "max_added_c23": 0.24,
+            "max_added_c23_fill": 0.18,
+            "max_added_c3": 0.14,
+            "coverage_w": 420.0,
+            "class0_w": 15.0,
+            "c23_penalty": 140.0,
+            "c3_penalty": 105.0,
+            "added_c23_penalty": 13.0,
+        },
+        {
+            "name": "under16_recover",
+            "target_coverage": 0.058,
+            "soft_coverage": 0.052,
+            "max_class23": 0.165,
+            "max_class3": 0.110,
+            "max_class2": 0.115,
+            "min_rate_pre": 0.66,
+            "min_rate_post": 0.67,
+            "min_added_rate": 0.38,
+            "min_added_rate_fill": 0.30,
+            "max_added_c23": 0.28,
+            "max_added_c23_fill": 0.22,
+            "max_added_c3": 0.16,
+            "coverage_w": 600.0,
+            "class0_w": 12.0,
+            "c23_penalty": 110.0,
+            "c3_penalty": 85.0,
+            "added_c23_penalty": 10.0,
+        },
+        {
+            "name": "compare_class23_safe_cap",
             "target_coverage": 0.060,
             "soft_coverage": 0.055,
-            "max_class23": 0.215,
-            "max_class3": 0.165,
-            "min_rate_pre": 0.58,
-            "min_rate_post": 0.60,
+            "max_class23": 0.185,
+            "max_class3": 0.130,
+            "max_class2": 0.130,
+            "min_rate_pre": 0.62,
+            "min_rate_post": 0.64,
             "min_added_rate": 0.36,
-            "min_added_rate_fill": 0.33,
-            "max_added_c23": 0.50,
-            "max_added_c23_fill": 0.60,
-            "coverage_w": 560.0,
-            "class0_w": 12.0,
-            "c23_penalty": 52.0,
-            "c3_penalty": 42.0,
-            "added_c23_penalty": 3.8,
+            "min_added_rate_fill": 0.32,
+            "max_added_c23": 0.38,
+            "max_added_c23_fill": 0.34,
+            "max_added_c3": 0.20,
+            "coverage_w": 650.0,
+            "class0_w": 11.0,
+            "c23_penalty": 88.0,
+            "c3_penalty": 68.0,
+            "added_c23_penalty": 7.0,
         },
     ]
 
-    def run_scenario(scenario, verbose=True):
+    def run_scenario(scenario: dict, verbose: bool = True):
         selected = []
         selected_names = set()
         train_mask = np.zeros(len(train), dtype=bool)
         valid_mask = np.zeros(len(valid), dtype=bool)
 
-        def choose_best(stage):
+        def choose_best(stage: str):
             cur = eval_mask(valid, valid_mask, label="VALID")
             cur_target = cur["class0_count"]
             cur_selected = cur["selected_count"]
             cur_cov = cur["class0_coverage"]
 
             best = None
+
             for cand in candidates:
                 if cand["name"] in selected_names:
                     continue
 
                 new_train = cand["train_mask"] & ~train_mask
                 new_valid = cand["valid_mask"] & ~valid_mask
+
                 vt = int(new_valid.sum())
                 tt = int(new_train.sum())
 
@@ -854,7 +871,7 @@ def select_rules_with_validation(train: pd.DataFrame, valid: pd.DataFrame, rules
                     continue
                 if added_c23_rate > max_added_c23:
                     continue
-                if added_c3_rate > min(0.40, scenario["max_class3"] + 0.18):
+                if added_c3_rate > scenario["max_added_c3"]:
                     continue
 
                 next_mask = valid_mask | new_valid
@@ -871,38 +888,47 @@ def select_rules_with_validation(train: pd.DataFrame, valid: pd.DataFrame, rules
                 next_c23_rate = next_c23 / next_selected if next_selected else 0.0
 
                 min_rate = scenario["min_rate_pre"] if next_cov < scenario["soft_coverage"] else scenario["min_rate_post"]
+
                 if next_rate < min_rate:
                     continue
                 if next_c23_rate > scenario["max_class23"]:
                     continue
                 if next_c3_rate > scenario["max_class3"]:
                     continue
+                if next_c2_rate > scenario["max_class2"]:
+                    continue
 
                 false_add = vt - va0
+
+                # Reward being below 15% class23 strongly.
+                under15_bonus = max(0.0, 0.15 - next_c23_rate) * 900.0
+                low_c3_bonus = max(0.0, 0.10 - next_c3_rate) * 500.0
+
                 score = (
-                        va0 * (scenario["class0_w"] if stage == "primary" else scenario["class0_w"] + 5.0)
-                        + vt * (0.70 if stage == "primary" else 0.90)
-                        + valid_added_rate * (24.0 if stage == "primary" else 12.0)
+                        va0 * (scenario["class0_w"] if stage == "primary" else scenario["class0_w"] + 4.0)
+                        + vt * (0.60 if stage == "primary" else 0.80)
+                        + valid_added_rate * (26.0 if stage == "primary" else 14.0)
                         + added_wilson * 8.0
                         + next_cov * scenario["coverage_w"]
-                        + (0.03 - min(next_c23_rate, 0.03)) * 250.0
-                        + tr0 * 0.35
-                        - false_add * (2.0 if stage == "primary" else 1.25)
+                        + under15_bonus
+                        + low_c3_bonus
+                        + tr0 * 0.30
+                        - false_add * (2.1 if stage == "primary" else 1.35)
                         - va23 * scenario["added_c23_penalty"]
-                        - va3 * (scenario["added_c23_penalty"] + 1.5)
+                        - va3 * (scenario["added_c23_penalty"] + 2.5)
                         - next_c23_rate * scenario["c23_penalty"]
                         - next_c3_rate * scenario["c3_penalty"]
-                        - next_c2_rate * (scenario["c23_penalty"] * 0.42)
-                        + cand["stable_score"] * 0.02
+                        - next_c2_rate * (scenario["c23_penalty"] * 0.55)
+                        + cand["stable_score"] * 0.015
                 )
 
                 key = (
                     score,
                     -next_c23_rate,
+                    -next_c3_rate,
                     va0,
                     next_cov,
                     next_rate,
-                    -next_c3_rate,
                     -va23,
                     cand["stable_score"],
                 )
@@ -940,7 +966,10 @@ def select_rules_with_validation(train: pd.DataFrame, valid: pd.DataFrame, rules
                         if verbose:
                             print(f"[{scenario['name']}] [FILL STOP] reached target coverage.")
                         break
-                    if cur["class0_coverage"] >= scenario["soft_coverage"] and cur["class23_rate"] >= scenario["max_class23"] * 0.96:
+                    if (
+                            cur["class0_coverage"] >= scenario["soft_coverage"]
+                            and cur["class23_rate"] >= scenario["max_class23"] * 0.96
+                    ):
                         if verbose:
                             print(f"[{scenario['name']}] [FILL STOP] soft coverage reached and class23 near cap.")
                         break
@@ -981,26 +1010,30 @@ def select_rules_with_validation(train: pd.DataFrame, valid: pd.DataFrame, rules
         print(f"\n[SCENARIO RUN] {scenario['name']}")
         sel, tm, vm, tr, va = run_scenario(scenario, verbose=True)
 
+        # Score prioritizes class23 < 15, then coverage, then class0_rate.
         score = (
-                va["class0_rate"] * 100000
-                + va["class0_coverage"] * 420000
+                va["class0_rate"] * 90000
+                + va["class0_coverage"] * 500000
                 + np.log1p(va["selected_count"]) * 700
-                - va["class23_rate"] * 70000
-                - va["class3_rate"] * 50000
+                - va["class23_rate"] * 120000
+                - va["class3_rate"] * 65000
         )
-        if va["class0_rate"] >= 0.68:
+        if va["class23_rate"] <= 0.150:
+            score += 60000
+        elif va["class23_rate"] <= 0.160:
+            score += 25000
+        elif va["class23_rate"] <= 0.170:
             score += 12000
+
         if va["class0_coverage"] >= 0.050:
             score += 6000
         if va["class0_coverage"] >= 0.055:
-            score += 18000
+            score += 35000
         if va["class0_coverage"] >= 0.060:
+            score += 7000
+        if va["class0_rate"] >= 0.70:
             score += 10000
-        if va["class23_rate"] <= 0.198:
-            score += 16000
-        if va["class23_rate"] <= 0.185:
-            score += 8000
-        if va["class3_rate"] <= 0.145:
+        if va["class3_rate"] <= 0.10:
             score += 7000
 
         results.append({
@@ -1233,18 +1266,18 @@ def interpret_final_result(valid_eval: dict):
     class3 = valid_eval["class3_rate"]
     class23 = valid_eval["class23_rate"]
 
-    if rate >= 0.68 and coverage >= 0.055 and class23 <= 0.198:
-        print("type: preferred balanced candidate")
-        print("해석: class0_rate, coverage, class23 보호의 균형이 좋습니다.")
-    elif rate >= 0.68 and coverage >= 0.050 and class23 <= 0.185:
-        print("type: low-class23 precision candidate")
-        print("해석: class23는 낮고 class0_rate는 좋지만 coverage는 중간입니다.")
-    elif rate >= 0.62 and coverage >= 0.060 and class23 <= 0.215:
-        print("type: coverage-priority candidate")
-        print("해석: coverage는 좋지만 class23 위험을 확인해야 합니다.")
+    if class23 <= 0.15 and coverage >= 0.05 and rate >= 0.70:
+        print("type: preferred under-15 class23 candidate")
+        print("해석: class23 15% 이하 목표를 달성하면서 class0_rate와 coverage도 유지했습니다.")
+    elif class23 <= 0.16 and coverage >= 0.052 and rate >= 0.68:
+        print("type: near-under-15 balanced candidate")
+        print("해석: class23가 15%에 근접했고 coverage도 어느 정도 확보했습니다.")
+    elif coverage >= 0.06 and class23 <= 0.185:
+        print("type: coverage-balanced but class23 above 15")
+        print("해석: coverage는 좋지만 class23 15% 목표에는 부족합니다.")
     else:
         print("type: needs review")
-        print("해석: 현재 feature/rule 조합에서 세 목표를 동시에 만족하기 어렵습니다.")
+        print("해석: class23 15% 이하와 coverage 확대를 동시에 만족하지 못했습니다.")
 
     print(f"valid_selected_count : {selected}")
     print(f"valid_class0_rate    : {rate * 100:.2f}%")
@@ -1253,12 +1286,14 @@ def interpret_final_result(valid_eval: dict):
     print(f"valid_class3_rate    : {class3 * 100:.2f}%")
     print(f"valid_class23_rate   : {class23 * 100:.2f}%")
 
-    if coverage < 0.055:
-        print("[NOTE] coverage 5.5% 미만입니다. 커버리지 확대가 부족합니다.")
-    if class23 > 0.198:
-        print("[WARN] class23_rate가 19.8%를 넘습니다.")
-    if class3 > 0.145:
-        print("[WARN] class3_rate가 14.5%를 넘습니다.")
+    if class23 > 0.15:
+        print("[NOTE] class23_rate가 15%를 넘습니다. 더 낮추려면 coverage 하락을 감수해야 할 수 있습니다.")
+    if class23 <= 0.15 and coverage >= 0.055:
+        print("[GOOD] class23 15% 이하와 coverage 5.5% 이상을 동시에 달성했습니다.")
+    if coverage < 0.05:
+        print("[NOTE] coverage 5% 미만입니다. 너무 좁은 필터입니다.")
+    if class3 > 0.10:
+        print("[NOTE] class3_rate가 10%를 넘습니다. class3 보호를 더 강화할 수 있습니다.")
 
 
 def parse_args():
