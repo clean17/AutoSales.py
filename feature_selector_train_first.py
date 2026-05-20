@@ -2,7 +2,7 @@ import argparse
 import math
 import os
 from dataclasses import dataclass
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Set
 
 import numpy as np
 import pandas as pd
@@ -12,28 +12,27 @@ TARGET_COL = "target_before_stop_7"
 
 
 DEFAULT_FEATURES = [
-    "vol5",
-    "vol_ratio_5_15",
-    "today_pct",
-    "max_drop_7d",
     "gap_pct",
-    "dist_to_ma20",
-    "pct_vs_lastweek",
+    "today_pct",
     "dist_to_ma5",
-    "ma5_ma20_gap_chg_1d",
-    "today_tr_val_eok",
-    "tr_val_rank_20d",
 
+    "tr_val_rank_20d",
+    "today_tr_val_eok",
+    "vol_ratio_5_15",
+    "vol5",
     "tr_value_ratio_5d",
+
+    "BB_perc",
+
+    "pct_vs_lastweek",
     "ma5_chg_rate",
-    "three_m_cur_max_chg_rate",
-    "dist_from_low_20d",
-    "_RSI_rebound",
-    "_UltimateOsc",
-    "_MACD_acc",
-    "_BB_perc",
-    "_CCI14",
-    "_ADX14",
+    "max_drop_7d",
+
+    "lower_wick_ratio",
+    "upper_wick_ratio",
+    "body_ratio",
+    "recent_runup",
+    "intraday_return",
 ]
 
 
@@ -75,9 +74,11 @@ def find_date_col(df: pd.DataFrame) -> Optional[str]:
         "ymd",
         "YMD",
     ]
+
     for c in candidates:
         if c in df.columns:
             return c
+
     return None
 
 
@@ -93,6 +94,7 @@ def split_train_valid(df, date_col, valid_ratio):
         print("[WARN] date_col not found. Splitting by current row order.")
 
     split_idx = int(len(df) * (1 - valid_ratio))
+
     train = df.iloc[:split_idx].copy()
     valid = df.iloc[split_idx:].copy()
 
@@ -108,6 +110,7 @@ def precision_recall_lift(y, mask):
     base_rate = total_pos / total_n if total_n else np.nan
 
     count = int(mask.sum())
+
     if count == 0:
         return {
             "count": 0,
@@ -165,12 +168,13 @@ def safe_auc(y_true, x):
 
 def single_feature_report(train, features, target_col):
     rows = []
-    y = train[target_col].astype(int).values
+
     base_rate = train[target_col].mean()
 
     for f in features:
         x = pd.to_numeric(train[f], errors="coerce")
         mask = x.notna()
+
         xv = x[mask].values
         yv = train.loc[mask, target_col].astype(int).values
 
@@ -192,11 +196,21 @@ def single_feature_report(train, features, target_col):
         except Exception:
             bins = pd.cut(x[mask], bins=10, duplicates="drop")
 
-        tmp = pd.DataFrame({"bin": bins, "y": yv})
-        bin_stats = tmp.groupby("bin", observed=False)["y"].agg(["count", "sum", "mean"])
+        tmp = pd.DataFrame({
+            "bin": bins,
+            "y": yv,
+        })
+
+        bin_stats = tmp.groupby("bin", observed=False)["y"].agg(
+            ["count", "sum", "mean"]
+        )
+
         bin_stats["lift"] = bin_stats["mean"] / base_rate
 
-        best = bin_stats.sort_values(["lift", "mean", "count"], ascending=False).iloc[0]
+        best = bin_stats.sort_values(
+            ["lift", "mean", "count"],
+            ascending=False,
+        ).iloc[0]
 
         rows.append({
             "feature": f,
@@ -210,6 +224,57 @@ def single_feature_report(train, features, target_col):
     return pd.DataFrame(rows)
 
 
+def build_corr_report(train, features, corr_threshold):
+    x = train[features].apply(pd.to_numeric, errors="coerce")
+    corr = x.corr(method="spearman")
+
+    rows = []
+    corr_pairs = set()
+
+    for i, a in enumerate(features):
+        for b in features[i + 1:]:
+            c = corr.loc[a, b]
+
+            if pd.isna(c):
+                continue
+
+            if abs(c) >= corr_threshold:
+                rows.append({
+                    "feature_a": a,
+                    "feature_b": b,
+                    "spearman_corr": c,
+                    "abs_corr": abs(c),
+                })
+
+                corr_pairs.add(frozenset([a, b]))
+
+    high_corr_df = pd.DataFrame(
+        rows,
+        columns=[
+            "feature_a",
+            "feature_b",
+            "spearman_corr",
+            "abs_corr",
+        ],
+    )
+
+    if len(high_corr_df):
+        high_corr_df = high_corr_df.sort_values(
+            "abs_corr",
+            ascending=False,
+        )
+
+    return corr, high_corr_df, corr_pairs
+
+
+def has_correlated_pair(features_in_rule: Set[str], new_feature: str, corr_pairs):
+    for f in features_in_rule:
+        if frozenset([f, new_feature]) in corr_pairs:
+            return True
+
+    return False
+
+
 def make_atoms(train, features, quantiles):
     atoms = []
 
@@ -219,6 +284,7 @@ def make_atoms(train, features, quantiles):
 
         if len(x) < 100:
             continue
+
         if x.nunique() <= 3:
             continue
 
@@ -237,6 +303,7 @@ def apply_atom(df, atom):
 
     if atom.op == ">=":
         return x >= atom.threshold
+
     if atom.op == "<=":
         return x <= atom.threshold
 
@@ -267,10 +334,13 @@ def train_rule_score(
 
     if count < min_train_count:
         return -1e18
+
     if target_count <= 0:
         return -1e18
+
     if not np.isfinite(precision) or not np.isfinite(lift):
         return -1e18
+
     if lift < min_train_lift:
         return -1e18
 
@@ -300,6 +370,8 @@ def search_rules_train_only(
         features,
         target_col,
         profile,
+        corr_pairs,
+        block_correlated_in_rule=True,
 ):
     y_train = train[target_col].astype(int).values
     y_valid = valid[target_col].astype(int).values
@@ -325,6 +397,10 @@ def search_rules_train_only(
                 if atom.feature in used_features:
                     continue
 
+                if block_correlated_in_rule:
+                    if has_correlated_pair(used_features, atom.feature, corr_pairs):
+                        continue
+
                 new_atoms = tuple(list(base_atoms) + [atom])
 
                 feature_order = [a.feature for a in new_atoms]
@@ -338,6 +414,7 @@ def search_rules_train_only(
 
                 if rule_key in seen:
                     continue
+
                 seen.add(rule_key)
 
                 train_mask = apply_rule(train, new_atoms)
@@ -363,6 +440,7 @@ def search_rules_train_only(
                     train_score=beam_score,
                     profile_name=profile["name"],
                 )
+
                 candidates_for_beam.append(beam_rule)
 
                 final_score = train_rule_score(
@@ -380,6 +458,7 @@ def search_rules_train_only(
                         train_score=final_score,
                         profile_name=profile["name"],
                     )
+
                     candidates_for_final.append(final_rule)
 
         if not candidates_for_beam:
@@ -433,7 +512,10 @@ def rules_to_df(rules):
             "train_score": r.train_score,
         }
 
-        for prefix, m in [("train", r.train_metrics), ("valid", r.valid_metrics)]:
+        for prefix, m in [
+            ("train", r.train_metrics),
+            ("valid", r.valid_metrics),
+        ]:
             row[f"{prefix}_count"] = m["count"]
             row[f"{prefix}_target_count"] = m["target_count"]
             row[f"{prefix}_precision"] = m["precision"]
@@ -444,7 +526,8 @@ def rules_to_df(rules):
 
         row["precision_gap_valid_minus_train"] = (
             row["valid_precision"] - row["train_precision"]
-            if np.isfinite(row["valid_precision"]) and np.isfinite(row["train_precision"])
+            if np.isfinite(row["valid_precision"])
+               and np.isfinite(row["train_precision"])
             else np.nan
         )
 
@@ -502,11 +585,15 @@ def leave_one_feature_out(
         target_col,
         baseline_rules_df,
         profiles,
+        corr_pairs,
+        block_correlated_in_rule,
 ):
     rows = []
 
     for profile in profiles:
-        profile_rules = baseline_rules_df[baseline_rules_df["profile"] == profile["name"]].copy()
+        profile_rules = baseline_rules_df[
+            baseline_rules_df["profile"] == profile["name"]
+            ].copy()
 
         if len(profile_rules) == 0:
             continue
@@ -524,6 +611,8 @@ def leave_one_feature_out(
                 features=sub_features,
                 target_col=target_col,
                 profile=profile,
+                corr_pairs=corr_pairs,
+                block_correlated_in_rule=block_correlated_in_rule,
             )
 
             rules_df = rules_to_df(rules)
@@ -611,7 +700,6 @@ def aggregate_feature_selection(
             auc = np.nan
             best_bin_lift = np.nan
 
-        # 통합 점수
         score = 0.0
 
         score += profiles_used * 8.0
@@ -639,38 +727,60 @@ def aggregate_feature_selection(
         if np.isfinite(best_bin_lift):
             score += max(0.0, best_bin_lift - 1.0) * 5.0
 
-        # 판정
         strong_usage = profiles_used >= 2 and total_usage_count >= 20
+
         strong_drop = (
-                              np.isfinite(mean_train_score_drop) and mean_train_score_drop >= 2.0
+                              np.isfinite(mean_train_score_drop)
+                              and mean_train_score_drop >= 2.0
                       ) or (
-                              np.isfinite(mean_valid_precision_drop) and mean_valid_precision_drop >= 0.03
+                              np.isfinite(mean_valid_precision_drop)
+                              and mean_valid_precision_drop >= 0.03
                       )
 
         valid_stable = (
-                               np.isfinite(avg_valid_lift) and avg_valid_lift >= 1.25
+                               np.isfinite(avg_valid_lift)
+                               and avg_valid_lift >= 1.25
                        ) and (
-                               not np.isfinite(avg_gap) or avg_gap <= 0.10
+                               not np.isfinite(avg_gap)
+                               or avg_gap <= 0.10
                        )
 
         weak = (
                 total_usage_count == 0
-                and (not np.isfinite(mean_train_score_drop) or mean_train_score_drop <= 0)
-                and (not np.isfinite(mean_valid_precision_drop) or mean_valid_precision_drop <= 0)
+                and (
+                        not np.isfinite(mean_train_score_drop)
+                        or mean_train_score_drop <= 0
+                )
+                and (
+                        not np.isfinite(mean_valid_precision_drop)
+                        or mean_valid_precision_drop <= 0
+                )
         )
 
-        if strong_usage and strong_drop and valid_stable:
+        # CORE 조건 강화:
+        # valid precision drop이 양수여야 진짜 핵심으로 본다.
+        if (
+                strong_usage
+                and strong_drop
+                and valid_stable
+                and np.isfinite(mean_valid_precision_drop)
+                and mean_valid_precision_drop >= 0.01
+        ):
             judgement = "KEEP_CORE"
-            reason = "여러 설정에서 반복 사용되고 제거 시 성능 하락이 있으며 VALID도 안정적"
+            reason = "여러 설정에서 반복 사용되고 제거 시 TRAIN/VALID 성능 하락이 확인됨"
+
         elif strong_usage and valid_stable:
             judgement = "KEEP_USEFUL"
             reason = "여러 설정에서 반복 사용되고 VALID 성능도 유지됨"
+
         elif total_usage_count > 0 and valid_stable:
             judgement = "CONDITIONAL"
             reason = "특정 설정/룰에서만 유용하므로 보조 피쳐로 유지"
+
         elif weak:
             judgement = "REMOVE_CANDIDATE"
             reason = "상위 룰 사용이 없고 제거 영향도 거의 없음"
+
         else:
             judgement = "CHECK_MANUALLY"
             reason = "사용 빈도, 제거 영향, VALID 안정성이 애매함"
@@ -714,6 +824,88 @@ def aggregate_feature_selection(
     out = out.drop(columns=["_order"])
 
     return out
+
+
+def correlated_feature_pruning(final_df, high_corr_df):
+    if len(high_corr_df) == 0:
+        final_df["corr_prune_status"] = "KEEP"
+        final_df["corr_prune_reason"] = ""
+        return final_df, pd.DataFrame()
+
+    score_map = final_df.set_index("feature")["selection_score"].to_dict()
+    judgement_map = final_df.set_index("feature")["judgement"].to_dict()
+
+    keep_status = {f: "KEEP" for f in final_df["feature"]}
+    reasons = {f: "" for f in final_df["feature"]}
+
+    rows = []
+
+    for _, r in high_corr_df.iterrows():
+        a = r["feature_a"]
+        b = r["feature_b"]
+        corr = r["spearman_corr"]
+        abs_corr = r["abs_corr"]
+
+        if a not in score_map or b not in score_map:
+            continue
+
+        score_a = score_map.get(a, -1e18)
+        score_b = score_map.get(b, -1e18)
+
+        judge_a = judgement_map.get(a, "")
+        judge_b = judgement_map.get(b, "")
+
+        # 핵심 피쳐는 약간 보호.
+        # 둘 다 CORE가 아니면 점수 높은 쪽 유지.
+        core_order = {
+            "KEEP_CORE": 4,
+            "KEEP_USEFUL": 3,
+            "CONDITIONAL": 2,
+            "CHECK_MANUALLY": 1,
+            "REMOVE_CANDIDATE": 0,
+        }
+
+        rank_a = core_order.get(judge_a, 0)
+        rank_b = core_order.get(judge_b, 0)
+
+        if rank_a > rank_b:
+            winner, loser = a, b
+        elif rank_b > rank_a:
+            winner, loser = b, a
+        else:
+            if score_a >= score_b:
+                winner, loser = a, b
+            else:
+                winner, loser = b, a
+
+        # 이미 더 강한 이유로 DROP된 피쳐는 유지
+        if keep_status.get(loser) != "CORRELATED_DROP_CANDIDATE":
+            keep_status[loser] = "CORRELATED_DROP_CANDIDATE"
+            reasons[loser] = (
+                f"{winner}와 상관 {corr:.3f}. "
+                f"{winner}의 judgement/score가 더 우수하여 중복 후보로 분류"
+            )
+
+        rows.append({
+            "feature_a": a,
+            "feature_b": b,
+            "spearman_corr": corr,
+            "abs_corr": abs_corr,
+            "winner": winner,
+            "drop_candidate": loser,
+            "winner_score": score_map[winner],
+            "drop_score": score_map[loser],
+            "winner_judgement": judgement_map[winner],
+            "drop_judgement": judgement_map[loser],
+        })
+
+    final_df = final_df.copy()
+    final_df["corr_prune_status"] = final_df["feature"].map(keep_status)
+    final_df["corr_prune_reason"] = final_df["feature"].map(reasons)
+
+    corr_prune_df = pd.DataFrame(rows)
+
+    return final_df, corr_prune_df
 
 
 def make_profiles(args):
@@ -764,23 +956,41 @@ def make_profiles(args):
 
 
 def print_recommended_features(final_df):
-    keep = final_df[
-        final_df["judgement"].isin(["KEEP_CORE", "KEEP_USEFUL", "CONDITIONAL"])
-    ]["feature"].tolist()
+    usable = final_df[
+        final_df["judgement"].isin([
+            "KEEP_CORE",
+            "KEEP_USEFUL",
+            "CONDITIONAL",
+        ])
+    ].copy()
+
+    usable = usable[
+        usable["corr_prune_status"] != "CORRELATED_DROP_CANDIDATE"
+        ]
 
     remove = final_df[
         final_df["judgement"].isin(["REMOVE_CANDIDATE"])
     ]["feature"].tolist()
 
+    correlated_drop = final_df[
+        final_df["corr_prune_status"] == "CORRELATED_DROP_CANDIDATE"
+        ]["feature"].tolist()
+
     print("\n[RECOMMENDED DEFAULT_FEATURES]")
     print("DEFAULT_FEATURES = [")
-    for f in keep:
+    for f in usable["feature"].tolist():
         print(f'    "{f}",')
     print("]")
 
     print("\n[REMOVE_CANDIDATES]")
     print("REMOVE_CANDIDATES = [")
     for f in remove:
+        print(f'    "{f}",')
+    print("]")
+
+    print("\n[CORRELATED_DROP_CANDIDATES]")
+    print("CORRELATED_DROP_CANDIDATES = [")
+    for f in correlated_drop:
         print(f'    "{f}",')
     print("]")
 
@@ -801,6 +1011,14 @@ def main():
 
     parser.add_argument("--skip-loo", action="store_true")
 
+    parser.add_argument("--corr-threshold", type=float, default=0.90)
+
+    parser.add_argument(
+        "--allow-correlated-in-rule",
+        action="store_true",
+        help="If set, correlated features can appear together in one rule.",
+    )
+
     args = parser.parse_args()
 
     os.makedirs(args.out, exist_ok=True)
@@ -815,6 +1033,7 @@ def main():
     df[args.target] = df[args.target].astype(int)
 
     features = [f for f in DEFAULT_FEATURES if f in df.columns]
+
     if not features:
         raise ValueError("No usable features found.")
 
@@ -826,6 +1045,8 @@ def main():
     print("[INFO] target_rate:", df[args.target].mean())
     print("[INFO] date_col:", date_col)
     print("[INFO] features:", features)
+    print("[INFO] corr_threshold:", args.corr_threshold)
+    print("[INFO] allow_correlated_in_rule:", args.allow_correlated_in_rule)
     print("=" * 80)
 
     train, valid = split_train_valid(df, date_col, args.valid_ratio)
@@ -833,9 +1054,33 @@ def main():
     print("[INFO] train rows:", len(train), "target_rate:", train[args.target].mean())
     print("[INFO] valid rows:", len(valid), "target_rate:", valid[args.target].mean())
 
+    corr_mat, high_corr_df, corr_pairs = build_corr_report(
+        train=train,
+        features=features,
+        corr_threshold=args.corr_threshold,
+    )
+
+    corr_mat.to_csv(
+        os.path.join(args.out, "00_corr_matrix_spearman.csv"),
+        encoding="utf-8-sig",
+    )
+
+    high_corr_df.to_csv(
+        os.path.join(args.out, "00_high_corr_pairs.csv"),
+        index=False,
+        encoding="utf-8-sig",
+    )
+
+    if len(high_corr_df):
+        print("\n[HIGH CORR PAIRS]")
+        print(high_corr_df.to_string(index=False))
+    else:
+        print("\n[HIGH CORR PAIRS] none")
+
     profiles = make_profiles(args)
 
     single_df = single_feature_report(train, features, args.target)
+
     single_df.to_csv(
         os.path.join(args.out, "01_single_feature_report.csv"),
         index=False,
@@ -844,6 +1089,8 @@ def main():
 
     all_rules = []
     all_raw_rules = []
+
+    block_correlated_in_rule = not args.allow_correlated_in_rule
 
     for profile in profiles:
         print("=" * 80)
@@ -856,6 +1103,8 @@ def main():
             features=features,
             target_col=args.target,
             profile=profile,
+            corr_pairs=corr_pairs,
+            block_correlated_in_rule=block_correlated_in_rule,
         )
 
         all_rules.extend(rules)
@@ -902,6 +1151,8 @@ def main():
             target_col=args.target,
             baseline_rules_df=rules_df,
             profiles=profiles,
+            corr_pairs=corr_pairs,
+            block_correlated_in_rule=block_correlated_in_rule,
         )
 
     loo_df.to_csv(
@@ -917,8 +1168,19 @@ def main():
         loo_df=loo_df,
     )
 
+    final_df, corr_prune_df = correlated_feature_pruning(
+        final_df=final_df,
+        high_corr_df=high_corr_df,
+    )
+
     final_df.to_csv(
         os.path.join(args.out, "06_final_feature_selection.csv"),
+        index=False,
+        encoding="utf-8-sig",
+    )
+
+    corr_prune_df.to_csv(
+        os.path.join(args.out, "07_correlated_feature_pruning.csv"),
         index=False,
         encoding="utf-8-sig",
     )
@@ -927,8 +1189,10 @@ def main():
     show_cols = [
         "feature",
         "judgement",
+        "corr_prune_status",
         "selection_score",
         "reason",
+        "corr_prune_reason",
         "profiles_used",
         "total_usage_count",
         "avg_valid_precision_when_used",
@@ -939,6 +1203,7 @@ def main():
         "auc_oriented",
         "best_bin_lift",
     ]
+
     show_cols = [c for c in show_cols if c in final_df.columns]
     print(final_df[show_cols].to_string(index=False))
 
