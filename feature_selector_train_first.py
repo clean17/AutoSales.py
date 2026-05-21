@@ -13,26 +13,28 @@ TARGET_COL = "target_before_stop_7"
 
 DEFAULT_FEATURES = [
     "gap_pct",
+    "lower_wick_ratio",
     "today_pct",
+
+    "vol5",
     "dist_to_ma5",
+    "max_drop_7d",
+
+    "body_ratio",
+    "recent_runup",
+    "intraday_return",
+
+    "rebound_from_7d_low",
+    "BB_perc",
+
 
     "tr_val_rank_20d",
     "today_tr_val_eok",
     "vol_ratio_5_15",
-    "vol5",
-    "tr_value_ratio_5d",
-
-    "BB_perc",
 
     "pct_vs_lastweek",
-    "ma5_chg_rate",
-    "max_drop_7d",
-
-    "lower_wick_ratio",
     "upper_wick_ratio",
-    "body_ratio",
-    "recent_runup",
-    "intraday_return",
+    "up_down_tr_value_ratio_5d_log",
 ]
 
 
@@ -1217,3 +1219,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# 실행방법
+# python feature_selector_train_first.py   --csv csv/low_result_7_desc.csv   --out feature_selector_corr_pruned   --max-depth 4   --beam-width 300   --top-k 150   --corr-threshold 0.90
