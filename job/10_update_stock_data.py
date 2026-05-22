@@ -8,7 +8,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 import pandas as pd
 from datetime import datetime, timedelta
-from utils import fetch_stock_data, get_kor_ticker_dict_list
+from utils import fetch_stock_data, get_kor_ticker_dict_list, get_stock_name
 import time
 
 start = time.time()   # 시작 시간(초)
@@ -33,7 +33,7 @@ tickers = list(tickers_dict.keys())
 
 for count, ticker in enumerate(tickers):
     time.sleep(3)
-    stock_name = tickers_dict.get(ticker).get("stock_name", 'Unknown Stock')
+    stock_name = get_stock_name(tickers_dict, ticker)
     # if count % 100 == 0:
     #     print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
 

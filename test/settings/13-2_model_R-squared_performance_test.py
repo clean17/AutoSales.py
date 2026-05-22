@@ -17,7 +17,7 @@ BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
 sys.path.append(BASE_DIR)
 
 from utils import create_multistep_dataset, add_technical_features, create_lstm_model, get_kor_ticker_dict_list, \
-    drop_trading_halt_rows, fetch_stock_data
+    drop_trading_halt_rows, fetch_stock_data, get_stock_name
 
 # 시드 고정 테스트
 import numpy as np, tensorflow as tf, random
@@ -63,7 +63,7 @@ for i in range(1):
     total_cnt = 0
 
     for count, ticker in enumerate(tickers):
-        stock_name = tickers_dict.get(ticker).get("stock_name", 'Unknown Stock')
+        stock_name = get_stock_name(tickers_dict, ticker)
         print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
 
         # 1. 데이터 수집

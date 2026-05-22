@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 from utils import create_lstm_model, create_multistep_dataset, fetch_stock_data, add_technical_features, \
     get_kor_ticker_dict_list, plot_candles_daily, plot_candles_weekly, drop_trading_halt_rows, regression_metrics, \
     pass_filter, inverse_close_matrix_fast, get_next_business_days, make_naive_preds, smape, pass_filter_v2, \
-    log_returns_from_prices, inverse_close_from_Xscale_fast, prices_from_logrets, drop_sparse_columns
+    log_returns_from_prices, inverse_close_from_Xscale_fast, prices_from_logrets, drop_sparse_columns, get_stock_name
 import requests
 import time
 
@@ -73,7 +73,7 @@ is_first_flag = True
 # 데이터 가져오는것만 1시간 걸리네
 for count, ticker in enumerate(tickers):
     # time.sleep(0.2)  # 200ms 대기
-    stock_name = tickers_dict.get(ticker).get("stock_name", 'Unknown Stock')
+    stock_name = get_stock_name(tickers_dict, ticker)
     # stock_name = '파인엠텍' # 테스트용
     print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
 

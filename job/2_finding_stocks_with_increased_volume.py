@@ -30,9 +30,7 @@ else:
     raise FileNotFoundError("utils.py를 상위 디렉터리에서 찾지 못했습니다.")
 
 from utils import fetch_stock_data, get_kor_ticker_list, get_kor_ticker_dict_list, add_technical_features, \
-    plot_candles_weekly, plot_candles_daily, drop_trading_halt_rows, drop_sparse_columns
-
-
+    plot_candles_weekly, plot_candles_daily, drop_trading_halt_rows, drop_sparse_columns, get_stock_name
 
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
 root_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(=루트)
@@ -60,7 +58,7 @@ for count, ticker in enumerate(tickers):
     condition_passed = True
     condition_passed2 = True
     time.sleep(0.1)  # x00ms 대기
-    stock_name = tickers_dict.get(ticker).get("stock_name", 'Unknown Stock')
+    stock_name = get_stock_name(tickers_dict, ticker)
     # if count % 100 == 0:
     #     print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
 

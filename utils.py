@@ -423,6 +423,20 @@ def get_kor_ticker_list():
     tickers = [item["stock_code"] for item in data if "stock_code" in item]
     return tickers
 
+
+def get_stock_name(tickers_dict, ticker):
+    ticker = str(ticker).zfill(6)
+    ticker_info = tickers_dict.get(ticker)
+
+    if isinstance(ticker_info, dict):
+        return ticker_info.get("stock_name", "Unknown Stock")
+
+    if isinstance(ticker_info, str):
+        return ticker_info
+
+    return "Unknown Stock"
+
+
 def get_kor_ticker_dict_list():
     """
     {

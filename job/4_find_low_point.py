@@ -40,7 +40,7 @@ else:
 
 from utils import get_kor_ticker_dict_list, add_technical_features, plot_candles_weekly, plot_candles_daily, \
     drop_sparse_columns, drop_trading_halt_rows, signal_any_drop, low_weekly_check, extract_numbers_from_filenames, \
-    safe_read_pickle, safe_rate, to_float, round_float_features
+    safe_read_pickle, safe_rate, to_float, round_float_features, get_stock_name
 
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
 root_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(=루트)
@@ -148,7 +148,7 @@ def insert_low_point_stock(row, data, market_value, save_path):
 def process_ticker(ticker, tickers_dict, i):
     results = []
 
-    stock_name = tickers_dict.get(ticker).get("stock_name", 'Unknown Stock')
+    stock_name = get_stock_name(tickers_dict, ticker)
     filepath = os.path.join(pickle_dir, f'{ticker}.pkl')
     if not os.path.exists(filepath):
         print(f"[process_ticker] {stock_name} ({ticker}) 파일 없음")
@@ -194,7 +194,7 @@ def process_ticker(ticker, tickers_dict, i):
 
 
 def process_one_with_df(data, idx, ticker, tickers_dict):
-    stock_name = tickers_dict.get(ticker).get("stock_name", 'Unknown Stock')
+    stock_name = get_stock_name(tickers_dict, ticker)
 
     ########################################################################
 

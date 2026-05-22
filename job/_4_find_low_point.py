@@ -57,7 +57,7 @@ from utils import (
     safe_read_pickle,
     safe_rate,
     to_float,
-    round_float_features
+    round_float_features, get_stock_name
 )
 
 
@@ -224,7 +224,7 @@ def prepare_stock_dataframe(df):
 def process_ticker(ticker, tickers_dict, i):
     results = []
 
-    stock_name = tickers_dict.get(ticker).get("stock_name", 'Unknown Stock')
+    stock_name = get_stock_name(tickers_dict, ticker)
     filepath = os.path.join(pickle_dir, f'{ticker}.pkl')
 
     if not os.path.exists(filepath):
@@ -259,7 +259,7 @@ def process_ticker(ticker, tickers_dict, i):
 
 
 def process_one_with_df(data, idx, ticker, tickers_dict):
-    stock_name = tickers_dict.get(ticker).get("stock_name", 'Unknown Stock')
+    stock_name = get_stock_name(tickers_dict, ticker)
 
     ########################################################################
 

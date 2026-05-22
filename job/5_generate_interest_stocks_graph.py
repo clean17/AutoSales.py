@@ -26,7 +26,8 @@ else:
     raise FileNotFoundError("utils.py를 상위 디렉터리에서 찾지 못했습니다.")
 
 from utils import add_technical_features, plot_candles_weekly, plot_candles_daily, \
-    drop_sparse_columns, drop_trading_halt_rows, get_kor_summary_ticker_dict_list, get_favorite_ticker_dict_list
+    drop_sparse_columns, drop_trading_halt_rows, get_kor_summary_ticker_dict_list, get_favorite_ticker_dict_list, \
+    get_stock_name
 
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
 root_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(=루트)
@@ -41,7 +42,7 @@ output_dir = f'F:\\interest_stocks\\{year}\\{month}\\{day}'
 
 
 def process_one(idx, count, ticker, tickers_dict):
-    stock_name = tickers_dict.get(ticker).get("stock_name", 'Unknown Stock')
+    stock_name = get_stock_name(tickers_dict, ticker)
 
     filepath = os.path.join(pickle_dir, f'{ticker}.pkl')
     if not os.path.exists(filepath):
