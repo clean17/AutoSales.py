@@ -54,7 +54,6 @@ DEFAULT_FEATURES = [
     "gap_pct",
     "lower_wick_ratio",
     "pct_vs_lastweek",
-    "tr_val_rank_20d",
     "ma5_chg_rate",
 ]
 
@@ -91,7 +90,6 @@ ALLOWED_OPS = {
     "gap_pct": ["<="],
     "lower_wick_ratio": ["<="],
     "pct_vs_lastweek": ["<="],
-    "tr_val_rank_20d": ["<="],
     "ma5_chg_rate": [">=", "<="],
 }
 
@@ -539,13 +537,6 @@ def default_extra_thresholds() -> Dict[str, List[Tuple[str, float]]]:
             ("<=", 0.21),
         ],
 
-        "tr_val_rank_20d": [
-            ("<=", 0.45),
-            ("<=", 0.5),
-            ("<=", 0.7),
-            ("<=", 0.8),
-            ("<=", 0.95),
-        ],
     }
 
 
@@ -1592,3 +1583,26 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# 실행방법
+"""
+python stable_rule_miner_final.py \
+  --csv csv/low_result_7_desc.csv \
+  --out stable_rule_miner_final_wf150 \
+  --date-col today \
+  --max-depth 6 \
+  --beam-width 1500 \
+  --top-k 150 \
+  --min-train-count 60 \
+  --min-valid-count 40 \
+  --min-train-precision 0.55 \
+  --min-valid-precision 0.62 \
+  --min-train-lift 1.25 \
+  --min-valid-lift 1.50 \
+  --max-precision-gap 0.18 \
+  --min-month-count 5 \
+  --min-valid-pass-month-rate 0.20 \
+  --valid-count-weight 7 \
+  --wf-top-rules 150 \
+  --simplify
+  """
