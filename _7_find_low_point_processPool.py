@@ -72,7 +72,7 @@ else:
 
 def process_ticker(ticker, tickers_dict, i):
     results = []
-    stock_name = tickers_dict.get(ticker, 'Unknown Stock')
+    stock_name = tickers_dict.get(ticker).get("stock_name", 'Unknown Stock')
     filepath = os.path.join(pickle_dir, f'{ticker}.pkl')
     if not os.path.exists(filepath):
         print(f"[process_ticker] [idx={i}] {ticker} 파일 없음")
@@ -120,7 +120,7 @@ def process_ticker(ticker, tickers_dict, i):
     return results
 
 def process_one_with_df(df, idx, ticker, tickers_dict):
-    stock_name = tickers_dict.get(ticker, 'Unknown Stock')
+    stock_name = tickers_dict.get(ticker).get("stock_name", 'Unknown Stock')
 
     # 과거 데이터(data)와 / 검증 데이터(remaining_data)로 분리
     # [0:150](0~149), idx = 10 >> [0:140](0~139) / [140:](140~149)

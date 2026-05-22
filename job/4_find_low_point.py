@@ -148,7 +148,7 @@ def insert_low_point_stock(row, data, market_value, save_path):
 def process_ticker(ticker, tickers_dict, i):
     results = []
 
-    stock_name = tickers_dict.get(ticker, 'Unknown Stock')
+    stock_name = tickers_dict.get(ticker).get("stock_name", 'Unknown Stock')
     filepath = os.path.join(pickle_dir, f'{ticker}.pkl')
     if not os.path.exists(filepath):
         print(f"[process_ticker] {stock_name} ({ticker}) 파일 없음")
@@ -194,7 +194,7 @@ def process_ticker(ticker, tickers_dict, i):
 
 
 def process_one_with_df(data, idx, ticker, tickers_dict):
-    stock_name = tickers_dict.get(ticker, 'Unknown Stock')
+    stock_name = tickers_dict.get(ticker).get("stock_name", 'Unknown Stock')
 
     ########################################################################
 

@@ -65,7 +65,7 @@ for i in range(1):
     total_cnt = 0
 
     for count, ticker in enumerate(tickers):
-        stock_name = tickers_dict.get(ticker, 'Unknown Stock')
+        stock_name = tickers_dict.get(ticker).get("stock_name", 'Unknown Stock')
         print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
 
         # 1. 데이터 수집

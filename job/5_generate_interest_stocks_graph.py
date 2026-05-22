@@ -41,7 +41,7 @@ output_dir = f'F:\\interest_stocks\\{year}\\{month}\\{day}'
 
 
 def process_one(idx, count, ticker, tickers_dict):
-    stock_name = tickers_dict.get(ticker, 'Unknown Stock')
+    stock_name = tickers_dict.get(ticker).get("stock_name", 'Unknown Stock')
 
     filepath = os.path.join(pickle_dir, f'{ticker}.pkl')
     if not os.path.exists(filepath):

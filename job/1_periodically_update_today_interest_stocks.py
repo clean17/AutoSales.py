@@ -48,7 +48,7 @@ tickers = list(tickers_dict.keys())
 
 for count, ticker in enumerate(tickers):
     time.sleep(1)  # 1초 대기
-    stock_name = tickers_dict.get(ticker, 'Unknown Stock')
+    stock_name = tickers_dict.get(ticker).get("stock_name", 'Unknown Stock')
     # print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
 
 

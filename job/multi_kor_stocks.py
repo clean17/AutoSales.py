@@ -79,7 +79,7 @@ R² → 모델 설명력, 0~1 범위에서 클수록 좋음
 # 데이터 가져오는것만 1시간 걸리네
 for count, ticker in enumerate(tickers):
     time.sleep(0.2)  # 200ms 대기
-    stock_name = tickers_dict.get(ticker, 'Unknown Stock')
+    stock_name = tickers_dict.get(ticker).get("stock_name", 'Unknown Stock')
     # stock_name = '파인엠텍' # 테스트용
     if count % 100 == 0:
         print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")

@@ -60,7 +60,7 @@ for count, ticker in enumerate(tickers):
     condition_passed = True
     condition_passed2 = True
     time.sleep(0.1)  # x00ms 대기
-    stock_name = tickers_dict.get(ticker, 'Unknown Stock')
+    stock_name = tickers_dict.get(ticker).get("stock_name", 'Unknown Stock')
     # if count % 100 == 0:
     #     print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
 
