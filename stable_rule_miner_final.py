@@ -32,10 +32,9 @@ DEFAULT_FEATURES = [
     # ============================================================
     "room_to_20d_high",
     "room_to_60d_high",
-    "open_to_close_pct",
     "price_power_value",
     "body_value_power",
-    "intraday_body_power",
+    # "intraday_body_power",
     "rebound_vs_prior_drop",
 
     # ============================================================
@@ -50,7 +49,7 @@ DEFAULT_FEATURES = [
     "intraday_return",
     "BB_perc",
     "dist_to_ma5",
-    "recent_runup",
+    # "recent_runup",
     "gap_pct",
     "lower_wick_ratio",
     "pct_vs_lastweek",
@@ -72,10 +71,9 @@ ALLOWED_OPS = {
     # 새 피쳐
     "room_to_20d_high": [">=", "<="],
     "room_to_60d_high": [">=", "<="],
-    "open_to_close_pct": [">="],
     "price_power_value": [">="],
     "body_value_power": [">="],
-    "intraday_body_power": [">="],
+    # "intraday_body_power": [">="],
     "rebound_vs_prior_drop": [">=", "<="],
 
     # 시장
@@ -86,7 +84,7 @@ ALLOWED_OPS = {
     "intraday_return": [">="],
     "BB_perc": ["<="],
     "dist_to_ma5": ["<="],
-    "recent_runup": ["<="],
+    # "recent_runup": ["<="],
     "gap_pct": ["<="],
     "lower_wick_ratio": ["<="],
     "pct_vs_lastweek": ["<="],
@@ -421,14 +419,6 @@ def default_extra_thresholds() -> Dict[str, List[Tuple[str, float]]]:
             ("<=", 50.0),
         ],
 
-        "open_to_close_pct": [
-            (">=", 3.0),
-            (">=", 5.0),
-            (">=", 8.0),
-            (">=", 10.0),
-            (">=", 15.0),
-        ],
-
         "price_power_value": [
             (">=", 20.0),
             (">=", 40.0),
@@ -446,13 +436,13 @@ def default_extra_thresholds() -> Dict[str, List[Tuple[str, float]]]:
             (">=", 40.0),
         ],
 
-        "intraday_body_power": [
-            (">=", 3.0),
-            (">=", 5.0),
-            (">=", 8.0),
-            (">=", 10.0),
-            (">=", 15.0),
-        ],
+        # "intraday_body_power": [
+        #     (">=", 3.0),
+        #     (">=", 5.0),
+        #     (">=", 8.0),
+        #     (">=", 10.0),
+        #     (">=", 15.0),
+        # ],
 
         "rebound_vs_prior_drop": [
             (">=", 1.0),
@@ -504,14 +494,14 @@ def default_extra_thresholds() -> Dict[str, List[Tuple[str, float]]]:
             ("<=", -2.0),
         ],
 
-        "recent_runup": [
-            ("<=", -16.0),
-            ("<=", -12.0),
-            ("<=", -10.7),
-            ("<=", -8.0),
-            ("<=", -5.0),
-            ("<=", 0.0),
-        ],
+        # "recent_runup": [
+        #     ("<=", -16.0),
+        #     ("<=", -12.0),
+        #     ("<=", -10.7),
+        #     ("<=", -8.0),
+        #     ("<=", -5.0),
+        #     ("<=", 0.0),
+        # ],
 
         "gap_pct": [
             ("<=", -2.0),

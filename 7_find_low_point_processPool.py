@@ -520,7 +520,7 @@ def process_one_with_df(df, idx, ticker, tickers_dict, market_context):
     #     _up_tr_value_5d / (_down_tr_value_5d + 1e-9)
     # )
 
-    # 이미 많이 오른 종목 제거
+    # 이미 많이 오른 종목 제거.. 추격매수 위험 필터
     _recent_runup        = data['등락률'].iloc[-5:-1].sum()
 
     # 시가 대비 종가가 얼마나 회복되었는가 (AUC 0.514 - 거의 랜덤)
@@ -587,14 +587,14 @@ def process_one_with_df(df, idx, ticker, tickers_dict, market_context):
         "lower_wick_ratio": lower_wick_ratio,
         "upper_wick_ratio": upper_wick_ratio,
         "body_ratio": body_ratio,
-        "recent_runup": _recent_runup,
+        # "recent_runup": _recent_runup,
         "intraday_return": intraday_return,
 
         "rebound_from_7d_low": rebound_from_7d_low,
 
         "price_power_value": price_power_value,
         "body_value_power": body_value_power,
-        "intraday_body_power": intraday_body_power,
+        # "intraday_body_power": intraday_body_power,
         "room_to_20d_high": room_to_20d_high,
         "room_to_60d_high": room_to_60d_high,
         "rebound_vs_prior_drop": rebound_vs_prior_drop,
