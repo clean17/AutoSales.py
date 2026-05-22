@@ -268,6 +268,9 @@ def process_ticker(ticker, tickers_dict, i, market_context):
     # 결측 제거
     df, _ = drop_sparse_columns(df, threshold=0.10, check_inf=True, inplace=True)
 
+    # drop 이후 다시 생성
+    df = add_technical_features(df)
+
     # 데이터가 부족하면 패스
     if df.empty or len(df) < 70:
         return None
