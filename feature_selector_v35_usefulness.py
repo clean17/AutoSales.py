@@ -31,7 +31,6 @@ DEFAULT_FEATURES = [
 
     # 거래대금
     "today_tr_val_eok",
-    "tr_val_rank_20d",
 
     # 밴드 / 캔들
     "BB_perc",
@@ -49,11 +48,8 @@ DEFAULT_FEATURES = [
 
     # 시장 상태
     "market_today_pct",
-    "market_5d_pct",
-    "market_breadth_up_ratio",
 
     # stable_rule_miner 쪽 구버전/추가 후보
-    "open_to_close_pct",
     "body_value_power",
     "intraday_body_power",
     "rebound_vs_prior_drop",
@@ -80,15 +76,12 @@ NON_MONOTONIC_FEATURES = [
 # 시장/장세 필터
 REGIME_FEATURES = [
     "market_today_pct",
-    "market_5d_pct",
-    "market_breadth_up_ratio",
 ]
 
 
 # 반복적으로 약했던 피쳐.
 # 강제 제거는 아니고, 최종 등급에서 참고만 한다.
 WEAK_HINT_FEATURES = [
-    "tr_val_rank_20d",
     "lower_wick_ratio",
     "today_tr_val_eok",
 ]
@@ -107,7 +100,6 @@ ALLOWED_OPS = {
     "dist_to_ma5": ["<=", ">="],
 
     "today_tr_val_eok": [">=", "<="],
-    "tr_val_rank_20d": [">=", "<="],
 
     "BB_perc": ["<=", ">="],
     "lower_wick_ratio": ["<="],
@@ -122,10 +114,7 @@ ALLOWED_OPS = {
     "room_to_60d_high": [">=", "<="],
 
     "market_today_pct": [">="],
-    "market_5d_pct": [">=", "<="],
-    "market_breadth_up_ratio": [">="],
 
-    "open_to_close_pct": [">="],
     "body_value_power": [">="],
     "intraday_body_power": [">="],
     "rebound_vs_prior_drop": [">=", "<="],
@@ -496,15 +485,6 @@ def default_extra_thresholds() -> Dict[str, List[Tuple[str, float]]]:
             (">=", 0.5), (">=", 1.0), (">=", 2.0),
             (">=", 3.0),
         ],
-        "market_5d_pct": [
-            ("<=", -10.0), ("<=", -5.0), ("<=", -3.0),
-            ("<=", -2.0), ("<=", -1.799), (">=", 3.0),
-            (">=", 5.0),
-        ],
-        "market_breadth_up_ratio": [
-            (">=", 0.50), (">=", 0.60), (">=", 0.70),
-            (">=", 0.80), (">=", 0.85),
-        ],
         "today_tr_val_eok": [
             (">=", 3.0), (">=", 5.0), (">=", 8.0),
             (">=", 10.0), (">=", 20.0), ("<=", 300.0),
@@ -528,10 +508,6 @@ def default_extra_thresholds() -> Dict[str, List[Tuple[str, float]]]:
         "price_power_value": [
             (">=", 20.0), (">=", 40.0), (">=", 60.0),
             (">=", 80.0), (">=", 100.0),
-        ],
-        "open_to_close_pct": [
-            (">=", 3.0), (">=", 5.0), (">=", 8.0),
-            (">=", 10.0), (">=", 15.0),
         ],
         "body_value_power": [
             (">=", 5.0), (">=", 10.0), (">=", 15.0),
@@ -1857,7 +1833,7 @@ python feature_selector_v35_usefulness.py ^
   --out feature_selector_v35_usefulness_out_wide ^
   --date-col today ^
   --max-depth 6 ^
-  --beam-width 1000 ^
+  --beam-width 3000 ^
   --top-k 200 ^
   --top-n-usage 100 ^
   --corr-threshold 0.90
