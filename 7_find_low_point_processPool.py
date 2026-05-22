@@ -576,7 +576,7 @@ def process_one_with_df(df, idx, ticker, tickers_dict, market_context):
         # "ma5_chg_rate": ma5_chg_rate,                          # _ma5_ma20_gap_chg_1d 상관 0.930, 중복이므로 정리, 룰 조합에서 강함
 
         "today_tr_val_eok": today_tr_val_eok,
-        "tr_val_rank_20d": tr_val_rank_20d,                    # 분리력 약함, 성공률 상승폭 작음
+        # "tr_val_rank_20d": tr_val_rank_20d,                    # 분리력 약함, 성공률 상승폭 작음
         # "tr_value_ratio_5d": tr_value_ratio_5d,               # 단일 AUC 0.528, IV 0.023으로 약함. vol5, vol_ratio_5_15가 있으면 우선순위 낮음
 
         "BB_perc": BB_perc,  # 볼린저밴드 위치
@@ -594,8 +594,8 @@ def process_one_with_df(df, idx, ticker, tickers_dict, market_context):
         "room_to_60d_high": room_to_60d_high,
 
         "market_today_pct": market_today_pct,                    # 해당 종목이 속한 시장의 당일 등락률
-        "market_5d_pct": market_5d_pct,                          # 해당 종목이 속한 시장의 최근 5거래일 등락률
-        "market_breadth_up_ratio": market_breadth_up_ratio,      # 같은 날짜, 같은 시장에서 상승한 종목 비율
+        # "market_5d_pct": market_5d_pct,                          # 해당 종목이 속한 시장의 최근 5거래일 등락률
+        # "market_breadth_up_ratio": market_breadth_up_ratio,      # 같은 날짜, 같은 시장에서 상승한 종목 비율
         # "market_stock_count": market_stock_count,
 
         # 이전 피쳐

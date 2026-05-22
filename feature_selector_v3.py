@@ -35,6 +35,7 @@ DEFAULT_FEATURES = [
     # 3) 거래대금
     # ============================================================
     "today_tr_val_eok",
+    "tr_val_rank_20d",
 
     # ============================================================
     # 4) 밴드 / 캔들
@@ -59,7 +60,6 @@ DEFAULT_FEATURES = [
     # ============================================================
     "market_today_pct",
     "market_5d_pct",
-    "market_breadth_up_ratio",
 ]
 
 
@@ -1337,9 +1337,22 @@ def print_recommended_features(final_df):
         )
         |
         (
-                (keep["judgement"] == "CONDITIONAL")
-                & (keep["avg_valid_lift_when_used"] >= 1.40)
-                & (keep["avg_valid_precision_when_used"] >= 0.56)
+                keep["judgement"].isin([
+                    "CONDITIONAL",
+                    "CHECK",
+                ])
+                & (keep["avg_valid_lift_when_used"] >= 1.35)
+                & (keep["avg_valid_precision_when_used"] >= 0.55)
+                & direction_ok
+        )
+        |
+        (
+                keep["judgement"].isin([
+                    "CONDITIONAL",
+                    "CHECK",
+                ])
+                & (keep["auc_oriented"] >= 0.555)
+                & (keep["best_bin_lift"] >= 1.20)
                 & direction_ok
         )
         ].copy()
@@ -1423,7 +1436,6 @@ def main():
     df[args.target] = df[args.target].astype(int)
 
     features = [f for f in DEFAULT_FEATURES if f in df.columns]
-
     missing_features = [f for f in DEFAULT_FEATURES if f not in df.columns]
 
     if missing_features:
