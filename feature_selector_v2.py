@@ -12,31 +12,52 @@ TARGET_COL = "target_before_stop_7"
 
 
 DEFAULT_FEATURES = [
-    "gap_pct",
-    "lower_wick_ratio",
+    # ============================================================
+    # 1) 현재까지 가장 강하게 살아남은 핵심 피쳐
+    # ============================================================
+    "rebound_from_7d_low",
     "today_pct",
+    "upper_wick_ratio",
 
+    # ============================================================
+    # 2) 핵심 보조 피쳐
+    # ============================================================
     "vol5",
-    "dist_to_ma5",
-    "max_drop_7d",
-
+    "today_tr_val_eok",
     "body_ratio",
+
+    # ============================================================
+    # 3) 새로 추가한 상승 여력 / 매수세 / 과열 판단 피쳐
+    # ============================================================
+    "room_to_20d_high",
+    "room_to_60d_high",
+    "open_to_close_pct",
+    "price_power_value",
+    "body_value_power",
+    "intraday_body_power",
+    "rebound_vs_prior_drop",
+
+    # ============================================================
+    # 4) 시장 상태 피쳐
+    # ============================================================
+    "market_today_pct",
+    "market_5d_pct",
+    "market_breadth_up_ratio",
+
+    # ============================================================
+    # 5) 조건부 유지 피쳐
+    # ============================================================
+    "max_drop_7d",
+    "gap_pct",
+    "pct_vs_lastweek",
+    "dist_to_ma5",
+    "ma5_chg_rate",
+    "tr_val_rank_20d",
+    "BB_perc",
+    "lower_wick_ratio",
     "recent_runup",
     "intraday_return",
-
-    "rebound_from_7d_low",
-    "BB_perc",
-
-
-    "tr_val_rank_20d",
-    "today_tr_val_eok",
-    "vol_ratio_5_15",
-
-    "pct_vs_lastweek",
-    "upper_wick_ratio",
-    "up_down_tr_value_ratio_5d_log",
 ]
-
 
 @dataclass(frozen=True)
 class Atom:
