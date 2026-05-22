@@ -881,18 +881,22 @@ def monthly_rule_stability(valid, rules, target_col, date_col):
     if len(tmp_valid) == 0:
         return pd.DataFrame()
 
+    # 중요: groupby index label과 numpy position 불일치 방지
+    tmp_valid = tmp_valid.reset_index(drop=True)
+
     tmp_valid["month"] = tmp_valid[date_col].dt.strftime("%Y-%m")
 
     rows = []
 
     for rule_idx, r in enumerate(rules, start=1):
         mask_all = apply_rule(tmp_valid, r.atoms)
+        mask_all = np.asarray(mask_all).astype(bool)
 
         for month, idx_values in tmp_valid.groupby("month").groups.items():
-            idx = np.array(list(idx_values))
+            pos = np.array(list(idx_values), dtype=int)
 
-            y_m = tmp_valid.loc[idx, target_col].astype(int).values
-            mask_m = mask_all[idx]
+            y_m = tmp_valid.iloc[pos][target_col].astype(int).values
+            mask_m = mask_all[pos]
 
             m = precision_recall_lift(y_m, mask_m)
 
@@ -1632,27 +1636,27 @@ if __name__ == "__main__":
 # ============================================================
 """
 빠른 테스트:
-python feature_selector_v2.py ^
-  --csv csv/low_result_7_desc.csv ^
-  --out feature_selector_v2_out_fast ^
-  --date-col today ^
-  --max-depth 4 ^
-  --beam-width 250 ^
-  --top-k 120 ^
-  --top-n-usage 50 ^
-  --top-n-loo 20 ^
-  --corr-threshold 0.90 ^
+python feature_selector_v3.py \
+  --csv csv/low_result_7_desc.csv \
+  --out feature_selector_v3_out_fast \
+  --date-col today \
+  --max-depth 4 \
+  --beam-width 250 \
+  --top-k 120 \
+  --top-n-usage 50 \
+  --top-n-loo 20 \
+  --corr-threshold 0.90 \
   --skip-loo
 
 최종 분석:
-python feature_selector_v2.py ^
-  --csv csv/low_result_7_desc.csv ^
-  --out feature_selector_v2_out_final ^
-  --date-col today ^
-  --max-depth 4 ^
-  --beam-width 300 ^
-  --top-k 150 ^
-  --top-n-usage 50 ^
-  --top-n-loo 20 ^
+python feature_selector_v3.py \
+  --csv csv/low_result_7_desc.csv \
+  --out feature_selector_v3_out_final \
+  --date-col today \
+  --max-depth 4 \
+  --beam-width 300 \
+  --top-k 150 \
+  --top-n-usage 50 \
+  --top-n-loo 20 \
   --corr-threshold 0.90
 """
