@@ -150,8 +150,7 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
     ########################################################################
 
     # closes = data['종가'].values
-    # 거래대금
-    trading_value = data['trading_value']
+    trading_value = data['trading_value']                            # 거래대금
     today_tr_val = round(trading_value.iloc[-1], 2)                  # 마지막 거래일 거래대금
     today_tr_val_eok = today_tr_val / 100_000_000                    # 마지막 거래일 거래대금(억)
     mean_prev3 = round(trading_value.iloc[:-1].tail(3).mean(), 2)    # 마지막 3일 거래대금 평균
@@ -160,6 +159,9 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
     _mean_prev5_eok = mean_prev5 / 100_000_000
     _mean_prev20_eok = mean_prev20 / 100_000_000
 
+    # ★★★★★ 오늘 거래대금 4억보다 작으면 패스 ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+    if today_tr_val_eok < 4:
+        return
 
     # ★★★★★ 20거래일 평균 거래대금 3억보다 작으면 패스 ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
     if mean_prev20 / 100_000_000 < 3:
@@ -180,8 +182,9 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
     - 최근 7일 하락 존재
     - 거래량 증가
     """
-    # 오늘 제외 최근 7일 5일선이 20일선보다 계속 낮은데 -2.5% 하락이 있으면서 오늘 3.3% 상승 ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+    # 오늘 제외 최근 7일 5일선이 20일선보다 계속 낮은데 -2.5% 하락이 있으면서 오늘 3.x% 상승 ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
     signal = signal_any_drop(data, 7, 3, -2.5)
+    # signal = signal_any_drop(data, 7, 3.3, -2.5)
     # signal = signal_any_drop(data, 7, 2, -2.5)
     if not signal:
         return
@@ -201,24 +204,28 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
 
     vol5                = data['등락률'].tail(5).std()
     vol15               = data['등락률'].tail(15).std()
+    # last20_ret          = data['등락률'].tail(20)
+
+    # 양봉 비율.. 의미없음
+    # pos20_ratio = (last20_ret > 0).mean()
 
     # 거래대금 변동률
     tr_value_ratio_3d = 0
-    _tr_value_ratio_5d = 0
+    tr_value_ratio_5d = 0
     tr_value_ratio_20d = 0
 
     if mean_prev3 > 0 and np.isfinite(mean_prev3):
         tr_value_ratio_3d = today_tr_val / (mean_prev3 + 1e-9)
 
     if mean_prev5 > 0 and np.isfinite(mean_prev5):
-        _tr_value_ratio_5d = today_tr_val / (mean_prev5 + 1e-9)
-        log_tr_value_ratio_5d = np.log1p(_tr_value_ratio_5d)
+        tr_value_ratio_5d = today_tr_val / (mean_prev5 + 1e-9)
+        log_tr_value_ratio_5d = np.log1p(tr_value_ratio_5d)
 
     if mean_prev20 > 0 and np.isfinite(mean_prev20):
         tr_value_ratio_20d = today_tr_val / (mean_prev20 + 1e-9)
 
     # 최근 대비 오늘 거래대금 변동률 (중복)
-    # _tr_value_ratio       = tr_value_ratio_3d * 0.4 + _tr_value_ratio_5d * 0.6
+    # _tr_value_ratio       = tr_value_ratio_3d * 0.4 + tr_value_ratio_5d * 0.6
     tr_val_rank_20d      = (trading_value.iloc[-20:] <= today_tr_val).mean()
     # tr_val_rank_60d    = (trading_value.iloc[-60:] <= today_tr_val).mean()
 
@@ -236,6 +243,9 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
     _high_60d             = data["고가"].iloc[-60:].max()
     dist_from_low_20d     = safe_rate(last['종가'], _low_20d)
     # dist_from_low_60d     = safe_rate(last['종가'], _low_60d)  # 3달 저가 대비 종가는 너무 멀다
+
+    room_to_20d_high = (_high_20d / last['종가'] - 1) * 100
+    room_to_60d_high = (_high_60d / last['종가'] - 1) * 100
 
     # 이평선 대비 종가의 변동률
     dist_to_ma5           = safe_rate(last['종가'], last['MA5'])
@@ -261,13 +271,13 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
     # 하루 변화량 : 빠름, 노이즈 많음, 3일 : 신호는 늦엇지만 안정된 필터용
     _MACD_hist_1d        = data['MACD_hist'].iloc[-1] - data['MACD_hist'].iloc[-2]
     MACD_hist_3d         = data['MACD_hist'].iloc[-1] - data['MACD_hist'].iloc[-4]     # (AUC 0.545)
-    ATR_pct              = last["ATR14"] / last["종가"] * 100  # 평균진폭 (변동성)
+    # _ATR_pct              = last["ATR14"] / last["종가"] * 100  # 평균진폭 (변동성)
 
     # -------------------------------
     # 필터
     # -------------------------------
+    BB_perc              = last['BB_perc']  # 중복
     _dist_to_high_20d     = safe_rate(last['종가'], _high_20d)
-    _BB_perc              = last['BB_perc']  # 중복
     _UltimateOsc          = last['UltimateOsc']
     _CCI14                = last['CCI14']
     _ADX14                = last['ADX14']
@@ -280,20 +290,37 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
     # MACD_hist_3d_atr_norm = MACD_hist_3d / (last["ATR14"] + 1e-9)
     _MACD_hist_3d_close_norm = MACD_hist_3d / (last["종가"] + 1e-9) * 100
 
+
+
+
+    m_data = data[-60:] # 뒤에서 x개 (3개월 정도)
+    m_current = m_data['종가'].iloc[-1]                               # 오늘 종가, 검증 데이터로 잘랐다면 검증 직전까지의 마지막 값 (수익률 분석 용도)
+
+    m_closes = m_data['종가']
+    # m_max = m_closes.max()
+    # m_min = m_closes.min()
+
+    # three_m_max_min_chg_rate = safe_rate(m_max, m_min)         # 최근 3개월 동안의 등락률
+    # three_m_cur_max_chg_rate = safe_rate(m_current, m_max)     # 최근 3개월 최고 대비 오늘 등락률 계산
+
+    result = low_weekly_check(m_data)
+
     # -------------------------------
     # 변별력이 없는 피쳐
     # -------------------------------
     # dist_to_high_60d      = safe_rate(last['종가'], _high_60d)  # 너무 장거리
 
-    # lower_wick_ratio = (min(last["시가"], last["종가"]) - last["저가"]) / (last["고가"] - last["저가"] + 1e-9)
+    lower_wick_ratio = (min(last["시가"], last["종가"]) - last["저가"]) / (last["고가"] - last["저가"] + 1e-9)
 
     # 윗꼬리 비율 (값이 크면 고가에서 많이 내려옴, 매도압력)
-    # upper_wick_ratio = (last["고가"] - max(last["시가"], last["종가"])) / (last["고가"] - last["저가"] + 1e-9)
+    upper_wick_ratio = (last["고가"] - max(last["시가"], last["종가"])) / (last["고가"] - last["저가"] + 1e-9)
 
     # ROC12_pct = last['ROC12_pct']
 
     # 캔들에서 몸통의 비율 (추세 강도)
-    # body_ratio = abs(last["종가"] - last["시가"]) / (last["고가"] - last["저가"] + 1e-9)
+    body_ratio = abs(last["종가"] - last["시가"]) / (last["고가"] - last["저가"] + 1e-9)
+    price_power_value = today_pct * log1p(today_tr_val_eok)
+    body_value_power = body_value_power * today_pct * np.log1p(today_tr_val_eok.clip(lower=0))
 
     # 거래대금 변동률 (어제, 오늘)
     # tr_value_chg_1d      = today_tr_val / (trading_value.iloc[-2] + 1e-9)
@@ -303,82 +330,96 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
     #         np.tanh(MACD_hist_3d / 100) * 0.35
     # )
 
-    # 20일 최저점 발생일 대비 몇 일 지났는지 (19: 처음, 0: 오늘)
+    # 20일 최저점 발생일 대비 몇 일 지났는지 (19: 처음, 0: 오늘).. 아무짝에도 쓸모 없음
     # window               = data.iloc[-20:]
     # low_idx_pos          = window['저가'].values.argmin()   # 최솟값의 인덱스를 반환
     # days_since_low       = len(window) - 1 - low_idx_pos
 
     # 최근 5일 동안 상승일 거래대금이 하락일 거래대금보다 얼마나 강했는가, _ma5_ma20_gap_chg_1d 유사, 거래대금이 작으면 설명력 부족
-    # _recent_5d            = data.iloc[-5:]
-    # _ret5                 = _recent_5d["등락률"]
-    # _recent_tr_value      = _recent_5d["종가"] * _recent_5d["거래량"]
-    #
+    _recent_5d            = data.iloc[-5:]
+    _ret5                 = _recent_5d["등락률"]
+    _recent_tr_value      = _recent_5d["종가"] * _recent_5d["거래량"]
+
     # _up_tr_value_5d       = _recent_tr_value[_ret5 > 0].sum()
     # _down_tr_value_5d     = _recent_tr_value[_ret5 < 0].sum()
-    # up_down_tr_value_ratio_5d_log = np.log1p(
+    # _up_down_tr_value_ratio_5d_log = np.log1p(
     #     _up_tr_value_5d / (_down_tr_value_5d + 1e-9)
     # )
 
     # 이미 많이 오른 종목 제거
-    # _recent_runup        = data['등락률'].iloc[-5:-1].sum()
+    _recent_runup        = data['등락률'].iloc[-5:-1].sum()
 
     # 시가 대비 종가가 얼마나 회복되었는가 (AUC 0.514 - 거의 랜덤)
-    # intraday_return = (last["종가"] / last["시가"] - 1) * 100
+    intraday_return = (last["종가"] / last["시가"] - 1) * 100
+    intraday_body_power = intraday_return * body_ratio
 
     # 데드캣 패널티
     # _deadcat_penalty     = max(0, (-_drawdown_60d - 40) / 20) + max(0, -_dist_to_ma20 / 5)
 
+    # 갭 상승 후 실제 몸통 상승률
+    #   - gap_pct가 낮고 today_pct가 높음 = 장중 매수세로 끌어올림
+    #   - gap_pct가 높고 today_pct가 비슷함 = 시초 갭만 뜨고 힘 없음
+    # gap_body_power        = today_pct - _gap_pct
+    # 윗꼬리 패널티 피쳐: 윗꼬리가 길고 몸통이 작으면 매도압력/실패 반등 가능성 증가
+    # selling_pressure_score = upper_wick_ratio * (1 - body_ratio)
+    # 저점 대비 반등 위치(오늘 제외): 최근 급락 저점에서 오늘 종가가 얼마나 회복했는지
+    _low_7d_before_today = data['저가'].iloc[-8:-1].min()
+    rebound_from_7d_low = (last['종가'] / _low_7d_before_today - 1) * 100
+    rebound_vs_prior_drop = (rebound_from_7d_low / max_drop_7d.abs() + 1e-9).replace(
+        [np.inf, -np.inf],
+        np.nan,
+    )
+    # 하락 후 반등: 최근 최대 하락폭 대비 오늘 반등이 얼마나 강했는가
+    # drop_rebound_ratio = today_pct / (abs(max_drop_7d) + 1e-9)
+    # 거래대금 + 가격 반등 결합 피쳐
+    # volume_price_power = today_pct * np.log1p(tr_value_ratio_5d)
 
-    m_data = data[-60:] # 뒤에서 x개 (3개월 정도)
-    m_current = m_data['종가'].iloc[-1]                               # 오늘 종가, 검증 데이터로 잘랐다면 검증 직전까지의 마지막 값 (수익률 분석 용도)
-
-    m_closes = m_data['종가']
-    m_max = m_closes.max()
-    m_min = m_closes.min()
-
-    # three_m_max_min_chg_rate = safe_rate(m_max, m_min)         # 최근 3개월 동안의 등락률
-    three_m_cur_max_chg_rate = safe_rate(m_current, m_max)     # 최근 3개월 최고 대비 오늘 등락률 계산
-
-    result = low_weekly_check(m_data)
-
-    """
-    3개중 2개만 사용하도록 규제
-    dist_to_ma5
-    pct_vs_lastweek
-    ma5_ma20_gap_chg_1d
-    """
     rule_features = {
-        # 상위 피쳐
-        "ATR_pct": ATR_pct,                                    # 성공군의 평균 변동폭이 큼, 대체 불가 핵심 피쳐
         "vol5": vol5,                                          # 성공군의 단기 변동성이 큼, 핵심 피쳐
         "vol_ratio_5_15": _vol_ratio_5_15,                     # 성공군의 최근 단기 변동성 확장이 큼, 정밀도를 올려줌, 표본 부족
-        "three_m_cur_max_chg_rate": three_m_cur_max_chg_rate,  # 성공군이 3개월 고점 대비 더 눌림, 정밀도를 올려줌
         "today_pct": today_pct,                                # 성공군의 마지막 날 반등 강도가 큼
         "max_drop_7d": max_drop_7d,                            # 성공군이 더 깊게 빠졌다가 반등
 
         "gap_pct": _gap_pct,                                   # gap_pct는 단독 분리력은 약하지만 today_pct와 조합하면 의미가 있을 수 있음, 비단조 주의, 룰 조합에서 강함, 핵심 피쳐
-        "dist_to_ma20": dist_to_ma20,                          # 성공군이 20일선 대비 조금 더 아래, 비단조 주의, 룰 조합에서 강함, 핵심 피쳐
+        # "dist_to_ma20": dist_to_ma20,                          # 성공군이 20일선 대비 조금 더 아래, 비단조 주의, 룰 조합에서 강함, 핵심 피쳐
         "pct_vs_lastweek": result['pct_vs_lastweek'],          # 단독 AUC는 약하지만 룰 조합에서 강함, 없으면 데드캣 상승, 주요 피쳐
 
-        "dist_from_low_20d": dist_from_low_20d,                # 성공군이 저점에서 조금 더 반등한 상태, 대체 가능
-
-        # 후순위
         "dist_to_ma5": dist_to_ma5,                            # dist_from_low_20d, pct_vs_lastweek, dist_to_ma20와 중복이 큼, 대체 가능
-        "ma5_ma20_gap_chg_1d": _ma5_ma20_gap_chg_1d,           # best bin은 괜찮지만 전체 방향성이 거의 없음.. dist_to_ma5, dist_to_ma20, pct_vs_lastweek와 의미가 겹친다, 대체 가능
+        # "ma5_ma20_gap_chg_1d": _ma5_ma20_gap_chg_1d,           # best bin은 괜찮지만 전체 방향성이 거의 없음.. dist_to_ma5, dist_to_ma20, pct_vs_lastweek와 의미가 겹친다, 대체 가능
 
+        "ma5_chg_rate": ma5_chg_rate,                          # _ma5_ma20_gap_chg_1d 상관 0.930, 중복이므로 정리, 룰 조합에서 강함
 
-        # 제거 후보
-        # "ma5_recovery_rate_3d": ma5_recovery_rate_3d,          # _ma5_ma20_gap_chg_1d, dist_to_ma20 겹침 (AUC 0.525)
-        # "ma5_chg_rate": ma5_chg_rate,                          # _ma5_ma20_gap_chg_1d 상관 0.930, 중복이므로 정리, 룰 조합에서 강함
-        "MACD_hist_3d": MACD_hist_3d,                          # 기술적 모멘텀 신호로는 약함, AUC가 0.517, IV가 0.016으로 매우 약함
-
-        # 거래대금 지표
         "today_tr_val_eok": today_tr_val_eok,
-        # "mean_prev5_eok": _mean_prev5_eok,
         "tr_val_rank_20d": tr_val_rank_20d,                    # 분리력 약함, 성공률 상승폭 작음
-        "tr_value_ratio_5d": _tr_value_ratio_5d,               # 단일 AUC 0.528, IV 0.023으로 약함. vol5, vol_ratio_5_15가 있으면 우선순위 낮음
+        # "tr_value_ratio_5d": tr_value_ratio_5d,               # 단일 AUC 0.528, IV 0.023으로 약함. vol5, vol_ratio_5_15가 있으면 우선순위 낮음
+
+        "BB_perc": BB_perc,  # 볼린저밴드 위치
+
+        "lower_wick_ratio": lower_wick_ratio,
+        "upper_wick_ratio": upper_wick_ratio,
+        "body_ratio": body_ratio,
+        "recent_runup": _recent_runup,
+        "intraday_return": intraday_return,
+
+        "rebound_from_7d_low": rebound_from_7d_low,
+
+        "price_power_value": price_power_value,
+        "body_value_power": body_value_power,
+        "intraday_body_power": intraday_body_power,
+        "room_to_20d_high": room_to_20d_high,
+        "room_to_60d_high": room_to_60d_high,
+        "rebound_vs_prior_drop": rebound_vs_prior_drop,
+
+        # "market_today_pct": market_today_pct,                    # 해당 종목이 속한 시장의 당일 등락률
+        # "market_5d_pct": market_5d_pct,                          # 해당 종목이 속한 시장의 최근 5거래일 등락률
+        # "market_breadth_up_ratio": market_breadth_up_ratio,      # 같은 날짜, 같은 시장에서 상승한 종목 비율
 
         # 이전 피쳐
+        # "three_m_cur_max_chg_rate": three_m_cur_max_chg_rate,  # 성공군이 3개월 고점 대비 더 눌림, 정밀도를 올려줌
+        # "dist_from_low_20d": dist_from_low_20d,                # 성공군이 저점에서 조금 더 반등한 상태, 대체 가능
+        # "MACD_hist_3d": MACD_hist_3d,                          # 기술적 모멘텀 신호로는 약함, AUC가 0.517, IV가 0.016으로 매우 약함
+        # "ma5_recovery_rate_3d": ma5_recovery_rate_3d,          # _ma5_ma20_gap_chg_1d, dist_to_ma20 겹침 (AUC 0.525)
+        # "ATR_pct": ATR_pct,                                    # 성공군의 평균 변동폭이 큼, 대체 불가 핵심 피쳐
         # "vol15": vol15,
         # "pct_vs_last4week": result['pct_vs_last4week'],        # dist_to_ma20 상관 0.874.. 20일선 대비 위치가 더 직접적으로 해석
         # "three_m_max_min_chg_rate": three_m_max_min_chg_rate,
@@ -396,7 +437,6 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
         #
         # # 차이가 없음
         # "_close_pos_20d": _close_pos_20d,  # dist_from_low_20d, dist_to_ma5 에서도 반영됨, 별 차이가 없음
-        # "_BB_perc": _BB_perc,  # 볼린저밴드 위치
         # "_CCI14": _CCI14,  # 단기 모멘텀 변화를 잘 포착하지만, 노이즈가 많음
         # "_ADX14": _ADX14,  # 별 차이가 없음
         # "_rebound_power": _rebound_power,
@@ -559,7 +599,7 @@ if __name__ == "__main__":
     start = time.time()   # 시작 시간(초)
     nowTime = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
     print(f'{nowTime} - 🕒 running 7_find_low_point.py...')
-    print('=== 7일 이상 5일선이 20일선 보다 아래에 있으면서 최근 -2.5% 이상 하락이 존재, 오늘 +3.3% 이상 상승 ===')
+    print('=== 7일 이상 5일선이 20일선 보다 아래에 있으면서 최근 -2.5% 이상 하락이 존재, 오늘 +3.x% 이상 상승 ===')
 
     tickers_dict = get_kor_ticker_dict_list()
     tickers = list(tickers_dict.keys())
