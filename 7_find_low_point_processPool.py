@@ -487,11 +487,11 @@ def process_one_with_df(df, idx, ticker, tickers_dict, market_context):
     # 캔들에서 몸통의 비율 (추세 강도)
     body_ratio = abs(last["종가"] - last["시가"]) / (last["고가"] - last["저가"] + 1e-9)
     price_power_value = today_pct * np.log1p(max(today_tr_val_eok, 0))
-    # body_value_power = (
-    #         max(body_ratio, 0)
-    #         * max(today_pct, 0)
-    #         * np.log1p(max(today_tr_val_eok, 0))
-    # )
+    body_value_power = (
+            max(body_ratio, 0)
+            * max(today_pct, 0)
+            * np.log1p(max(today_tr_val_eok, 0))
+    )
 
     # 거래대금 변동률 (어제, 오늘)
     # tr_value_chg_1d      = today_tr_val / (trading_value.iloc[-2] + 1e-9)
@@ -523,7 +523,7 @@ def process_one_with_df(df, idx, ticker, tickers_dict, market_context):
     # 시가 대비 종가가 얼마나 회복되었는가 (AUC 0.514 - 거의 랜덤)
     intraday_return = (last["종가"] / last["시가"] - 1) * 100
     # 전일 대비 갭이 아니라 “장중 순수 매수세”.. 상광 0.929
-    # intraday_body_power = intraday_return * body_ratio
+    intraday_body_power = intraday_return * body_ratio
 
     # 데드캣 패널티
     # _deadcat_penalty     = max(0, (-_drawdown_60d - 40) / 20) + max(0, -_dist_to_ma20 / 5)
@@ -538,9 +538,9 @@ def process_one_with_df(df, idx, ticker, tickers_dict, market_context):
     _low_7d_before_today = data['저가'].iloc[-8:-1].min()
     rebound_from_7d_low = (last['종가'] / _low_7d_before_today - 1) * 100
     # 최근 하락폭 대비 오늘까지 얼마나 반등했는가
-    # rebound_vs_prior_drop = rebound_from_7d_low / (abs(max_drop_7d) + 1e-9)
-    # if not np.isfinite(rebound_vs_prior_drop):
-    #     rebound_vs_prior_drop = np.nan
+    rebound_vs_prior_drop = rebound_from_7d_low / (abs(max_drop_7d) + 1e-9)
+    if not np.isfinite(rebound_vs_prior_drop):
+        rebound_vs_prior_drop = np.nan
 
     # 하락 후 반등: 최근 최대 하락폭 대비 오늘 반등이 얼마나 강했는가
     # drop_rebound_ratio = today_pct / (abs(max_drop_7d) + 1e-9)
@@ -573,7 +573,7 @@ def process_one_with_df(df, idx, ticker, tickers_dict, market_context):
         "dist_to_ma5": dist_to_ma5,                            # dist_from_low_20d, pct_vs_lastweek, dist_to_ma20와 중복이 큼, 대체 가능
         # "ma5_ma20_gap_chg_1d": _ma5_ma20_gap_chg_1d,           # best bin은 괜찮지만 전체 방향성이 거의 없음.. dist_to_ma5, dist_to_ma20, pct_vs_lastweek와 의미가 겹친다, 대체 가능
 
-        # "ma5_chg_rate": ma5_chg_rate,                          # _ma5_ma20_gap_chg_1d 상관 0.930, 중복이므로 정리, 룰 조합에서 강함
+        "ma5_chg_rate": ma5_chg_rate,                          # _ma5_ma20_gap_chg_1d 상관 0.930, 중복이므로 정리, 룰 조합에서 강함
 
         "today_tr_val_eok": today_tr_val_eok,
         # "tr_val_rank_20d": tr_val_rank_20d,                    # 분리력 약함, 성공률 상승폭 작음
@@ -590,8 +590,11 @@ def process_one_with_df(df, idx, ticker, tickers_dict, market_context):
         "rebound_from_7d_low": rebound_from_7d_low,
 
         "price_power_value": price_power_value,
+        "body_value_power": body_value_power,
+        "intraday_body_power": intraday_body_power,
         "room_to_20d_high": room_to_20d_high,
         "room_to_60d_high": room_to_60d_high,
+        "rebound_vs_prior_drop": rebound_vs_prior_drop,
 
         "market_today_pct": market_today_pct,                    # 해당 종목이 속한 시장의 당일 등락률
         # "market_5d_pct": market_5d_pct,                          # 해당 종목이 속한 시장의 최근 5거래일 등락률
