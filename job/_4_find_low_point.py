@@ -1,13 +1,26 @@
 '''
 저점을 찾는 스크립트 (저점매수 + 반등 + 모멘텀)
-signal_any_drop 를 통해서 5일선이 20일선보다 아래에 있으면서 최근 -3%이 존재 + 오늘 4% 이상 상승
+
+signal_any_drop 를 통해서
+5일선이 20일선보다 아래에 있으면서
+최근 -3%이 존재 + 기준일 4% 이상 상승
+
+수정사항:
+- 오늘 제외
+- 7일 전부터 어제까지의 각 거래일 기준으로 검사
+- insert / 차트 생성도 해당 기준일 데이터로 처리
 '''
+
 import matplotlib
 matplotlib.use("Agg")  # ✅ 비인터랙티브 백엔드 (창 안 띄움)
-import os, sys
+
+import os
+import sys
+
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
+
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
@@ -16,7 +29,9 @@ import matplotlib.pyplot as plt
 import requests
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
+
 import lowscan_rules_v1 as rule1
+
 modules = [rule1]
 
 
@@ -29,9 +44,22 @@ for parent in [here.parent, *here.parents]:
 else:
     raise FileNotFoundError("utils.py를 상위 디렉터리에서 찾지 못했습니다.")
 
-from utils import get_kor_ticker_dict_list, add_technical_features, plot_candles_weekly, plot_candles_daily, \
-    drop_sparse_columns, drop_trading_halt_rows, signal_any_drop, low_weekly_check, extract_numbers_from_filenames, \
-    safe_read_pickle, safe_rate, to_float, round_float_features
+from utils import (
+    get_kor_ticker_dict_list,
+    add_technical_features,
+    plot_candles_weekly,
+    plot_candles_daily,
+    drop_sparse_columns,
+    drop_trading_halt_rows,
+    signal_any_drop,
+    low_weekly_check,
+    extract_numbers_from_filenames,
+    safe_read_pickle,
+    safe_rate,
+    to_float,
+    round_float_features
+)
+
 
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
 root_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(=루트)
@@ -40,6 +68,27 @@ output_dir = 'F:\\5below20'
 # output_dir = 'F:\\5below20_test'
 
 api_cache = {}
+
+
+def get_target_dates(df, lookback_days=7):
+    """
+    오늘 제외, lookback_days일 전부터 어제까지의 거래일 index 반환.
+
+    예:
+    오늘이 2026-05-19라면
+    2026-05-12 ~ 2026-05-18 범위 내에 존재하는 거래일만 반환
+    """
+    today = pd.Timestamp.now().normalize()
+    start_date = today - pd.Timedelta(days=lookback_days)
+    end_date = today - pd.Timedelta(days=1)
+
+    target_dates = df.loc[
+        (df.index.normalize() >= start_date) &
+        (df.index.normalize() <= end_date)
+        ].index
+
+    return target_dates
+
 
 def get_stock_info(ticker):
     if ticker in api_cache:
@@ -61,7 +110,7 @@ def get_stock_info(ticker):
 
         product_code = result[0]["data"]["items"][0]["productCode"]
 
-    except:
+    except Exception as e:
         print(f"info 요청 실패-2: (코드: {str(ticker)}) {e}")
         api_cache[ticker] = None
         return None
@@ -78,7 +127,8 @@ def get_stock_info(ticker):
 
         if market_value is None:
             print(f"overview marketValueKrw is None: {product_code}")
-            return
+            api_cache[ticker] = None
+            return None
 
         result = {
             "product_code": product_code,
@@ -88,17 +138,25 @@ def get_stock_info(ticker):
         api_cache[ticker] = result
         return result
 
-    except:
+    except Exception as e:
         print(f"overview 요청 실패-2: {e} {product_code}")
         api_cache[ticker] = None
         return None
 
 
 def insert_low_point_stock(row, data, market_value, save_path):
+    """
+    data는 반드시 기준일 기준으로 잘린 데이터여야 함.
+    즉 data.iloc[-1]이 row["today"]와 같은 날짜여야 함.
+    """
     ticker = row["ticker"]
+
+    if data is None or data.empty or len(data) < 2:
+        return
 
     _closes = data['종가'].values
     _trading_value = data['종가'] * data['거래량']
+
     today_tr_val = _trading_value.iloc[-1]
     today_tr_val_avg_5d = _trading_value.iloc[-6:-1].mean()
     tr_val_ratio = today_tr_val / today_tr_val_avg_5d * 100
@@ -131,27 +189,18 @@ def insert_low_point_stock(row, data, market_value, save_path):
             timeout=10
         )
     except Exception as e:
-        # logging.warning(f"progress-update 요청 실패: {e}")
         print(f"progress-update 요청 실패-4-1: {e}")
-        pass  # 오류
+        pass
 
 
-def process_ticker(ticker, tickers_dict, i):
-    results = []
-
-    stock_name = tickers_dict.get(ticker, 'Unknown Stock')
-    filepath = os.path.join(pickle_dir, f'{ticker}.pkl')
-    if not os.path.exists(filepath):
-        print(f"[process_ticker] {stock_name} ({ticker}) 파일 없음")
-        return results
-
-    df = safe_read_pickle(filepath)
-
-    # 데이터가 부족하면 패스
+def prepare_stock_dataframe(df):
+    """
+    종목별 원본 pickle 데이터를 공통 전처리하는 함수.
+    process_ticker와 차트 생성부에서 같은 흐름을 쓰기 위해 분리.
+    """
     if df is None or df.empty or len(df) < 70:
         return None
 
-    # 2차 생성 feature
     df = add_technical_features(df)
 
     # 결측 제거
@@ -163,23 +212,48 @@ def process_ticker(ticker, tickers_dict, i):
     # drop 이후 3차 생성
     df = add_technical_features(df)
 
-    # 데이터가 부족하면 패스
     if df.empty or len(df) < 70:
         return None
-
-    # today = df.index[-1].strftime("%Y%m%d") # 마지막 인덱스
-    # if i == 1:
-    # nowTime = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
-    # print('─────────────────────────────────────────────────────────────')
-    # print(df.index[-1].date(), '  7일 이상 5일선이 20일선 보다 아래에 있으면서 최근 -2.5% 이상 하락이 존재, 오늘 +3.3% 이상 상승')
-    # print('─────────────────────────────────────────────────────────────')
 
     # 거래대금
     df["trading_value"] = df["종가"] * df["거래량"]
 
-    res = process_one_with_df(df, 0, ticker, tickers_dict)
-    if res is not None:
-        results.append(res)
+    return df
+
+
+def process_ticker(ticker, tickers_dict, i):
+    results = []
+
+    stock_name = tickers_dict.get(ticker, 'Unknown Stock')
+    filepath = os.path.join(pickle_dir, f'{ticker}.pkl')
+
+    if not os.path.exists(filepath):
+        print(f"[process_ticker] {stock_name} ({ticker}) 파일 없음")
+        return results
+
+    df = safe_read_pickle(filepath)
+    df = prepare_stock_dataframe(df)
+
+    if df is None or df.empty or len(df) < 70:
+        return None
+
+    # 오늘 제외, 7일 전부터 어제까지의 실제 거래일만 검사
+    target_dates = get_target_dates(df, lookback_days=30)
+
+    if len(target_dates) == 0:
+        return results
+
+    for idx, target_date in enumerate(target_dates, start=1):
+        # 기준일까지만 잘라서 검사
+        sliced_df = df.loc[df.index <= target_date].copy()
+
+        if sliced_df.empty or len(sliced_df) < 70:
+            continue
+
+        res = process_one_with_df(sliced_df, idx, ticker, tickers_dict)
+
+        if res is not None:
+            results.append(res)
 
     return results
 
@@ -189,96 +263,96 @@ def process_one_with_df(data, idx, ticker, tickers_dict):
 
     ########################################################################
 
-    # closes = data['종가'].values
     # 거래대금
     trading_value = data['trading_value']
-    today_tr_val = round(trading_value.iloc[-1], 2)                  # 마지막 거래일 거래대금
-    today_tr_val_eok = today_tr_val / 100_000_000                    # 마지막 거래일 거래대금(억)
-    mean_prev3 = round(trading_value.iloc[:-1].tail(3).mean(), 2)    # 마지막 3일 거래대금 평균
-    mean_prev5 = round(trading_value.iloc[:-1].tail(5).mean(), 2)    # 마지막 3일 거래대금 평균
-    mean_prev20 = round(trading_value.iloc[:-1].tail(20).mean(), 2)  # 마지막 20일 거래대금 평균
+
+    today_tr_val = round(trading_value.iloc[-1], 2)                  # 기준일 거래대금
+    today_tr_val_eok = today_tr_val / 100_000_000                    # 기준일 거래대금(억)
+    mean_prev3 = round(trading_value.iloc[:-1].tail(3).mean(), 2)    # 기준일 전 3일 거래대금 평균
+    mean_prev5 = round(trading_value.iloc[:-1].tail(5).mean(), 2)    # 기준일 전 5일 거래대금 평균
+    mean_prev20 = round(trading_value.iloc[:-1].tail(20).mean(), 2)  # 기준일 전 20일 거래대금 평균
+
     _mean_prev5_eok = mean_prev5 / 100_000_000
     _mean_prev20_eok = mean_prev20 / 100_000_000
 
-
-    # ★★★★★ 20거래일 평균 거래대금 4억보다 작으면 패스 ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+    # ★★★★★ 20거래일 평균 거래대금 4억보다 작으면 패스
     if mean_prev20 / 100_000_000 < 4:
-        return
+        return None
 
     # 5일, 20일 이동평균선 없으면 패스
     REQUIRED_COLS = ["MA5", "MA20", "등락률"]
 
     for col in REQUIRED_COLS:
         if col not in data.columns:
-            return
+            return None
 
-    # 마지막 일자 5일선은 20일선보다 낮아야 한다
+    # 기준일 5일선
     ma5_today = data['MA5'].iloc[-1]
     ma5_yesterday = data['MA5'].iloc[-2]
 
-    # 변화율 계산 (퍼센트로 보려면 * 100)
+    # 변화율 계산
     ma5_chg_rate = (ma5_today - ma5_yesterday) / ma5_yesterday * 100
 
     """
     depth4 (진입 gate) >> 실패 줄이기
-    - 오늘 +3% 이상
+    - 기준일 +3% 이상
     - 최근 7일 하락 존재
     - 거래량 증가
     """
-    # 오늘 제외 최근 7일 5일선이 20일선보다 계속 낮은데 -2.5% 하락이 있으면서 오늘 3.3% 상승 ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+    # 기준일 제외 최근 7일 5일선이 20일선보다 계속 낮은데 -2.5% 하락이 있으면서 기준일 3.3% 상승
     signal = signal_any_drop(data, 7, 3.3, -2.5)
-    # signal = signal_any_drop(data, 7, 2, -2.5)
+
     if not signal:
-        return
+        return None
 
     ########################################################################
     # feature 만들기
     ########################################################################
 
-    # ★★★★★ 최근 20일 변동성 너무 낮으면 제외 (지루한 종목)
-    last15_ret = data['등락률'].tail(15)           # 등락률이 % 단위라고 가정
-    last20_ret = data['등락률'].tail(20)           # 등락률이 % 단위라고 가정
+    # 최근 변동성
+    last15_ret = data['등락률'].tail(15)
+    last20_ret = data['등락률'].tail(20)
     last30_ret = data['등락률'].tail(30)
-    vol15 = last15_ret.std()                      # 표준편차
-    vol30 = last30_ret.std()                      # 표준편차
 
-    # 양봉 비율이 30% 미만이면 제외 (계속 음봉 위주)
-    pos20_ratio = (last20_ret > 0).mean()           # True 비율 => 양봉 비율
+    vol15 = last15_ret.std()
+    vol30 = last30_ret.std()
+
+    # 양봉 비율
+    pos20_ratio = (last20_ret > 0).mean()
 
     # 추가 독립 피쳐
-    def to_float(x):
+    def local_to_float(x):
         return float(x) if pd.notna(x) else np.nan
 
     last = data.iloc[-1]
-    close_pos        = round(to_float(last.get("close_pos")), 4)
+    close_pos = round(local_to_float(last.get("close_pos")), 4)
 
     ########################################################################
 
-    m_data = data[-60:] # 뒤에서 x개 (3개월 정도)
+    m_data = data[-60:]  # 뒤에서 60개
 
     m_closes = m_data['종가']
     m_max = m_closes.max()
     m_min = m_closes.min()
-    m_current = m_closes[-1]
+    m_current = m_closes.iloc[-1]
 
-    three_m_chg_rate=(m_max-m_min)/m_min*100        # 최근 3개월 동안의 등락률
-    today_chg_rate=(m_current-m_max)/m_max*100      # 최근 3개월 최고 대비 오늘 등락률 계산
-
+    three_m_chg_rate = (m_max - m_min) / m_min * 100        # 최근 3개월 동안의 등락률
+    today_chg_rate = (m_current - m_max) / m_max * 100      # 최근 3개월 최고 대비 기준일 등락률
 
     result = low_weekly_check(m_data)
-    if result["ok"]:
-        # ★★★★★ 저번주 대비 이번주 증감률 -1%보다 낮으면 패스 (아직 하락 추세) ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-        if result["is_drop_more_than_minus1pct"]:
-            # return
-            pass
 
+    if result["ok"]:
+        # ★★★★★ 저번주 대비 이번주 증감률 -1%보다 낮으면 패스
+        if result["is_drop_more_than_minus1pct"]:
+            # return None
+            pass
 
     ########################################################################
 
     ma5_chg_rate = round(ma5_chg_rate, 4)
     vol15 = round(vol15, 4)
     vol30 = round(vol30, 4)
-    pos20_ratio = round(pos20_ratio*100, 4)
+    pos20_ratio = round(pos20_ratio * 100, 4)
     mean_prev3 = round(mean_prev3, 4)
     today_tr_val = round(today_tr_val, 4)
     three_m_chg_rate = round(three_m_chg_rate, 4)
@@ -289,48 +363,51 @@ def process_one_with_df(data, idx, ticker, tickers_dict):
 
     # --- build_conditions()가 참조하는 컬럼들을 data에 주입 (스칼라 → 컬럼 브로드캐스트) ---
     rule_features = {
-        "ma5_chg_rate": ma5_chg_rate,                    # 5일선 기울기 👍
-        "vol15": vol15,                                  # 20일 평균 변동성
-        "vol30": vol30,                                  # 30일 평균 변동성
-        "pos20_ratio": pos20_ratio,                      # 20일 평균 양봉비율 (전환 직전 눌림/반등 준비를 더 잘 반영할 가능성)
-        "today_tr_val": today_tr_val,                    # 오늘 거래대금 👍
-        "mean_prev3": mean_prev3,                        # 직전 3일 평균 거래대금 (조건에서 다수 사용)
-        "three_m_chg_rate": three_m_chg_rate,            # 3개월 종가 최저 대비 최고 등락률 👍
-        "today_chg_rate": today_chg_rate,                # 3개월 종가 최고 대비 오늘 등락률 👍
-        "pct_vs_lastweek": pct_vs_lastweek,              # 저번주 대비 이번주 등락률
-        "pct_vs_last4week": pct_vs_last4week,            # 4주 전 대비 이번주 등락률
-        "today_pct": today_pct,                          # 오늘등락률 👍
-        "close_pos": close_pos,                          # 당일 range 내 종가 위치(0~1)
+        "ma5_chg_rate": ma5_chg_rate,
+        "vol15": vol15,
+        "vol30": vol30,
+        "pos20_ratio": pos20_ratio,
+        "today_tr_val": today_tr_val,
+        "mean_prev3": mean_prev3,
+        "three_m_chg_rate": three_m_chg_rate,
+        "today_chg_rate": today_chg_rate,
+        "pct_vs_lastweek": pct_vs_lastweek,
+        "pct_vs_last4week": pct_vs_last4week,
+        "today_pct": today_pct,
+        "close_pos": close_pos,
     }
 
     ########################################################################
 
     row = {
         "stock_name": stock_name,
-        "today" : str(data.index[-1].date()),
+        "today": str(data.index[-1].date()),
         "idx": idx,
     }
 
     row.update(rule_features)
     row = round_float_features(row)
-    row["ticker"] = ticker  # 종목코드 숫자 float 처리 되어서 밖으로 뺌
+
+    # 종목코드 숫자 float 처리 방지
+    row["ticker"] = ticker
 
     return {
         "row": row,
     }
 
 
-
 if __name__ == "__main__":
-    start = time.time()   # 시작 시간(초)
+    start = time.time()
     nowTime = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
     print(f'{nowTime} - 🕒 running 4_find_low_point.py...')
 
     tickers_dict = get_kor_ticker_dict_list()
     tickers = list(tickers_dict.keys())
 
+    rows = []
+    selected = pd.DataFrame()
 
-    rows = []            # 결과 종목 데이터 저장
+    executor = None
 
     try:
         with ProcessPoolExecutor(max_workers=os.cpu_count() - 2) as executor:
@@ -342,8 +419,10 @@ if __name__ == "__main__":
             for f in as_completed(futures):
                 try:
                     results = f.result()
+
                     if results is None:
                         continue
+
                 except Exception as e:
                     print("worker error:", e)
                     raise
@@ -352,11 +431,10 @@ if __name__ == "__main__":
                     row = res["row"]
                     rows.append(row)
 
-
         rows_sorted = sorted(rows, key=lambda row: row['today'])
 
         if len(rows) > 0:
-            df = pd.DataFrame(rows)
+            df = pd.DataFrame(rows_sorted)
 
             mask = pd.Series(False, index=df.index)
             matched_rule_map = {idx: [] for idx in df.index}
@@ -383,6 +461,18 @@ if __name__ == "__main__":
 
             selected = df[mask].copy()
 
+        if selected.empty:
+            nowTime = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
+            print(f'{nowTime} - 조건에 맞는 종목 없음')
+
+            end = time.time()
+            elapsed = end - start
+
+            hours, remainder = divmod(int(elapsed), 3600)
+            minutes, seconds = divmod(remainder, 60)
+
+            print(f"4_find_low_point.py 총 소요 시간: {hours}시간 {minutes}분 {seconds}초")
+            sys.exit(0)
 
         plot_jobs = []
 
@@ -396,18 +486,15 @@ if __name__ == "__main__":
             if origin is None or origin.empty:
                 continue
 
-            origin = add_technical_features(origin)
-            origin, _ = drop_sparse_columns(
-                origin,
-                threshold=0.10,
-                check_inf=True,
-                inplace=True
-            )
-            origin, _ = drop_trading_halt_rows(origin)
-            origin = add_technical_features(origin)
+            origin = prepare_stock_dataframe(origin)
 
-            # 기본값: idx == 0이면 전체 origin 사용
-            chart_data = origin.copy()
+            if origin is None or origin.empty or len(origin) < 70:
+                continue
+
+            target_date = pd.to_datetime(row["today"])
+
+            # 기준일까지만 자른 데이터
+            chart_data = origin.loc[origin.index <= target_date].copy()
 
             if chart_data.empty or len(chart_data) < 70:
                 continue
@@ -418,7 +505,7 @@ if __name__ == "__main__":
 
             title = (
                 f"v1_{today} ({now_hm}) {stock_name} [{ticker}] "
-                f"일봉 차트 - 오늘 등락률_{row['today_pct']}% "
+                f"일봉 차트 - 기준일 등락률_{row['today_pct']}% "
                 f"조건수: {rule_cnt}"
             )
 
@@ -426,6 +513,7 @@ if __name__ == "__main__":
             save_path = os.path.join(output_dir, final_file_name)
 
             ticker_data = get_stock_info(ticker)
+
             if (
                     ticker_data is None
                     or ticker_data.get("product_code") is None
@@ -435,14 +523,12 @@ if __name__ == "__main__":
 
             market_value = ticker_data['market_value']
 
-            # ─────────────────────────────────────────────────────────────
-            # 2) 시가 총액 500억 이하 패스
-            # ─────────────────────────────────────────────────────────────
             # 시가총액이 500억보다 작으면 패스
-            if (market_value < 50_000_000_000):
+            if market_value < 50_000_000_000:
                 continue
 
-            insert_low_point_stock(row, origin, market_value, save_path)
+            # insert도 기준일 데이터 기준으로 처리
+            insert_low_point_stock(row, chart_data, market_value, save_path)
 
             plot_jobs.append({
                 "origin": chart_data,
@@ -451,15 +537,14 @@ if __name__ == "__main__":
                 "save_path": save_path,
             })
 
-
         for job in plot_jobs:
             fig = plt.figure(figsize=(14, 16), dpi=150)
             gs = fig.add_gridspec(nrows=4, ncols=1, height_ratios=[3, 1, 3, 1])
 
             ax_d_price = fig.add_subplot(gs[0, 0])
-            ax_d_vol   = fig.add_subplot(gs[1, 0], sharex=ax_d_price)
+            ax_d_vol = fig.add_subplot(gs[1, 0], sharex=ax_d_price)
             ax_w_price = fig.add_subplot(gs[2, 0])
-            ax_w_vol   = fig.add_subplot(gs[3, 0], sharex=ax_w_price)
+            ax_w_vol = fig.add_subplot(gs[3, 0], sharex=ax_w_price)
 
             plot_candles_daily(
                 job["origin"],
@@ -490,25 +575,22 @@ if __name__ == "__main__":
             )
             plt.close()
 
-
         if len(selected) > 0:
             nowTime = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
-            print(f'{nowTime} - ✅ 4_find_low_poind.py 그래프 생성 완료')
+            print(f'{nowTime} - ✅ 4_find_low_point.py 그래프 생성 완료')
 
-
-        end = time.time()     # 끝 시간(초)
+        end = time.time()
         elapsed = end - start
 
         hours, remainder = divmod(int(elapsed), 3600)
         minutes, seconds = divmod(remainder, 60)
 
-        # if elapsed > 20:
-        #     print(f"4_find_low_point.py 총 소요 시간: {hours}시간 {minutes}분 {seconds}초")
-        # nowTime = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
-        # print(f'{nowTime} - ✅ 저점 종목 스캔 완료, 총 소요 시간: {hours}시간 {minutes}분 {seconds}초')
-
+        print(f"4_find_low_point.py 총 소요 시간: {hours}시간 {minutes}분 {seconds}초")
 
     except KeyboardInterrupt:
         print("\n사용자 중지 요청 감지. 작업을 종료합니다.")
-        executor.shutdown(wait=False, cancel_futures=True)
+
+        if executor is not None:
+            executor.shutdown(wait=False, cancel_futures=True)
+
         raise
