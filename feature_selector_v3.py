@@ -13,6 +13,7 @@ TARGET_COL = "target_before_stop_7"
 
 # ============================================================
 # Feature candidates
+# 현재 7_find_low_point_processPool.py 의 rule_features 키 기준
 # ============================================================
 DEFAULT_FEATURES = [
     # ============================================================
@@ -62,9 +63,10 @@ DEFAULT_FEATURES = [
 ]
 
 
-REMOVE_CANDIDATES_HINT = [
-
-]
+# 강제 제거가 아님.
+# 여기에 넣으면 selection_score에서 -5점만 감점된다.
+# 지금은 피쳐를 공정하게 보기 위해 비워둔다.
+REMOVE_CANDIDATES_HINT = []
 
 
 @dataclass(frozen=True)
@@ -127,6 +129,9 @@ def split_train_valid(df, date_col, valid_ratio):
 
     split_idx = int(len(df) * (1 - valid_ratio))
 
+    # 중요:
+    # valid가 원본 index를 유지하면 monthly_rule_stability에서
+    # numpy mask position과 DataFrame index label이 충돌할 수 있다.
     train = df.iloc[:split_idx].copy().reset_index(drop=True)
     valid = df.iloc[split_idx:].copy().reset_index(drop=True)
 
@@ -880,7 +885,8 @@ def monthly_rule_stability(valid, rules, target_col, date_col):
     if len(tmp_valid) == 0:
         return pd.DataFrame()
 
-    # 중요: groupby index label과 numpy position 불일치 방지
+    # 중요:
+    # groupby index label과 numpy position 불일치 방지
     tmp_valid = tmp_valid.reset_index(drop=True)
 
     tmp_valid["month"] = tmp_valid[date_col].dt.strftime("%Y-%m")
@@ -1309,18 +1315,32 @@ def print_recommended_features(final_df):
         final_df["corr_prune_status"] != "CORRELATED_DROP"
         ].copy()
 
+    direction_ok = (
+            (
+                    (keep["auc_direction"] == "higher_success")
+                    & (keep["dominant_op"] == ">=")
+            )
+            |
+            (
+                    (keep["auc_direction"] == "lower_success")
+                    & (keep["dominant_op"] == "<=")
+            )
+    )
+
     default = keep[
         (
-            keep["judgement"].isin([
-                "CORE_NECESSARY",
-                "USEFUL_ADDITIVE",
-            ])
+                keep["judgement"].isin([
+                    "CORE_NECESSARY",
+                    "USEFUL_ADDITIVE",
+                ])
+                & direction_ok
         )
         |
         (
                 (keep["judgement"] == "CONDITIONAL")
                 & (keep["avg_valid_lift_when_used"] >= 1.40)
                 & (keep["avg_valid_precision_when_used"] >= 0.56)
+                & direction_ok
         )
         ].copy()
 
@@ -1369,7 +1389,7 @@ def main():
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--csv", required=True)
-    parser.add_argument("--out", default="feature_selector_v2_out")
+    parser.add_argument("--out", default="feature_selector_v3_out")
     parser.add_argument("--target", default=TARGET_COL)
     parser.add_argument("--date-col", default=None)
     parser.add_argument("--valid-ratio", type=float, default=0.30)
