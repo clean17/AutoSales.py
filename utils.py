@@ -424,6 +424,14 @@ def get_kor_ticker_list():
     return tickers
 
 def get_kor_ticker_dict_list():
+    """
+    {
+        "005930": {
+            "stock_name": "삼성전자",
+            "stock_market": "kospi"
+        },
+    }
+    """
     url = "https://chickchick.kr/stocks/kor"
     res = requests.get(url)
     try:
@@ -431,7 +439,10 @@ def get_kor_ticker_dict_list():
     except ValueError:  # JSONDecodeError도 ValueError 하위
         data = {}
     return {
-        item["stock_code"]: item["stock_name"]
+        item["stock_code"]: {
+            "stock_name": item["stock_name"],
+            "stock_market": item["stock_market"],
+        }
         for item in data
         if "stock_code" in item and "stock_name" in item
     }
@@ -1919,7 +1930,7 @@ def low_weekly_check(data: pd.DataFrame):
     # two_w_ago_pct   = (this_w_close / two_w_close) - 1       # 2주 대비 이번주 증감률
     # three_w_ago_pct = (this_w_close / three_w_close) - 1     # 3주 대비 이번주 증감률
     four_w_ago_pct  = (this_w_close / four_w_close) - 1      # 4주 대비 이번주 증감률
-    # is_drop_over_1  = one_w_ago_pct < -0.01                  # -1% 보다 더 하락했는가 // -0.005   # -0.5%
+    is_drop_over_1  = one_w_ago_pct < -0.01                  # -1% 보다 더 하락했는가 // -0.005   # -0.5%
 
     return {
         "ok": True,
@@ -1930,7 +1941,7 @@ def low_weekly_check(data: pd.DataFrame):
         # "pct_vs_last3week": round(float(three_w_ago_pct*100), 3),       # 3주 전 대비 이번주 증감률
         "pct_vs_last4week": round(float(four_w_ago_pct*100), 3),        # 4주 전 대비 이번주 증감률
         # "pct_vs_firstweek": round(float(pct_from_first*100), 3),        # 3개월 첫주 대비 이번주 증감률, -0.22 -> -22% 하락
-        # "is_drop_more_than_minus1pct": bool(is_drop_over_1),            # 주봉 증감률이 기준보다 하락했는지
+        "is_drop_more_than_minus1pct": bool(is_drop_over_1),            # 주봉 증감률이 기준보다 하락했는지
     }
 
 
@@ -2143,6 +2154,7 @@ def build_literals(df, features):
     literals = []
     literal_masks = []
 
+    print('[FEATURES]', features)
     for f in features:
         col = df[f].astype(float).to_numpy()  # flaat 형변환 >  Series > Numpy 배열
         col_nonan = col[~np.isnan(col)]       # ~np.isnan() 으로 True 값만 남는다 > NaN 제거
@@ -2150,7 +2162,7 @@ def build_literals(df, features):
         if len(col_nonan) == 0:
             continue
 
-        print(f, len(col_nonan), len(np.unique(col_nonan)))
+        # print(f, len(col_nonan), len(np.unique(col_nonan)))
 
         # 분위수(percentile) 배열 생성 (덜 촘촘하게 = 과적합 방지하면서 빠르게)
         unique_vals = np.unique(col_nonan)
@@ -2170,8 +2182,8 @@ def build_literals(df, features):
             # n_bins = min(19, len(unique_vals) - 1)
             # qs = np.unique(np.quantile(col_nonan, np.linspace(0.05, 0.95, n_bins)))
 
-            qs = np.unique(np.quantile(col_nonan, np.linspace(0.05, 0.95, 19)))
-            # qs = np.unique(np.quantile(col_nonan, np.linspace(0.1, 0.9, 9)))
+            # qs = np.unique(np.quantile(col_nonan, np.linspace(0.05, 0.95, 19)))
+            qs = np.unique(np.quantile(col_nonan, np.linspace(0.1, 0.9, 9)))
             # qs = np.unique(np.quantile(col_nonan, np.linspace(0.2, 0.8, 7)))
 
         for thr in qs:
