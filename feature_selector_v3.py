@@ -34,7 +34,6 @@ DEFAULT_FEATURES = [
     # 3) 거래대금
     # ============================================================
     "today_tr_val_eok",
-    "tr_val_rank_20d",
 
     # ============================================================
     # 4) 밴드 / 캔들
@@ -128,8 +127,8 @@ def split_train_valid(df, date_col, valid_ratio):
 
     split_idx = int(len(df) * (1 - valid_ratio))
 
-    train = df.iloc[:split_idx].copy()
-    valid = df.iloc[split_idx:].copy()
+    train = df.iloc[:split_idx].copy().reset_index(drop=True)
+    valid = df.iloc[split_idx:].copy().reset_index(drop=True)
 
     return train, valid
 
@@ -1311,18 +1310,27 @@ def print_recommended_features(final_df):
         ].copy()
 
     default = keep[
-        keep["judgement"].isin([
-            "CORE_NECESSARY",
-            "USEFUL_ADDITIVE",
-        ])
-    ].copy()
+        (
+            keep["judgement"].isin([
+                "CORE_NECESSARY",
+                "USEFUL_ADDITIVE",
+            ])
+        )
+        |
+        (
+                (keep["judgement"] == "CONDITIONAL")
+                & (keep["avg_valid_lift_when_used"] >= 1.40)
+                & (keep["avg_valid_precision_when_used"] >= 0.56)
+        )
+        ].copy()
 
     candidate = keep[
-        keep["judgement"].isin([
+        ~keep["feature"].isin(default["feature"])
+        & keep["judgement"].isin([
             "CONDITIONAL",
             "CHECK",
         ])
-    ].copy()
+        ].copy()
 
     remove = final_df[
         final_df["judgement"].isin(["REMOVE"])
