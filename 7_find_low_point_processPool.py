@@ -78,9 +78,173 @@ else:
 
 
 
-def process_ticker(ticker, tickers_dict, i):
+
+
+
+def get_ticker_info(ticker, tickers_dict):
+    ticker = str(ticker).zfill(6)
+    info = tickers_dict.get(ticker, {})
+
+    if isinstance(info, dict):
+        stock_name = info.get("stock_name", "Unknown Stock")
+        stock_market = str(info.get("stock_market", "")).lower()
+        sector_code = info.get("sector_code", None)
+    else:
+        stock_name = info if info else "Unknown Stock"
+        stock_market = ""
+        sector_code = None
+
+    return {
+        "ticker": ticker,
+        "stock_name": stock_name,
+        "stock_market": stock_market,
+        "sector_code": sector_code,
+    }
+
+
+def normalize_price_df_for_market(df, ticker, tickers_dict):
+    """
+    시장 피쳐 계산용으로 종목 df를 정리한다.
+    원본 df index가 날짜인 구조를 기준으로 함.
+    """
+    info = get_ticker_info(ticker, tickers_dict)
+
+    if df is None or df.empty:
+        return None
+
+    tmp = df.copy()
+
+    # 날짜 index -> today 컬럼
+    if "today" not in tmp.columns:
+        tmp = tmp.reset_index()
+        first_col = tmp.columns[0]
+        tmp = tmp.rename(columns={first_col: "today"})
+
+    tmp["today"] = pd.to_datetime(tmp["today"], errors="coerce")
+    tmp["ticker"] = info["ticker"]
+    tmp["stock_market"] = info["stock_market"]
+
+    if "등락률" not in tmp.columns or "종가" not in tmp.columns:
+        return None
+
+    tmp["등락률"] = pd.to_numeric(tmp["등락률"], errors="coerce")
+    tmp["종가"] = pd.to_numeric(tmp["종가"], errors="coerce")
+
+    tmp = tmp.sort_values("today").reset_index(drop=True)
+
+    # 종목 자체 5일 수익률
+    tmp["stock_5d_pct"] = (tmp["종가"] / tmp["종가"].shift(5) - 1) * 100
+
+    return tmp[[
+        "today",
+        "ticker",
+        "stock_market",
+        "등락률",
+        "stock_5d_pct",
+    ]]
+
+
+def build_market_context_from_pickles(tickers, tickers_dict, pickle_dir):
+    """
+    전체 종목 pickle을 훑어서 날짜별/시장별 피쳐를 만든다.
+
+    생성:
+    - market_today_pct: 같은 시장 종목들의 당일 평균 등락률
+    - market_5d_pct: 같은 시장 종목들의 5일 수익률 평균
+    - market_breadth_up_ratio: 같은 시장 상승 종목 비율
+    - market_stock_count: 계산에 사용된 종목 수
+
+    반환:
+    market_context[(YYYY-MM-DD, stock_market)] = dict
+    """
+    parts = []
+
+    for ticker in tickers:
+        ticker = str(ticker).zfill(6)
+        filepath = os.path.join(pickle_dir, f"{ticker}.pkl")
+
+        if not os.path.exists(filepath):
+            continue
+
+        try:
+            one = safe_read_pickle(filepath)
+            one = normalize_price_df_for_market(one, ticker, tickers_dict)
+
+            if one is not None and not one.empty:
+                parts.append(one)
+
+        except Exception as e:
+            print(f"[market_context] skip {ticker}: {e}")
+            continue
+
+    if not parts:
+        print("[market_context] no data")
+        return {}
+
+    market_base = pd.concat(parts, ignore_index=True)
+
+    market_base = market_base[
+        market_base["today"].notna()
+        & market_base["stock_market"].notna()
+        & (market_base["stock_market"] != "")
+        ].copy()
+
+    market_daily = (
+        market_base
+        .groupby(["today", "stock_market"])
+        .agg(
+            market_today_pct=("등락률", "mean"),
+            market_5d_pct=("stock_5d_pct", "mean"),
+            market_breadth_up_ratio=("등락률", lambda s: (s > 0).mean()),
+            market_stock_count=("등락률", "count"),
+        )
+        .reset_index()
+    )
+
+    market_daily["today_str"] = market_daily["today"].dt.strftime("%Y-%m-%d")
+
+    market_context = {}
+
+    for _, r in market_daily.iterrows():
+        key = (r["today_str"], str(r["stock_market"]).lower())
+
+        market_context[key] = {
+            "market_today_pct": float(r["market_today_pct"]) if pd.notna(r["market_today_pct"]) else np.nan,
+            "market_5d_pct": float(r["market_5d_pct"]) if pd.notna(r["market_5d_pct"]) else np.nan,
+            "market_breadth_up_ratio": float(r["market_breadth_up_ratio"]) if pd.notna(r["market_breadth_up_ratio"]) else np.nan,
+            "market_stock_count": int(r["market_stock_count"]) if pd.notna(r["market_stock_count"]) else 0,
+        }
+
+    print(f"[market_context] built: {len(market_context)} date-market rows")
+
+    return market_context
+
+
+def get_market_features_for_row(today, stock_market, market_context):
+    today_str = pd.to_datetime(today).strftime("%Y-%m-%d")
+    market = str(stock_market).lower()
+
+    item = market_context.get((today_str, market), None)
+
+    if item is None:
+        return {
+            "market_today_pct": np.nan,
+            "market_5d_pct": np.nan,
+            "market_breadth_up_ratio": np.nan,
+            "market_stock_count": 0,
+        }
+
+    return item
+
+
+def process_ticker(ticker, tickers_dict, i, market_context):
     results = []
-    stock_name = tickers_dict.get(ticker, 'Unknown Stock')
+
+    info = get_ticker_info(ticker, tickers_dict)
+    ticker = info["ticker"]
+    stock_name = info["stock_name"]
+    # stock_name = get_stock_name(tickers_dict, ticker)
+
     filepath = os.path.join(pickle_dir, f'{ticker}.pkl')
     if not os.path.exists(filepath):
         print(f"[process_ticker] [idx={i}] {ticker} 파일 없음")
@@ -95,17 +259,14 @@ def process_ticker(ticker, tickers_dict, i):
     if df is None or df.empty or len(df) < 70:
         return None
 
+    # 거래정지/이상치 행 제거
+    df, _ = drop_trading_halt_rows(df)
+
     # 2차 생성 feature
     df = add_technical_features(df)
 
     # 결측 제거
     df, _ = drop_sparse_columns(df, threshold=0.10, check_inf=True, inplace=True)
-
-    # 거래정지/이상치 행 제거
-    df, _ = drop_trading_halt_rows(df)
-
-    # drop 이후 3차 생성
-    df = add_technical_features(df)
 
     # 데이터가 부족하면 패스
     if df.empty or len(df) < 70:
@@ -121,14 +282,20 @@ def process_ticker(ticker, tickers_dict, i):
     print(f"{pad_text(i, 4)} | {first_date} - {last_date} | {ticker} | {pad_text(stock_name, 26)} | {len(df)}")  #  문자열을 왼쪽 정렬하고, 전체 너비를 15칸
 
     for idx in range(START_OFFSET, END_OFFSET + 1):
-        res = process_one_with_df(df, idx, ticker, tickers_dict)
+        res = process_one_with_df(df, idx, ticker, tickers_dict, market_context=market_context)
         if res is not None:
             results.append(res)
 
     return results
 
-def process_one_with_df(df, idx, ticker, tickers_dict):
-    stock_name = tickers_dict.get(ticker, 'Unknown Stock')
+def process_one_with_df(df, idx, ticker, tickers_dict, market_context):
+    info = get_ticker_info(ticker, tickers_dict)
+
+    ticker = info["ticker"]
+    stock_name = info["stock_name"]
+    stock_market = info["stock_market"]
+    sector_code = info["sector_code"]
+    # stock_name = get_stock_name(tickers_dict, ticker)
 
     # 과거 데이터(data)와 / 검증 데이터(remaining_data)로 분리
     # [0:150](0~149), idx = 10 >> [0:140](0~139) / [140:](140~149)
@@ -319,8 +486,12 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
 
     # 캔들에서 몸통의 비율 (추세 강도)
     body_ratio = abs(last["종가"] - last["시가"]) / (last["고가"] - last["저가"] + 1e-9)
-    price_power_value = today_pct * log1p(today_tr_val_eok)
-    body_value_power = body_value_power * today_pct * np.log1p(today_tr_val_eok.clip(lower=0))
+    price_power_value = today_pct * np.log1p(max(today_tr_val_eok, 0))
+    # body_value_power = (
+    #         max(body_ratio, 0)
+    #         * max(today_pct, 0)
+    #         * np.log1p(max(today_tr_val_eok, 0))
+    # )
 
     # 거래대금 변동률 (어제, 오늘)
     # tr_value_chg_1d      = today_tr_val / (trading_value.iloc[-2] + 1e-9)
@@ -351,7 +522,8 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
 
     # 시가 대비 종가가 얼마나 회복되었는가 (AUC 0.514 - 거의 랜덤)
     intraday_return = (last["종가"] / last["시가"] - 1) * 100
-    intraday_body_power = intraday_return * body_ratio
+    # 전일 대비 갭이 아니라 “장중 순수 매수세”.. 상광 0.929
+    # intraday_body_power = intraday_return * body_ratio
 
     # 데드캣 패널티
     # _deadcat_penalty     = max(0, (-_drawdown_60d - 40) / 20) + max(0, -_dist_to_ma20 / 5)
@@ -365,14 +537,28 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
     # 저점 대비 반등 위치(오늘 제외): 최근 급락 저점에서 오늘 종가가 얼마나 회복했는지
     _low_7d_before_today = data['저가'].iloc[-8:-1].min()
     rebound_from_7d_low = (last['종가'] / _low_7d_before_today - 1) * 100
-    rebound_vs_prior_drop = (rebound_from_7d_low / max_drop_7d.abs() + 1e-9).replace(
-        [np.inf, -np.inf],
-        np.nan,
-    )
+    # 최근 하락폭 대비 오늘까지 얼마나 반등했는가
+    # rebound_vs_prior_drop = rebound_from_7d_low / (abs(max_drop_7d) + 1e-9)
+    # if not np.isfinite(rebound_vs_prior_drop):
+    #     rebound_vs_prior_drop = np.nan
+
     # 하락 후 반등: 최근 최대 하락폭 대비 오늘 반등이 얼마나 강했는가
     # drop_rebound_ratio = today_pct / (abs(max_drop_7d) + 1e-9)
     # 거래대금 + 가격 반등 결합 피쳐
     # volume_price_power = today_pct * np.log1p(tr_value_ratio_5d)
+
+    today_str = str(data.index[-1].date())
+
+    market_item = get_market_features_for_row(
+        today=today_str,
+        stock_market=stock_market,
+        market_context=market_context,
+    )
+
+    market_today_pct = market_item["market_today_pct"]
+    market_5d_pct = market_item["market_5d_pct"]
+    market_breadth_up_ratio = market_item["market_breadth_up_ratio"]
+    market_stock_count = market_item["market_stock_count"]
 
     rule_features = {
         "vol5": vol5,                                          # 성공군의 단기 변동성이 큼, 핵심 피쳐
@@ -387,7 +573,7 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
         "dist_to_ma5": dist_to_ma5,                            # dist_from_low_20d, pct_vs_lastweek, dist_to_ma20와 중복이 큼, 대체 가능
         # "ma5_ma20_gap_chg_1d": _ma5_ma20_gap_chg_1d,           # best bin은 괜찮지만 전체 방향성이 거의 없음.. dist_to_ma5, dist_to_ma20, pct_vs_lastweek와 의미가 겹친다, 대체 가능
 
-        "ma5_chg_rate": ma5_chg_rate,                          # _ma5_ma20_gap_chg_1d 상관 0.930, 중복이므로 정리, 룰 조합에서 강함
+        # "ma5_chg_rate": ma5_chg_rate,                          # _ma5_ma20_gap_chg_1d 상관 0.930, 중복이므로 정리, 룰 조합에서 강함
 
         "today_tr_val_eok": today_tr_val_eok,
         "tr_val_rank_20d": tr_val_rank_20d,                    # 분리력 약함, 성공률 상승폭 작음
@@ -404,15 +590,13 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
         "rebound_from_7d_low": rebound_from_7d_low,
 
         "price_power_value": price_power_value,
-        "body_value_power": body_value_power,
-        "intraday_body_power": intraday_body_power,
         "room_to_20d_high": room_to_20d_high,
         "room_to_60d_high": room_to_60d_high,
-        "rebound_vs_prior_drop": rebound_vs_prior_drop,
 
-        # "market_today_pct": market_today_pct,                    # 해당 종목이 속한 시장의 당일 등락률
-        # "market_5d_pct": market_5d_pct,                          # 해당 종목이 속한 시장의 최근 5거래일 등락률
-        # "market_breadth_up_ratio": market_breadth_up_ratio,      # 같은 날짜, 같은 시장에서 상승한 종목 비율
+        "market_today_pct": market_today_pct,                    # 해당 종목이 속한 시장의 당일 등락률
+        "market_5d_pct": market_5d_pct,                          # 해당 종목이 속한 시장의 최근 5거래일 등락률
+        "market_breadth_up_ratio": market_breadth_up_ratio,      # 같은 날짜, 같은 시장에서 상승한 종목 비율
+        # "market_stock_count": market_stock_count,
 
         # 이전 피쳐
         # "three_m_cur_max_chg_rate": three_m_cur_max_chg_rate,  # 성공군이 3개월 고점 대비 더 눌림, 정밀도를 올려줌
@@ -450,7 +634,9 @@ def process_one_with_df(df, idx, ticker, tickers_dict):
 
     row = {
         "stock_name": stock_name,
-        "today" : str(data.index[-1].date()),
+        "stock_market": stock_market,
+        "sector_code": sector_code,
+        "today": str(data.index[-1].date()),
         "idx": idx,
     }
 
@@ -606,13 +792,20 @@ if __name__ == "__main__":
     # tickers = ['103140']  # 풍산
     # tickers = extract_numbers_from_filenames(directory = r'D:\5below20_test\4퍼', isToday=False)
 
+    print("[market_context] building...")
+    market_context = build_market_context_from_pickles(
+        tickers=tickers,
+        tickers_dict=tickers_dict,
+        pickle_dir=pickle_dir,
+    )
+
 
     rows = []            # 결과 종목 데이터 저장
 
     try:
         with ProcessPoolExecutor(max_workers=os.cpu_count() - 2) as executor:
             futures = [
-                executor.submit(process_ticker, ticker, tickers_dict, i)
+                executor.submit(process_ticker, ticker, tickers_dict, i, market_context)
                 for i, ticker in enumerate(tickers, start=1)
             ]
 
@@ -663,7 +856,7 @@ if __name__ == "__main__":
                 selected = df[mask].copy()
 
                 total_cnt = len(selected)
-                up_cnt = int(selected["is_success7"].sum())
+                up_cnt = int(selected["target_before_stop_7"].sum())
                 shortfall_cnt = total_cnt - up_cnt
                 total_up_rate = up_cnt / total_cnt * 100 if total_cnt else 0
 
