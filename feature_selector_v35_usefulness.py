@@ -7,7 +7,28 @@ from typing import Dict, List, Tuple, Optional, Set
 import numpy as np
 import pandas as pd
 
+"""
+"피쳐가 유용한지 알고 싶다"
 
+“이 피쳐가 유용한가?”
+“단독으로 약해도 룰 조합에서 필터 역할을 하는가?”
+
+좋은 룰을 많이 뽑고, 그 룰들에서 피쳐 유용성을 평가하는 방식
+
+>>>
+전체 룰 후보 기준으로 피쳐 유용성 평가
+조건부 기여도 추가
+비단조 피쳐 예외 처리
+수동 threshold + ALLOWED_OPS 적용
+
+좋은 점:
+현재 네 목적 “유용한 피쳐를 알고 싶다”에 가장 잘 맞음
+BB_perc, dist_to_ma5, gap_pct 같은 필터 피쳐를 더 공정하게 봄
+
+나쁜 점:
+S 등급이 넓게 나올 수 있음
+valid 평균 60%를 보장하지 않음
+"""
 TARGET_COL = "target_before_stop_7"
 
 

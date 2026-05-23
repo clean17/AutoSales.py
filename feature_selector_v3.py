@@ -7,7 +7,16 @@ from typing import Dict, List, Tuple, Optional, Set
 import numpy as np
 import pandas as pd
 
+"""
+v3는 전체 피쳐 유용성 1차 스캔용
 
+>>>
+좋은 점:
+피쳐가 전반적으로 중요한지 보기 좋음
+
+나쁜 점:
+비단조/조건부 필터 피쳐를 약하게 볼 수 있음
+"""
 TARGET_COL = "target_before_stop_7"
 
 

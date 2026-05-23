@@ -7,6 +7,22 @@ from typing import Dict, List, Tuple, Optional, Set
 import numpy as np
 import pandas as pd
 
+"""
+"valid 평균 60%를 만드는 피쳐를 알고 싶다"
+
+valid precision 평균 60% 이상 룰 포트폴리오를 만들고 그 룰 묶음에서 유용한 피쳐를 판별
+
+>>>
+좋은 점:
+실제 valid 60% 목표에 직접 맞음
+고정밀 룰에 필요한 피쳐를 좁히기 좋음
+중복 룰을 줄이는 옵션이 있음
+
+나쁜 점:
+선택된 avg60 룰에 안 들어간 피쳐는 낮게 평가될 수 있음
+전체적으로 유용한 피쳐라도 avg60 룰 밖이면 밀림
+데이터 split이나 룰 선택 조건에 민감함
+"""
 
 TARGET_COL = "target_before_stop_7"
 
