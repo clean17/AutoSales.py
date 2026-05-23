@@ -9,14 +9,15 @@ matplotlib.use("Agg")  # 비인터랙티브 백엔드 (창 안 띄움)
 import os, sys
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 import matplotlib.pyplot as plt
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import lowscan_rules_v1 as rule1
+import lowscan_rules_v1_1 as rule1_1
 
-modules = [rule1]
+modules = [rule1, rule1_1]
 
 # log_file = open("csv/output.log", "w", encoding="utf-8")
 # sys.stdout = log_file
@@ -35,9 +36,9 @@ else:
     raise FileNotFoundError("utils.py를 상위 디렉터리에서 찾지 못했습니다.")
 
 from utils import get_kor_ticker_dict_list, add_technical_features, plot_candles_weekly, plot_candles_daily, \
-    drop_sparse_columns, drop_trading_halt_rows, signal_any_drop, low_weekly_check, extract_numbers_from_filenames, \
-    sort_csv_by_today_desc, safe_read_pickle, safe_rate, to_float, round_float_features, pad_text, \
-    first_reach_day_from_rates, make_trade_labels, get_stock_name
+    drop_sparse_columns, drop_trading_halt_rows, signal_any_drop, low_weekly_check, sort_csv_by_today_desc, safe_read_pickle, safe_rate, \
+    round_float_features, pad_text, \
+    make_trade_labels, get_stock_name
 
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
 root_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(=루트)

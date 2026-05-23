@@ -1,5 +1,6 @@
 """
 stop_before_target_7 == 1 룰 생성 스크립트 - 적용 버전
+“이 종목은 반등할 수도 있지만, 목표가 전에 손절이 먼저 나올 가능성이 높다.”
 
 여러 시나리오와 precision fill을 비교해 coverage를 유지하면서 target_rate를 더 끌어올린다.
 

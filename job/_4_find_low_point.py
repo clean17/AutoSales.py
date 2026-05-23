@@ -30,7 +30,7 @@ import requests
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-from low import lowscan_rules_v1 as rule1
+import lowscan_rules_v1 as rule1
 
 modules = [rule1]
 

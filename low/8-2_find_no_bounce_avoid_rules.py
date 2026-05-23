@@ -33,6 +33,7 @@ target_class == 0 고확률 룰 마이닝 스크립트
 
 from __future__ import annotations
 
+import os
 import argparse
 import heapq
 import math
@@ -63,7 +64,13 @@ import pandas as pd
 #
 # =============================================================================
 
-CSV_PATH = "../csv/low_result_7_desc.csv"
+script_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(root/low)
+project_root = os.path.dirname(script_dir)               # root
+
+csv_dir = os.path.join(project_root, "csv")
+os.makedirs(csv_dir, exist_ok=True)
+
+CSV_PATH = os.path.join(csv_dir, "low_result_7.csv")
 OUT_PATH = Path("lowscan_target0_highprob_rules.py")
 
 TARGET_CLASS = 0
