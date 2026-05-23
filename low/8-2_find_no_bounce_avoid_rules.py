@@ -233,37 +233,49 @@ def get_features(df: pd.DataFrame) -> list[str]:
     return features
 
 
-def get_feature_groups() -> tuple[dict[str, str], dict[str, int]]:
+def get_feature_groups():
     feature_groups = {
         "today_pct": "PRICE",
+        "intraday_return": "PRICE",
         "max_drop_7d": "DROP",
-        "dist_from_low_20d": "POSITION",
-        "three_m_cur_max_chg_rate": "POSITION",
+        "rebound_from_7d_low": "REBOUND",
+        "rebound_vs_prior_drop": "REBOUND",
+        "room_to_20d_high": "ROOM",
+        "room_to_60d_high": "ROOM",
         "dist_to_ma5": "POSITION",
-        "dist_to_ma20": "POSITION",
         "pct_vs_lastweek": "WEEK_POSITION",
-        "ma5_ma20_gap_chg_1d": "TREND",
+        "ma5_chg_rate": "TREND",
         "gap_pct": "GAP",
         "today_tr_val_eok": "VOLUME",
-        "tr_val_rank_20d": "VOLUME",
-        "tr_value_ratio_5d": "VOLUME",
-        "MACD_hist_3d": "MACD",
         "vol5": "VOLATILITY",
-        "ATR_pct": "VOLATILITY",
         "vol_ratio_5_15": "VOLATILITY",
+        "BB_perc": "BAND",
+        "body_ratio": "CANDLE",
+        "lower_wick_ratio": "CANDLE",
+        "upper_wick_ratio": "CANDLE",
+        "price_power_value": "POWER",
+        "body_value_power": "POWER",
+        "market_today_pct": "MARKET",
+        "market_5d_pct": "MARKET",
     }
 
     group_limits = {
         "PRICE": 1,
         "DROP": 1,
-        "POSITION": 2,
+        "REBOUND": 1,
+        "ROOM": 1,
+        "POSITION": 1,
         "WEEK_POSITION": 1,
         "TREND": 1,
         "GAP": 1,
         "VOLATILITY": 2,
         "VOLUME": 1,
-        "MACD": 1,
+        "BAND": 1,
+        "CANDLE": 1,
+        "POWER": 1,
+        "MARKET": 1,
     }
+
     return feature_groups, group_limits
 
 

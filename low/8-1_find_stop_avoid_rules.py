@@ -307,7 +307,6 @@ def get_feature_groups():
         "ma5_chg_rate": "TREND",
         "gap_pct": "GAP",
         "today_tr_val_eok": "VOLUME",
-        "tr_val_rank_20d": "VOLUME",
         "vol5": "VOLATILITY",
         "vol_ratio_5_15": "VOLATILITY",
         "BB_perc": "BAND",
