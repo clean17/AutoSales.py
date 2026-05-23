@@ -1,5 +1,6 @@
 import argparse
 import hashlib
+import itertools
 import math
 import os
 from dataclasses import dataclass
@@ -8,87 +9,75 @@ from typing import Dict, List, Tuple, Optional, Set
 import numpy as np
 import pandas as pd
 
+"""
+- v2 기능 포함
+- room_to_20d_high / room_to_60d_high / rebound_vs_prior_drop 구간형 조건 허용
+- 단순화 강화
+- OR 룰셋 평가 추가
+- 12_or_rule_sets.csv 출력
+
+단일 룰 여러 개를 OR로 묶어 평가
+"""
 
 TARGET_COL = "target_before_stop_7"
 
 
 DEFAULT_FEATURES = [
-    # ============================================================
-    # 1) 현재까지 가장 강하게 살아남은 핵심 피쳐
-    # ============================================================
-    "rebound_from_7d_low",
-    "today_pct",
-    "upper_wick_ratio",
-    "vol5",
-
-    # ============================================================
-    # 2) 기존 보조 피쳐
-    # ============================================================
-    "today_tr_val_eok",
-    "body_ratio",
-
-    # ============================================================
-    # 3) 새로 추가한 매수세 / 저항 / 과열 판단 피쳐
-    # ============================================================
+    # 핵심
     "room_to_20d_high",
     "room_to_60d_high",
+    "upper_wick_ratio",
+    "today_pct",
+    "vol5",
+
+    # 보조
+    "today_tr_val_eok",
+    "body_ratio",
+    "rebound_from_7d_low",
+
+    # 상관쌍 중 우선 선택
+    "intraday_return",
+    "ma5_chg_rate",
+
+    # 조건부
     "price_power_value",
     "body_value_power",
-    # "intraday_body_power",
     "rebound_vs_prior_drop",
-
-    # ============================================================
-    # 4) 시장 상태 피쳐
-    # ============================================================
-    "market_today_pct",
-
-    # ============================================================
-    # 5) 실험용 보조
-    # ============================================================
     "max_drop_7d",
-    "intraday_return",
-    "BB_perc",
-    "dist_to_ma5",
-    # "recent_runup",
-    "gap_pct",
-    "lower_wick_ratio",
-    "pct_vs_lastweek",
-    "ma5_chg_rate",
+
+    # 시장 피쳐는 실험용에 가깝지만 일단 유지
+    "market_today_pct",
 ]
 
 
 ALLOWED_OPS = {
-    # 핵심
-    "rebound_from_7d_low": [">="],
-    "today_pct": [">="],
-    "upper_wick_ratio": ["<="],
-    "vol5": [">="],
-
-    # 기존 보조
-    "today_tr_val_eok": [">=", "<="],
-    "body_ratio": [">="],
-
-    # 새 피쳐
     "room_to_20d_high": [">=", "<="],
     "room_to_60d_high": [">=", "<="],
+    "upper_wick_ratio": ["<="],
+    "today_pct": [">="],
+    "vol5": [">="],
+
+    "today_tr_val_eok": [">=", "<="],
+    "body_ratio": [">="],
+    "rebound_from_7d_low": [">="],
+
+    "intraday_return": [">="],
+    "ma5_chg_rate": [">=", "<="],
+
     "price_power_value": [">="],
     "body_value_power": [">="],
-    # "intraday_body_power": [">="],
     "rebound_vs_prior_drop": [">=", "<="],
-
-    # 시장
-    "market_today_pct": [">="],
-
-    # 실험용 보조
     "max_drop_7d": ["<="],
-    "intraday_return": [">="],
-    "BB_perc": ["<="],
-    "dist_to_ma5": ["<="],
-    # "recent_runup": ["<="],
-    "gap_pct": ["<="],
-    "lower_wick_ratio": ["<="],
-    "pct_vs_lastweek": ["<="],
-    "ma5_chg_rate": [">=", "<="],
+
+    "market_today_pct": [">="],
+}
+
+
+# 같은 룰 안에서 상한/하한을 동시에 허용할 피쳐
+INTERVAL_FEATURES = {
+    "room_to_20d_high",
+    "room_to_60d_high",
+    "rebound_vs_prior_drop",
 }
 
 
@@ -126,17 +115,8 @@ class Rule:
 
 def find_date_col(df: pd.DataFrame) -> Optional[str]:
     for c in [
-        "today",
-        "date",
-        "Date",
-        "datetime",
-        "trade_date",
-        "trd_date",
-        "일자",
-        "날짜",
-        "기준일",
-        "ymd",
-        "YMD",
+        "today", "date", "Date", "datetime", "trade_date",
+        "trd_date", "일자", "날짜", "기준일", "ymd", "YMD",
     ]:
         if c in df.columns:
             return c
@@ -169,19 +149,12 @@ def prepare_df(df: pd.DataFrame, target_col: str, date_col: str) -> pd.DataFrame
 
 def split_train_valid_by_date(df: pd.DataFrame, valid_ratio: float):
     split_idx = int(len(df) * (1 - valid_ratio))
-
     train = df.iloc[:split_idx].copy().reset_index(drop=True)
     valid = df.iloc[split_idx:].copy().reset_index(drop=True)
-
     return train, valid
 
 
 def wilson_lcb(success: int, n: int, z: float = 1.64) -> float:
-    """
-    90% Wilson lower confidence bound.
-    표본이 작은 고정밀 룰 과대평가 방지.
-    """
-
     if n <= 0:
         return np.nan
 
@@ -264,8 +237,20 @@ def apply_rule(df: pd.DataFrame, atoms: Tuple[Atom, ...]) -> np.ndarray:
     return mask
 
 
+def apply_or_rules(df: pd.DataFrame, rules: List[Rule]) -> np.ndarray:
+    if not rules:
+        return np.zeros(len(df), dtype=bool)
+
+    mask = np.zeros(len(df), dtype=bool)
+
+    for r in rules:
+        mask |= apply_rule(df, r.atoms)
+
+    return mask
+
+
 # ============================================================
-# 상관 피쳐 처리
+# 상관 피쳐
 # ============================================================
 
 def build_corr_pairs(df: pd.DataFrame, features: List[str], corr_threshold: float):
@@ -316,217 +301,74 @@ def has_correlated_pair(
 
 def default_extra_thresholds() -> Dict[str, List[Tuple[str, float]]]:
     return {
-        "rebound_from_7d_low": [
-            (">=", 25.0),
-            (">=", 30.0),
-            (">=", 32.9122),
-            (">=", 35.0),
-            (">=", 40.0),
-            (">=", 40.7563),
-            (">=", 45.0),
-            (">=", 50.0),
-            (">=", 55.0),
-            (">=", 60.0),
-        ],
-
-        "today_pct": [
-            (">=", 5.0),
-            (">=", 8.0),
-            (">=", 10.0),
-            (">=", 11.253),
-            (">=", 13.0),
-            (">=", 15.0),
-            (">=", 15.86),
-            (">=", 18.0),
-            (">=", 20.0),
-            (">=", 22.2708),
-            (">=", 25.0),
-        ],
-
-        "upper_wick_ratio": [
-            ("<=", 0.0),
-            ("<=", 0.02),
-            ("<=", 0.04),
-            ("<=", 0.064),
-            ("<=", 0.087),
-            ("<=", 0.1),
-            ("<=", 0.111),
-            ("<=", 0.158),
-            ("<=", 0.21),
-            ("<=", 0.31),
-        ],
-
-        "vol5": [
-            (">=", 4.0),
-            (">=", 5.0),
-            (">=", 6.0),
-            (">=", 6.507),
-            (">=", 8.0),
-            (">=", 8.467),
-            (">=", 10.0),
-            (">=", 10.5491),
-            (">=", 13.4364),
-        ],
-
-        "today_tr_val_eok": [
-            (">=", 3.0),
-            (">=", 5.0),
-            (">=", 8.0),
-            (">=", 10.0),
-            (">=", 12.4428),
-            (">=", 15.3325),
-            (">=", 20.0),
-            (">=", 23.4034),
-            ("<=", 300.0),
-            ("<=", 500.0),
-            ("<=", 841.482),
-            ("<=", 1391.67),
-        ],
-
-        "body_ratio": [
-            (">=", 0.6),
-            (">=", 0.7),
-            (">=", 0.706),
-            (">=", 0.8),
-            (">=", 0.839),
-            (">=", 0.9),
-        ],
-
         "room_to_20d_high": [
-            (">=", -10.0),
-            (">=", -5.0),
-            (">=", 0.0),
-            (">=", 3.0),
-            (">=", 5.0),
-            (">=", 10.0),
-            ("<=", 5.0),
-            ("<=", 10.0),
-            ("<=", 20.0),
-            ("<=", 30.0),
+            (">=", -10.0), (">=", -5.0), (">=", 0.0), (">=", 3.0), (">=", 5.0),
+            ("<=", -5.0), ("<=", 0.0), ("<=", 3.0), ("<=", 4.4438), ("<=", 5.0),
+            ("<=", 10.0), ("<=", 20.0), ("<=", 30.0),
         ],
-
         "room_to_60d_high": [
-            (">=", -10.0),
-            (">=", -5.0),
-            (">=", 0.0),
-            (">=", 3.0),
-            (">=", 5.0),
-            (">=", 10.0),
-            ("<=", 5.0),
-            ("<=", 10.0),
-            ("<=", 20.0),
-            ("<=", 30.0),
+            (">=", -10.0), (">=", -5.0), (">=", 0.0), (">=", 3.0), (">=", 5.0),
+            ("<=", -5.0), ("<=", 0.0), ("<=", 5.0), ("<=", 10.0),
+            ("<=", 12.2626), ("<=", 18.9896), ("<=", 20.0), ("<=", 30.0),
             ("<=", 50.0),
         ],
-
+        "upper_wick_ratio": [
+            ("<=", 0.0), ("<=", 0.02), ("<=", 0.04), ("<=", 0.064),
+            ("<=", 0.087), ("<=", 0.1), ("<=", 0.111), ("<=", 0.158),
+            ("<=", 0.21), ("<=", 0.31),
+        ],
+        "today_pct": [
+            (">=", 5.0), (">=", 8.0), (">=", 10.0), (">=", 11.253),
+            (">=", 13.0), (">=", 15.0), (">=", 15.86), (">=", 18.0),
+            (">=", 20.0), (">=", 22.2708), (">=", 25.0),
+        ],
+        "vol5": [
+            (">=", 4.0), (">=", 5.0), (">=", 6.0), (">=", 6.507),
+            (">=", 8.0), (">=", 8.467), (">=", 10.0), (">=", 10.5478),
+            (">=", 10.5491), (">=", 13.4364),
+        ],
+        "today_tr_val_eok": [
+            (">=", 3.0), (">=", 5.0), (">=", 8.0), (">=", 10.0),
+            (">=", 12.4428), (">=", 15.3325), (">=", 20.0),
+            (">=", 23.4034), (">=", 50.0), (">=", 100.0),
+            ("<=", 300.0), ("<=", 500.0), ("<=", 841.482), ("<=", 1391.67),
+        ],
+        "body_ratio": [
+            (">=", 0.6), (">=", 0.7), (">=", 0.706), (">=", 0.8),
+            (">=", 0.839), (">=", 0.9),
+        ],
+        "rebound_from_7d_low": [
+            (">=", 25.0), (">=", 30.0), (">=", 32.9122), (">=", 35.0),
+            (">=", 40.0), (">=", 40.7563), (">=", 45.0), (">=", 50.0),
+            (">=", 55.0), (">=", 60.0),
+        ],
+        "intraday_return": [
+            (">=", 4.0), (">=", 5.0), (">=", 6.0), (">=", 8.0),
+            (">=", 10.0), (">=", 15.0), (">=", 18.6578),
+        ],
+        "ma5_chg_rate": [
+            (">=", 3.0), (">=", 5.0), (">=", 5.8628), (">=", 8.0),
+            (">=", 10.0), ("<=", -3.0), ("<=", -5.0),
+        ],
         "price_power_value": [
-            (">=", 20.0),
-            (">=", 40.0),
-            (">=", 60.0),
-            (">=", 80.0),
+            (">=", 20.0), (">=", 40.0), (">=", 60.0), (">=", 80.0),
             (">=", 100.0),
         ],
-
         "body_value_power": [
-            (">=", 5.0),
-            (">=", 10.0),
-            (">=", 15.0),
-            (">=", 20.0),
-            (">=", 30.0),
-            (">=", 40.0),
+            (">=", 5.0), (">=", 10.0), (">=", 15.0), (">=", 20.0),
+            (">=", 30.0), (">=", 40.0),
         ],
-
-        # "intraday_body_power": [
-        #     (">=", 3.0),
-        #     (">=", 5.0),
-        #     (">=", 8.0),
-        #     (">=", 10.0),
-        #     (">=", 15.0),
-        # ],
-
         "rebound_vs_prior_drop": [
-            (">=", 1.0),
-            (">=", 2.0),
-            (">=", 3.0),
-            (">=", 5.0),
-            ("<=", 5.0),
-            ("<=", 10.0),
-            ("<=", 20.0),
+            (">=", 1.0), (">=", 2.0), (">=", 3.0), (">=", 5.0),
+            ("<=", 5.0), ("<=", 10.0), ("<=", 20.0),
         ],
-
-        "market_today_pct": [
-            (">=", -2.0),
-            (">=", -1.0),
-            (">=", 0.0),
-            (">=", 0.5),
-            (">=", 1.0),
-        ],
-
         "max_drop_7d": [
-            ("<=", -3.54),
-            ("<=", -3.7931),
-            ("<=", -5.0),
-            ("<=", -7.0),
-            ("<=", -10.0),
+            ("<=", -3.54), ("<=", -3.7931), ("<=", -5.0),
+            ("<=", -7.0), ("<=", -10.0),
         ],
-
-        "intraday_return": [
-            (">=", 4.0),
-            (">=", 5.0),
-            (">=", 6.0),
-            (">=", 8.0),
-            (">=", 10.0),
+        "market_today_pct": [
+            (">=", -2.0), (">=", -1.0), (">=", 0.0), (">=", 0.5), (">=", 1.0),
         ],
-
-        "BB_perc": [
-            ("<=", 0.05),
-            ("<=", 0.1),
-            ("<=", 0.1765),
-            ("<=", 0.25),
-            ("<=", 0.3),
-        ],
-
-        "dist_to_ma5": [
-            ("<=", -0.0182),
-            ("<=", -0.3),
-            ("<=", -0.5),
-            ("<=", -1.0),
-            ("<=", -2.0),
-        ],
-
-        # "recent_runup": [
-        #     ("<=", -16.0),
-        #     ("<=", -12.0),
-        #     ("<=", -10.7),
-        #     ("<=", -8.0),
-        #     ("<=", -5.0),
-        #     ("<=", 0.0),
-        # ],
-
-        "gap_pct": [
-            ("<=", -2.0),
-            ("<=", -1.0),
-            ("<=", -0.5),
-            ("<=", 0.0),
-            ("<=", 0.5),
-        ],
-
-        "lower_wick_ratio": [
-            ("<=", 0.0),
-            ("<=", 0.004),
-            ("<=", 0.01),
-            ("<=", 0.02),
-            ("<=", 0.05),
-        ],
-
-        "pct_vs_lastweek": [
-            ("<=", -5.0),
-            ("<=", -3.0),
-            ("<=", -1.0),
-            ("<=", 0.0),
-            ("<=", 0.21),
-        ],
-
     }
 
 
@@ -558,6 +400,7 @@ def make_atoms(train, features, quantiles, extra_thresholds, allowed_ops):
             atoms.append(Atom(f, op, float(th)))
 
     unique = {}
+
     for a in atoms:
         unique[(a.feature, a.op, round(a.threshold, 10))] = a
 
@@ -565,10 +408,81 @@ def make_atoms(train, features, quantiles, extra_thresholds, allowed_ops):
 
 
 # ============================================================
+# 같은 피쳐 구간형 조건 허용
+# ============================================================
+
+def can_add_atom(base_atoms: Tuple[Atom, ...], atom: Atom, corr_pairs, args) -> bool:
+    used_features = [a.feature for a in base_atoms]
+    same_feature_atoms = [a for a in base_atoms if a.feature == atom.feature]
+
+    # 일반 피쳐는 한 룰에 한 번만
+    if atom.feature not in INTERVAL_FEATURES:
+        if atom.feature in used_features:
+            return False
+
+        if not args.allow_correlated_in_rule:
+            if has_correlated_pair(set(used_features), atom.feature, corr_pairs):
+                return False
+
+        return True
+
+    # 구간형 피쳐는 최대 2개까지 허용
+    if len(same_feature_atoms) >= 2:
+        return False
+
+    # 같은 op 두 번은 불허
+    if any(a.op == atom.op for a in same_feature_atoms):
+        return False
+
+    # 같은 피쳐의 하한/상한 조합이 모순이면 불허
+    candidate = list(same_feature_atoms) + [atom]
+    lowers = [a.threshold for a in candidate if a.op == ">="]
+    uppers = [a.threshold for a in candidate if a.op == "<="]
+
+    if lowers and uppers:
+        if max(lowers) > min(uppers):
+            return False
+
+    # 구간형 피쳐는 자기 자신 상관 체크 제외, 다른 피쳐와는 체크
+    if not args.allow_correlated_in_rule:
+        other_features = set(f for f in used_features if f != atom.feature)
+        if has_correlated_pair(other_features, atom.feature, corr_pairs):
+            return False
+
+    return True
+
+
+def canonical_atoms_key(atoms: Tuple[Atom, ...]):
+    return tuple(
+        sorted(
+            [(a.feature, a.op, round(a.threshold, 10)) for a in atoms],
+            key=lambda x: (x[0], x[1], x[2]),
+        )
+    )
+
+
+def canonicalize_atoms(atoms: Tuple[Atom, ...]) -> Tuple[Atom, ...]:
+    return tuple(
+        sorted(
+            atoms,
+            key=lambda a: (a.feature, a.op, a.threshold),
+        )
+    )
+
+
+# ============================================================
 # 월별 평가
 # ============================================================
 
-def monthly_summary(df, target_col, atoms, min_month_count, pass_precision, pass_lift):
+def monthly_summary(
+        df,
+        target_col,
+        atoms,
+        min_month_count,
+        pass_precision,
+        pass_lift,
+        crash_precision,
+):
     df = df.reset_index(drop=True).copy()
 
     y_all = df[target_col].values
@@ -599,6 +513,7 @@ def monthly_summary(df, target_col, atoms, min_month_count, pass_precision, pass
             "total_month_count": int(monthly_df["selected_count"].sum()) if len(monthly_df) else 0,
             "pass_month_rate": 0.0,
             "bad_month_count": len(monthly_df),
+            "crash_month_count": len(monthly_df),
         }
 
     pass_mask = (
@@ -606,7 +521,10 @@ def monthly_summary(df, target_col, atoms, min_month_count, pass_precision, pass
             (usable["lift"] >= pass_lift)
     )
 
+    crash_mask = usable["precision"] < crash_precision
+
     std_p = usable["precision"].std()
+
     if not np.isfinite(std_p):
         std_p = 0.0
 
@@ -623,10 +541,59 @@ def monthly_summary(df, target_col, atoms, min_month_count, pass_precision, pass
         "total_month_count": int(monthly_df["selected_count"].sum()),
         "pass_month_rate": pass_mask.mean(),
         "bad_month_count": int((~pass_mask).sum()),
+        "crash_month_count": int(crash_mask.sum()),
     }
 
 
-def eval_rule(df, target_col, atoms, min_month_count, pass_precision, pass_lift):
+def monthly_summary_from_mask(
+        df,
+        target_col,
+        mask,
+        min_month_count,
+        pass_precision,
+        pass_lift,
+        crash_precision,
+):
+    df = df.reset_index(drop=True).copy()
+    y_all = df[target_col].values
+    mask_all = np.asarray(mask).astype(bool)
+
+    rows = []
+
+    for month, g in df.groupby("month", sort=True):
+        idx = g.index.to_numpy()
+        m = calc_metrics(y_all[idx], mask_all[idx])
+        m["month"] = month
+        rows.append(m)
+
+    monthly_df = pd.DataFrame(rows)
+    usable = monthly_df[monthly_df["selected_count"] >= min_month_count].copy()
+
+    if len(usable) == 0:
+        return monthly_df, {
+            "n_usable_months": 0,
+            "mean_month_precision": np.nan,
+            "min_month_precision": np.nan,
+            "pass_month_rate": 0.0,
+            "crash_month_count": len(monthly_df),
+        }
+
+    pass_mask = (
+            (usable["precision"] >= pass_precision) &
+            (usable["lift"] >= pass_lift)
+    )
+    crash_mask = usable["precision"] < crash_precision
+
+    return monthly_df, {
+        "n_usable_months": len(usable),
+        "mean_month_precision": usable["precision"].mean(),
+        "min_month_precision": usable["precision"].min(),
+        "pass_month_rate": pass_mask.mean(),
+        "crash_month_count": int(crash_mask.sum()),
+    }
+
+
+def eval_rule(df, target_col, atoms, args):
     mask = apply_rule(df, atoms)
     metrics = calc_metrics(df[target_col].values, mask)
 
@@ -634,9 +601,10 @@ def eval_rule(df, target_col, atoms, min_month_count, pass_precision, pass_lift)
         df=df,
         target_col=target_col,
         atoms=atoms,
-        min_month_count=min_month_count,
-        pass_precision=pass_precision,
-        pass_lift=pass_lift,
+        min_month_count=args.min_month_count,
+        pass_precision=args.month_pass_precision,
+        pass_lift=args.month_pass_lift,
+        crash_precision=args.month_crash_precision,
     )
 
     return metrics, mon, monthly_df, mask
@@ -674,6 +642,7 @@ def beam_score(metrics, mon, args):
             + mean_p * 35
             + pass_rate * 15
             + math.log1p(count) * 1.5
+            - mon.get("crash_month_count", 0) * 10
     )
 
 
@@ -718,6 +687,13 @@ def final_score(train_m, valid_m, train_mon, valid_mon, args):
     if valid_mon["pass_month_rate"] < args.min_valid_pass_month_rate:
         return -1e18
 
+    if np.isfinite(valid_mon["min_month_precision"]):
+        if valid_mon["min_month_precision"] < args.min_valid_month_min_precision:
+            return -1e18
+
+    if valid_mon.get("crash_month_count", 0) > args.max_valid_crash_months:
+        return -1e18
+
     valid_lcb = valid_m["precision_lcb"]
 
     if np.isfinite(valid_lcb) and valid_lcb < args.min_valid_lcb:
@@ -731,12 +707,8 @@ def final_score(train_m, valid_m, train_mon, valid_mon, args):
     if not np.isfinite(valid_min_p):
         valid_min_p = 0.0
 
-    # 핵심:
-    # 70% 이상을 강하게 보상하되,
-    # valid_count도 같이 보상해서 종목 수가 너무 작아지는 것을 완화.
     precision_bonus_70 = max(0.0, valid_p - 0.70) * 250
     precision_bonus_65 = max(0.0, valid_p - 0.65) * 120
-
     count_bonus = math.log1p(valid_count) * args.valid_count_weight
 
     score = (
@@ -744,22 +716,23 @@ def final_score(train_m, valid_m, train_mon, valid_mon, args):
             + valid_lcb * 80
             + valid_lift * 25
             + valid_mon["mean_month_precision"] * 70
-            + valid_min_p * 45
-            + valid_mon["pass_month_rate"] * 60
+            + valid_min_p * 55
+            + valid_mon["pass_month_rate"] * 70
             + train_p * 20
             + count_bonus
             + precision_bonus_70
             + precision_bonus_65
             - gap * 90
-            - valid_std * 55
-            - valid_mon["bad_month_count"] * 2
+            - valid_std * 60
+            - valid_mon["bad_month_count"] * 4
+            - valid_mon.get("crash_month_count", 0) * 25
     )
 
     return score
 
 
 # ============================================================
-# 룰 중복 제거 / 탐색
+# 룰 탐색 / 중복 제거
 # ============================================================
 
 def is_near_duplicate(new_rule: Rule, selected: List[Rule], args) -> bool:
@@ -804,26 +777,12 @@ def search_rules(train, valid, atoms, corr_pairs, args):
         beam_candidates = []
 
         for base_atoms in beam:
-            used_features = set(a.feature for a in base_atoms)
-
             for atom in atoms:
-                if atom.feature in used_features:
+                if not can_add_atom(base_atoms, atom, corr_pairs, args):
                     continue
 
-                if not args.allow_correlated_in_rule:
-                    if has_correlated_pair(used_features, atom.feature, corr_pairs):
-                        continue
-
-                new_atoms = tuple(list(base_atoms) + [atom])
-
-                feature_order = [a.feature for a in new_atoms]
-                if feature_order != sorted(feature_order):
-                    continue
-
-                key = tuple(
-                    (a.feature, a.op, round(a.threshold, 10))
-                    for a in new_atoms
-                )
+                new_atoms = canonicalize_atoms(tuple(list(base_atoms) + [atom]))
+                key = canonical_atoms_key(new_atoms)
 
                 if key in seen_rules:
                     continue
@@ -834,9 +793,7 @@ def search_rules(train, valid, atoms, corr_pairs, args):
                     train,
                     args.target,
                     new_atoms,
-                    args.min_month_count,
-                    args.month_pass_precision,
-                    args.month_pass_lift,
+                    args,
                 )
 
                 bscore = beam_score(train_m, train_mon, args)
@@ -855,9 +812,7 @@ def search_rules(train, valid, atoms, corr_pairs, args):
                     valid,
                     args.target,
                     new_atoms,
-                    args.min_month_count,
-                    args.month_pass_precision,
-                    args.month_pass_lift,
+                    args,
                 )
 
                 fscore = final_score(train_m, valid_m, train_mon, valid_mon, args)
@@ -920,33 +875,31 @@ def search_rules(train, valid, atoms, corr_pairs, args):
 # ============================================================
 
 def simplify_rule_by_dropping_atoms(rule: Rule, train, valid, args) -> Rule:
-    current_atoms = list(rule.atoms)
+    current_rule = rule
     improved = True
 
-    while improved and len(current_atoms) > 1:
+    while improved and len(current_rule.atoms) > 1:
         improved = False
         best_candidate = None
-        best_score = rule.score
+        best_tuple = None
 
-        for i in range(len(current_atoms)):
-            candidate_atoms = tuple(current_atoms[:i] + current_atoms[i + 1:])
+        for i in range(len(current_rule.atoms)):
+            candidate_atoms = tuple(
+                a for j, a in enumerate(current_rule.atoms) if j != i
+            )
 
             train_m, train_mon, _, train_mask = eval_rule(
                 train,
                 args.target,
                 candidate_atoms,
-                args.min_month_count,
-                args.month_pass_precision,
-                args.month_pass_lift,
+                args,
             )
 
             valid_m, valid_mon, _, valid_mask = eval_rule(
                 valid,
                 args.target,
                 candidate_atoms,
-                args.min_month_count,
-                args.month_pass_precision,
-                args.month_pass_lift,
+                args,
             )
 
             score = final_score(train_m, valid_m, train_mon, valid_mon, args)
@@ -954,41 +907,52 @@ def simplify_rule_by_dropping_atoms(rule: Rule, train, valid, args) -> Rule:
             if score <= -1e17:
                 continue
 
-            old_vp = rule.valid_metrics["precision"]
+            old_vp = current_rule.valid_metrics["precision"]
             new_vp = valid_m["precision"]
-
-            old_vc = rule.valid_metrics["selected_count"]
+            old_vc = current_rule.valid_metrics["selected_count"]
             new_vc = valid_m["selected_count"]
 
             if not np.isfinite(old_vp) or not np.isfinite(new_vp):
                 continue
 
             precision_drop = old_vp - new_vp
+            count_gain = new_vc - old_vc
 
-            if precision_drop <= args.simplify_max_precision_drop and new_vc >= old_vc:
-                if score >= best_score - 5:
-                    best_score = score
-                    best_candidate = Rule(
-                        atoms=candidate_atoms,
-                        train_metrics=train_m,
-                        valid_metrics=valid_m,
-                        train_monthly=train_mon,
-                        valid_monthly=valid_mon,
-                        score=score,
-                        train_mask_key=mask_hash(train_mask),
-                        valid_mask_key=mask_hash(valid_mask),
-                    )
+            # 기존보다 강화:
+            # precision 1%p 이하 하락은 허용.
+            # count가 늘면 더 적극적으로 단순화.
+            if precision_drop <= args.simplify_max_precision_drop:
+                candidate = Rule(
+                    atoms=candidate_atoms,
+                    train_metrics=train_m,
+                    valid_metrics=valid_m,
+                    train_monthly=train_mon,
+                    valid_monthly=valid_mon,
+                    score=score,
+                    train_mask_key=mask_hash(train_mask),
+                    valid_mask_key=mask_hash(valid_mask),
+                )
+
+                compare_tuple = (
+                    count_gain,
+                    -precision_drop,
+                    -len(candidate_atoms),
+                    score,
+                )
+
+                if best_tuple is None or compare_tuple > best_tuple:
+                    best_tuple = compare_tuple
+                    best_candidate = candidate
 
         if best_candidate is not None:
-            rule = best_candidate
-            current_atoms = list(rule.atoms)
+            current_rule = best_candidate
             improved = True
 
-    return rule
+    return current_rule
 
 
 # ============================================================
-# Walk-forward 고정 룰 검증
+# Walk-forward
 # ============================================================
 
 def walk_forward_eval_fixed_rules(
@@ -1054,6 +1018,7 @@ def summarize_wf(
         min_count: int,
         min_precision: float,
         min_lift: float,
+        crash_precision: float,
 ) -> pd.DataFrame:
     rows = []
 
@@ -1078,6 +1043,7 @@ def summarize_wf(
                 "total_valid_count": int(g["valid_count"].sum()),
                 "pass_split_rate": 0.0,
                 "bad_split_count": len(g),
+                "crash_split_count": len(g),
                 "wf_score": -999,
             })
             continue
@@ -1087,18 +1053,21 @@ def summarize_wf(
                 (usable["valid_lift"] >= min_lift)
         )
 
+        crash_mask = usable["valid_precision"] < crash_precision
+
         std_p = usable["valid_precision"].std()
         if not np.isfinite(std_p):
             std_p = 0.0
 
         wf_score = (
                 usable["valid_precision"].mean() * 120
-                + usable["valid_precision"].min() * 80
+                + usable["valid_precision"].min() * 90
                 + usable["valid_lift"].mean() * 20
-                + pass_mask.mean() * 60
+                + pass_mask.mean() * 70
                 + math.log1p(usable["valid_count"].sum()) * 5
-                - std_p * 60
-                - int((~pass_mask).sum()) * 4
+                - std_p * 70
+                - int((~pass_mask).sum()) * 5
+                - int(crash_mask.sum()) * 30
         )
 
         rows.append({
@@ -1115,11 +1084,187 @@ def summarize_wf(
             "total_valid_count": int(usable["valid_count"].sum()),
             "pass_split_rate": pass_mask.mean(),
             "bad_split_count": int((~pass_mask).sum()),
+            "crash_split_count": int(crash_mask.sum()),
             "wf_score": wf_score,
         })
 
     out = pd.DataFrame(rows)
     out = out.sort_values("wf_score", ascending=False)
+
+    return out
+
+
+# ============================================================
+# OR 룰셋 평가
+# ============================================================
+
+def eval_or_rule_set(train, valid, df_all, date_col, rules, target_col, args):
+    train_mask = apply_or_rules(train, rules)
+    valid_mask = apply_or_rules(valid, rules)
+
+    train_m = calc_metrics(train[target_col].values, train_mask)
+    valid_m = calc_metrics(valid[target_col].values, valid_mask)
+
+    _, valid_mon = monthly_summary_from_mask(
+        df=valid,
+        target_col=target_col,
+        mask=valid_mask,
+        min_month_count=args.min_month_count,
+        pass_precision=args.month_pass_precision,
+        pass_lift=args.month_pass_lift,
+        crash_precision=args.month_crash_precision,
+    )
+
+    # OR walk-forward
+    df_all = df_all.sort_values(date_col).reset_index(drop=True)
+    months = sorted(df_all["month"].unique())
+
+    if len(months) <= args.wf_min_train_months:
+        return train_m, valid_m, valid_mon, {}
+
+    start_idx = max(args.wf_min_train_months, len(months) - args.wf_splits)
+
+    wf_rows = []
+
+    for i in range(start_idx, len(months)):
+        train_months = months[:i]
+        valid_month = months[i]
+
+        wf_valid = df_all[df_all["month"] == valid_month].copy().reset_index(drop=True)
+        wf_mask = apply_or_rules(wf_valid, rules)
+        wf_m = calc_metrics(wf_valid[target_col].values, wf_mask)
+        wf_m["valid_month"] = valid_month
+        wf_rows.append(wf_m)
+
+    wf_df = pd.DataFrame(wf_rows)
+    usable = wf_df[wf_df["selected_count"] >= args.wf_min_count].copy()
+
+    if len(usable) == 0:
+        wf_summary = {
+            "wf_n_splits": len(wf_df),
+            "wf_n_usable_splits": 0,
+            "wf_mean_precision": np.nan,
+            "wf_min_precision": np.nan,
+            "wf_total_count": int(wf_df["selected_count"].sum()) if len(wf_df) else 0,
+            "wf_pass_split_rate": 0.0,
+            "wf_crash_split_count": len(wf_df),
+        }
+    else:
+        pass_mask = (
+                (usable["precision"] >= args.wf_min_precision) &
+                (usable["lift"] >= args.wf_min_lift)
+        )
+        crash_mask = usable["precision"] < args.wf_crash_precision
+
+        wf_summary = {
+            "wf_n_splits": len(wf_df),
+            "wf_n_usable_splits": len(usable),
+            "wf_mean_precision": usable["precision"].mean(),
+            "wf_min_precision": usable["precision"].min(),
+            "wf_total_count": int(usable["selected_count"].sum()),
+            "wf_pass_split_rate": pass_mask.mean(),
+            "wf_crash_split_count": int(crash_mask.sum()),
+        }
+
+    return train_m, valid_m, valid_mon, wf_summary
+
+
+def evaluate_or_rule_sets(rules, train, valid, df_all, date_col, args):
+    if len(rules) == 0:
+        return pd.DataFrame()
+
+    # OR 후보는 final filter 통과 룰이 있으면 그걸 우선 사용하고,
+    # 없으면 상위 룰 사용.
+    candidate_rules = rules[:args.or_top_rules]
+
+    rows = []
+
+    for k in range(2, args.or_max_size + 1):
+        for combo in itertools.combinations(candidate_rules, k):
+            train_m, valid_m, valid_mon, wf_s = eval_or_rule_set(
+                train=train,
+                valid=valid,
+                df_all=df_all,
+                date_col=date_col,
+                rules=list(combo),
+                target_col=args.target,
+                args=args,
+            )
+
+            rule_ranks = []
+            rule_names = []
+
+            for r in combo:
+                # rank는 나중에 rules_to_df와 맞추기 위해 name 기준만 저장
+                rule_names.append(r.name())
+
+            valid_p = valid_m["precision"]
+            valid_count = valid_m["selected_count"]
+            wf_mean = wf_s.get("wf_mean_precision", np.nan)
+            wf_min = wf_s.get("wf_min_precision", np.nan)
+            wf_total = wf_s.get("wf_total_count", 0)
+            wf_pass = wf_s.get("wf_pass_split_rate", 0.0)
+            wf_crash = wf_s.get("wf_crash_split_count", 999)
+
+            if not np.isfinite(valid_p):
+                continue
+
+            # 너무 낮은 OR 조합은 버림
+            if valid_p < args.or_min_valid_precision:
+                continue
+
+            if valid_count < args.or_min_valid_count:
+                continue
+
+            if np.isfinite(wf_mean) and wf_mean < args.or_min_wf_mean_precision:
+                continue
+
+            if np.isfinite(wf_min) and wf_min < args.or_min_wf_min_precision:
+                continue
+
+            if wf_pass < args.or_min_wf_pass_split_rate:
+                continue
+
+            if wf_crash > args.or_max_wf_crash_splits:
+                continue
+
+            score = (
+                    valid_p * 130
+                    + math.log1p(valid_count) * args.or_count_weight
+                    + (wf_mean if np.isfinite(wf_mean) else 0) * 100
+                    + (wf_min if np.isfinite(wf_min) else 0) * 60
+                    + math.log1p(wf_total) * 8
+                    + wf_pass * 60
+                    - wf_crash * 30
+            )
+
+            rows.append({
+                "or_size": k,
+                "rules": " || ".join(rule_names),
+                "train_count": train_m["selected_count"],
+                "train_precision": train_m["precision"],
+                "train_lift": train_m["lift"],
+                "valid_count": valid_count,
+                "valid_precision": valid_p,
+                "valid_lift": valid_m["lift"],
+                "valid_month_min_precision": valid_mon.get("min_month_precision", np.nan),
+                "valid_month_pass_rate": valid_mon.get("pass_month_rate", np.nan),
+                "valid_month_crash_count": valid_mon.get("crash_month_count", np.nan),
+                "wf_mean_precision": wf_mean,
+                "wf_min_precision": wf_min,
+                "wf_total_count": wf_total,
+                "wf_pass_split_rate": wf_pass,
+                "wf_crash_split_count": wf_crash,
+                "or_score": score,
+            })
+
+    out = pd.DataFrame(rows)
+
+    if len(out):
+        out = out.sort_values(
+            ["or_score", "valid_precision", "valid_count", "wf_mean_precision", "wf_total_count"],
+            ascending=[False, False, False, False, False],
+        )
 
     return out
 
@@ -1173,6 +1318,12 @@ def rules_to_df(rules: List[Rule]) -> pd.DataFrame:
         row["pass_valid_60"] = (
                 row["valid_precision"] >= 0.60
                 and row["valid_lift"] >= 1.45
+                and row["valid_count"] >= 60
+        )
+
+        row["pass_valid_60_large"] = (
+                row["valid_precision"] >= 0.60
+                and row["valid_lift"] >= 1.45
                 and row["valid_count"] >= 80
         )
 
@@ -1214,9 +1365,7 @@ def collect_monthly_details(rules, train, valid, args):
                 df,
                 args.target,
                 r.atoms,
-                args.min_month_count,
-                args.month_pass_precision,
-                args.month_pass_lift,
+                args,
             )
 
             monthly_df = monthly_df.copy()
@@ -1231,6 +1380,44 @@ def collect_monthly_details(rules, train, valid, args):
     return pd.concat(dfs, ignore_index=True)
 
 
+def build_final_wf_filtered_rules(
+        rules_df: pd.DataFrame,
+        wf_summary: pd.DataFrame,
+        args,
+) -> pd.DataFrame:
+    if len(rules_df) == 0 or len(wf_summary) == 0:
+        return pd.DataFrame()
+
+    merged = rules_df.merge(
+        wf_summary,
+        on=["rank", "rule"],
+        how="left",
+        suffixes=("", "_wf"),
+    )
+
+    out = merged[
+        (merged["train_precision"] >= args.final_min_train_precision)
+        & (merged["valid_precision"] >= args.final_min_valid_precision)
+        & (merged["valid_count"] >= args.final_min_valid_count)
+        & (merged["valid_lift"] >= args.final_min_valid_lift)
+        & (merged["valid_month_min_month_precision"] >= args.final_min_valid_month_min_precision)
+        & (merged["valid_month_crash_month_count"] <= args.final_max_valid_crash_months)
+        & (merged["mean_valid_precision"] >= args.final_min_wf_mean_precision)
+        & (merged["min_valid_precision"] >= args.final_min_wf_min_precision)
+        & (merged["pass_split_rate"] >= args.final_min_wf_pass_split_rate)
+        & (merged["total_valid_count"] >= args.final_min_wf_total_count)
+        & (merged["crash_split_count"] <= args.final_max_wf_crash_splits)
+        ].copy()
+
+    if len(out):
+        out = out.sort_values(
+            ["valid_precision", "valid_count", "mean_valid_precision", "total_valid_count"],
+            ascending=[False, False, False, False],
+        )
+
+    return out
+
+
 # ============================================================
 # Main
 # ============================================================
@@ -1239,7 +1426,7 @@ def main():
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--csv", required=True)
-    parser.add_argument("--out", default="stable_rule_miner_final_out")
+    parser.add_argument("--out", default="stable_rule_miner_final_v3_out")
     parser.add_argument("--target", default=TARGET_COL)
     parser.add_argument("--date-col", default=None)
     parser.add_argument("--valid-ratio", type=float, default=0.30)
@@ -1258,7 +1445,6 @@ def main():
     parser.add_argument("--min-valid-lift", type=float, default=1.50)
 
     parser.add_argument("--min-valid-lcb", type=float, default=0.50)
-
     parser.add_argument("--max-precision-gap", type=float, default=0.18)
 
     parser.add_argument("--beam-min-count", type=int, default=60)
@@ -1267,8 +1453,12 @@ def main():
     parser.add_argument("--min-month-count", type=int, default=5)
     parser.add_argument("--month-pass-precision", type=float, default=0.55)
     parser.add_argument("--month-pass-lift", type=float, default=1.20)
+    parser.add_argument("--month-crash-precision", type=float, default=0.45)
+
     parser.add_argument("--min-valid-usable-months", type=int, default=2)
     parser.add_argument("--min-valid-pass-month-rate", type=float, default=0.20)
+    parser.add_argument("--min-valid-month-min-precision", type=float, default=0.55)
+    parser.add_argument("--max-valid-crash-months", type=int, default=0)
 
     parser.add_argument("--valid-count-weight", type=float, default=7.0)
 
@@ -1287,7 +1477,33 @@ def main():
     parser.add_argument("--wf-min-count", type=int, default=5)
     parser.add_argument("--wf-min-precision", type=float, default=0.60)
     parser.add_argument("--wf-min-lift", type=float, default=1.25)
-    parser.add_argument("--wf-top-rules", type=int, default=50)
+    parser.add_argument("--wf-crash-precision", type=float, default=0.45)
+    parser.add_argument("--wf-top-rules", type=int, default=150)
+
+    # 최종 실전 후보 필터
+    parser.add_argument("--final-min-train-precision", type=float, default=0.60)
+    parser.add_argument("--final-min-valid-precision", type=float, default=0.70)
+    parser.add_argument("--final-min-valid-count", type=int, default=50)
+    parser.add_argument("--final-min-valid-lift", type=float, default=1.65)
+    parser.add_argument("--final-min-valid-month-min-precision", type=float, default=0.55)
+    parser.add_argument("--final-max-valid-crash-months", type=int, default=0)
+
+    parser.add_argument("--final-min-wf-mean-precision", type=float, default=0.70)
+    parser.add_argument("--final-min-wf-min-precision", type=float, default=0.55)
+    parser.add_argument("--final-min-wf-pass-split-rate", type=float, default=0.70)
+    parser.add_argument("--final-min-wf-total-count", type=int, default=50)
+    parser.add_argument("--final-max-wf-crash-splits", type=int, default=0)
+
+    # OR 룰셋 평가
+    parser.add_argument("--or-top-rules", type=int, default=15)
+    parser.add_argument("--or-max-size", type=int, default=3)
+    parser.add_argument("--or-min-valid-precision", type=float, default=0.68)
+    parser.add_argument("--or-min-valid-count", type=int, default=70)
+    parser.add_argument("--or-min-wf-mean-precision", type=float, default=0.68)
+    parser.add_argument("--or-min-wf-min-precision", type=float, default=0.50)
+    parser.add_argument("--or-min-wf-pass-split-rate", type=float, default=0.60)
+    parser.add_argument("--or-max-wf-crash-splits", type=int, default=1)
+    parser.add_argument("--or-count-weight", type=float, default=12.0)
 
     args = parser.parse_args()
 
@@ -1307,8 +1523,8 @@ def main():
     )
 
     features = [f for f in DEFAULT_FEATURES if f in df.columns]
-
     missing = [f for f in DEFAULT_FEATURES if f not in df.columns]
+
     if missing:
         print("[WARN] missing features:", missing)
 
@@ -1323,7 +1539,7 @@ def main():
     print("[INFO] valid rows:", len(valid), "base_rate:", valid[args.target].mean())
     print("[INFO] date_col:", date_col)
     print("[INFO] features:", features)
-    print("[INFO] goal: valid precision >= 70% and as many candidates as possible")
+    print("[INFO] goal: valid 70% + count + no monthly/wf crash + OR sets")
     print("=" * 80)
 
     high_corr_df, corr_pairs = build_corr_pairs(
@@ -1465,7 +1681,6 @@ def main():
         encoding="utf-8-sig",
     )
 
-    # walk-forward
     wf_df = walk_forward_eval_fixed_rules(
         df=df,
         date_col=date_col,
@@ -1486,6 +1701,7 @@ def main():
         min_count=args.wf_min_count,
         min_precision=args.wf_min_precision,
         min_lift=args.wf_min_lift,
+        crash_precision=args.wf_crash_precision,
     )
 
     wf_summary.to_csv(
@@ -1494,27 +1710,51 @@ def main():
         encoding="utf-8-sig",
     )
 
+    final_wf_filtered = build_final_wf_filtered_rules(
+        rules_df=rules_df,
+        wf_summary=wf_summary,
+        args=args,
+    )
+
+    final_wf_filtered.to_csv(
+        os.path.join(args.out, "11_final_rules_wf_filtered.csv"),
+        index=False,
+        encoding="utf-8-sig",
+    )
+
+    # OR 룰셋 평가
+    or_df = evaluate_or_rule_sets(
+        rules=rules,
+        train=train,
+        valid=valid,
+        df_all=df,
+        date_col=date_col,
+        args=args,
+    )
+
+    or_df.to_csv(
+        os.path.join(args.out, "12_or_rule_sets.csv"),
+        index=False,
+        encoding="utf-8-sig",
+    )
+
     print("\n[SELECTED RULES]")
     show_cols = [
         "rank",
         "rule",
-
         "train_count",
         "train_precision",
         "train_lift",
-
         "valid_count",
         "valid_precision",
         "valid_precision_lcb",
         "valid_lift",
-
         "precision_gap_abs",
-
         "valid_month_n_usable_months",
         "valid_month_mean_month_precision",
         "valid_month_min_month_precision",
+        "valid_month_crash_month_count",
         "valid_month_pass_month_rate",
-
         "pass_valid_60",
         "pass_valid_65",
         "pass_valid_70",
@@ -1529,38 +1769,58 @@ def main():
     else:
         print("No selected rules found.")
 
-    print("\n[WALK FORWARD SUMMARY]")
-    if len(wf_summary):
-        wf_cols = [
+    print("\n[FINAL WF FILTERED RULES]")
+    if len(final_wf_filtered):
+        final_cols = [
             "rank",
             "rule",
-            "n_splits",
-            "n_usable_splits",
+            "train_precision",
+            "valid_count",
+            "valid_precision",
+            "valid_lift",
+            "valid_month_min_month_precision",
             "mean_valid_precision",
-            "median_valid_precision",
             "min_valid_precision",
-            "std_valid_precision",
-            "mean_valid_lift",
-            "min_valid_lift",
             "total_valid_count",
             "pass_split_rate",
-            "bad_split_count",
-            "wf_score",
+            "crash_split_count",
         ]
-        wf_cols = [c for c in wf_cols if c in wf_summary.columns]
-        print(wf_summary[wf_cols].head(30).to_string(index=False))
+        final_cols = [c for c in final_cols if c in final_wf_filtered.columns]
+        print(final_wf_filtered[final_cols].head(30).to_string(index=False))
     else:
-        print("No walk-forward summary.")
+        print("No final rules passed monthly + walk-forward crash filters.")
+
+    print("\n[OR RULE SETS]")
+    if len(or_df):
+        or_cols = [
+            "or_size",
+            "valid_count",
+            "valid_precision",
+            "valid_lift",
+            "wf_mean_precision",
+            "wf_min_precision",
+            "wf_total_count",
+            "wf_pass_split_rate",
+            "wf_crash_split_count",
+            "or_score",
+            "rules",
+        ]
+        or_cols = [c for c in or_cols if c in or_df.columns]
+        print(or_df[or_cols].head(30).to_string(index=False))
+    else:
+        print("No OR rule sets passed filters.")
 
     print("\n[SUMMARY]")
     if len(rules_df):
+        print("selected rules:", len(rules_df))
         print("pass_valid_60:", int(rules_df["pass_valid_60"].sum()))
         print("pass_valid_65:", int(rules_df["pass_valid_65"].sum()))
         print("pass_valid_70:", int(rules_df["pass_valid_70"].sum()))
         print("pass_valid_70_large:", int(rules_df["pass_valid_70_large"].sum()))
         print("pass_train_valid_70:", int(rules_df["pass_train_valid_70"].sum()))
+        print("final_wf_filtered:", len(final_wf_filtered))
+        print("or_rule_sets:", len(or_df))
         print("best_valid_precision:", rules_df["valid_precision"].max())
-        print("best_valid_count:", rules_df.sort_values("valid_precision", ascending=False)["valid_count"].iloc[0])
         print("max_valid_count:", rules_df["valid_count"].max())
     else:
         print("No rules.")
@@ -1574,11 +1834,10 @@ def main():
 if __name__ == "__main__":
     main()
 
-# 실행방법
 """
-python stable_rule_miner_final.py \
+python stable_rule_miner_final_v3.py \
   --csv csv/low_result_7_desc.csv \
-  --out stable_rule_miner_final_wf150 \
+  --out stable_rule_miner_final_v3_next \
   --date-col today \
   --max-depth 6 \
   --beam-width 1500 \
@@ -1591,8 +1850,29 @@ python stable_rule_miner_final.py \
   --min-valid-lift 1.50 \
   --max-precision-gap 0.18 \
   --min-month-count 5 \
-  --min-valid-pass-month-rate 0.20 \
+  --month-pass-precision 0.55 \
+  --month-crash-precision 0.45 \
+  --min-valid-month-min-precision 0.55 \
+  --max-valid-crash-months 0 \
   --valid-count-weight 7 \
   --wf-top-rules 150 \
+  --wf-min-precision 0.60 \
+  --wf-crash-precision 0.45 \
+  --final-min-train-precision 0.60 \
+  --final-min-valid-precision 0.70 \
+  --final-min-valid-count 50 \
+  --final-min-wf-mean-precision 0.70 \
+  --final-min-wf-min-precision 0.55 \
+  --final-min-wf-pass-split-rate 0.70 \
+  --final-min-wf-total-count 50 \
+  --final-max-wf-crash-splits 0 \
+  --or-top-rules 15 \
+  --or-max-size 3 \
+  --or-min-valid-precision 0.70 \
+  --or-min-valid-count 70 \
+  --or-min-wf-mean-precision 0.70 \
+  --or-min-wf-min-precision 0.55 \
+  --or-min-wf-pass-split-rate 0.70 \
+  --or-max-wf-crash-splits 0 \
   --simplify
-  """
+"""
