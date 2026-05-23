@@ -10,16 +10,14 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 import numpy as np
-import pandas as pd
-from datetime import datetime, timedelta
-import unicodedata
+from datetime import datetime
 from pathlib import Path
 import matplotlib.pyplot as plt
 import requests
 import time
 import pytz
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
-from lowscan_rules_us import build_conditions, RULE_NAMES
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from low.lowscan_rules_us import build_conditions, RULE_NAMES
 
 
 # 자동 탐색 (utils.py를 찾을 때까지 위로 올라가 탐색)
@@ -31,9 +29,8 @@ for parent in [here.parent, *here.parents]:
 else:
     raise FileNotFoundError("utils.py를 상위 디렉터리에서 찾지 못했습니다.")
 
-from utils import _col, get_kor_ticker_dict_list, add_technical_features, plot_candles_weekly, plot_candles_daily, \
-    drop_sparse_columns, drop_trading_halt_rows, signal_any_drop, low_weekly_check, extract_numbers_from_filenames, \
-    get_usd_krw_rate, get_nasdaq_symbols, add_today_change_rate, safe_read_pickle
+from utils import add_technical_features, plot_candles_weekly, plot_candles_daily, \
+    drop_sparse_columns, drop_trading_halt_rows, signal_any_drop, get_usd_krw_rate, get_nasdaq_symbols, add_today_change_rate, safe_read_pickle
 
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
 root_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(=루트)

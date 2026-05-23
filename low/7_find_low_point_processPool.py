@@ -49,13 +49,13 @@ from utils import get_kor_ticker_dict_list, add_technical_features, plot_candles
 
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
 root_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(=루트)
-pickle_dir = os.path.join(root_dir, 'pickle')
+pickle_dir = os.path.join(root_dir, '../pickle')
 output_dir = 'F:\\5below20_test'
 # output_dir = 'F:\\5below20'
 
 
-CSV_PATH = r"csv/low_result_7.csv"
-SORTED_CSV_PATH = r"csv/low_result_7_desc.csv"
+CSV_PATH = r"../csv/low_result_7.csv"
+SORTED_CSV_PATH = r"../csv/low_result_7_desc.csv"
 
 # 목표 검증 수익률
 VALIDATION_TARGET_RETURN = 7
@@ -592,15 +592,15 @@ def process_one_with_df(df, idx, ticker, tickers_dict, market_context):
         "rebound_vs_prior_drop": rebound_vs_prior_drop,        # 최근 하락폭 대비 오늘까지 얼마나 반등했는가
 
         "market_today_pct": market_today_pct,                  # 해당 종목이 속한 시장의 당일 등락률
+        "market_5d_pct": market_5d_pct,                        # 해당 종목이 속한 시장의 최근 5거래일 등락률
 
-        # "recent_runup": _recent_runup,                         # 상관 0.9이상
-        # "intraday_body_power": intraday_body_power,            # 상관 0.9이상
+        # "recent_runup": _recent_runup,                         # ma5_chg_rate 상관 0.9이상
+        # "intraday_body_power": intraday_body_power,            # intraday_return 상관 0.9이상
         # _ma5_ma20_gap_chg_1d                                   # 상관 0.930, 중복이므로 정리, 룰 조합에서 강함
         # "dist_to_ma20": dist_to_ma20,                          # 성공군이 20일선 대비 조금 더 아래, 비단조 주의, 룰 조합에서 강함, 핵심 피쳐
         # "ma5_ma20_gap_chg_1d": _ma5_ma20_gap_chg_1d,           # best bin은 괜찮지만 전체 방향성이 거의 없음.. dist_to_ma5, dist_to_ma20, pct_vs_lastweek와 의미가 겹친다, 대체 가능
         # "tr_val_rank_20d": tr_val_rank_20d,                    # 분리력 약함, 성공률 상승폭 작음
         # "tr_value_ratio_5d": tr_value_ratio_5d,                # 단일 AUC 0.528, IV 0.023으로 약함. vol5, vol_ratio_5_15가 있으면 우선순위 낮음
-        # "market_5d_pct": market_5d_pct,                        # 해당 종목이 속한 시장의 최근 5거래일 등락률
         # "market_breadth_up_ratio": market_breadth_up_ratio,    # 같은 날짜, 같은 시장에서 상승한 종목 비율
         # "market_stock_count": market_stock_count,
 

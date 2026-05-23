@@ -3,17 +3,16 @@
 lowscan_rules.py > 새 CSV에서도 성능이 나오는지 검증
 """
 
-from utils import sort_csv_by_today_desc
 import pandas as pd
 from pathlib import Path
 
 out_path = Path("lowscan_rules.py")
 
 # df = pd.read_csv("csv/low_result_us_desc.csv")
-df = pd.read_csv("csv/low_result_7_desc.csv")
+df = pd.read_csv("../csv/low_result_7_desc.csv")
 
 # 각 조건 정의
-from lowscan_rules import build_conditions
+from low.lowscan_rules import build_conditions
 conditions = build_conditions(df)
 
 rows = []

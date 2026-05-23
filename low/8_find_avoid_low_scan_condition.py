@@ -31,7 +31,7 @@ from itertools import count
 
 from utils import split_train_valid_by_date_ratio, build_literals
 
-CSV_PATH = "csv/low_result_7_desc.csv"
+CSV_PATH = "../csv/low_result_7_desc.csv"
 
 DEPTH0_FEATURES = {
     "vol5",

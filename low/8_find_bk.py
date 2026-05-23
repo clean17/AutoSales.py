@@ -30,7 +30,7 @@ import heapq
 from itertools import count
 
 
-CSV_PATH = "csv/low_result_7_desc.csv"
+CSV_PATH = "../csv/low_result_7_desc.csv"
 
 DEPTH0_FEATURES = {
     "ATR_pct",

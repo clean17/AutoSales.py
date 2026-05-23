@@ -29,9 +29,9 @@ from pathlib import Path
 import heapq
 from itertools import count
 
-from utils import build_literals, split_train_valid_by_date_ratio, write_rule_file
+from utils import build_literals, split_train_valid_by_date_ratio, write_rule_file, make_mask_from_conds
 
-CSV_PATH = "csv/low_result_7_desc2.csv"
+CSV_PATH = "../csv/low_result_7_desc.csv"
 
 DEPTH0_FEATURES = {
     "ATR_pct",
@@ -50,7 +50,7 @@ DEPTH0_FEATURES = {
 GOOD_OUT_PATH = Path("lowscan_rules.py")
 GOOD_EXPAND_RATIO = [0.32, 0.55, 0.73, 0.82, 0.85]
 MIN_CNT = 120
-MAX_DEPTH = 3
+MAX_DEPTH = 4
 # MIN_RATE = GOOD_EXPAND_RATIO[(MAX_DEPTH-1)]
 MIN_RATE = 0.75
 BEAM = 30000
@@ -144,10 +144,8 @@ def get_feature_groups():
 
         "max_drop_7d": "DROP",
 
-        "dist_from_low_20d": "POSITION",
-        "three_m_cur_max_chg_rate": "POSITION",
-        "dist_to_ma5": "POSITION",
-        "dist_to_ma20": "POSITION",
+        "dist_to_ma5": "MA5_POSITION",
+        "dist_to_ma20": "MA20_POSITION",
 
         "pct_vs_lastweek": "WEEK_POSITION",
 
@@ -159,8 +157,6 @@ def get_feature_groups():
         "tr_val_rank_20d": "VOLUME",
         "tr_value_ratio_5d": "VOLUME",
 
-        "MACD_hist_3d": "MACD",
-
         "vol5": "VOLATILITY",
         "ATR_pct": "VOLATILITY",
         "vol_ratio_5_15": "VOLATILITY",
@@ -169,13 +165,13 @@ def get_feature_groups():
     group_limits = {
         "PRICE": 1,
         "DROP": 1,
-        "POSITION": 2,
+        "MA5_POSITION": 1,
+        "MA20_POSITION": 1,
         "WEEK_POSITION": 1,
         "TREND": 1,
         "GAP": 1,
         "VOLATILITY": 2,
         "VOLUME": 1,
-        "MACD": 1,
     }
 
     return feature_groups, group_limits

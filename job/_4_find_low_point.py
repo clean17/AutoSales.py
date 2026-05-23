@@ -23,14 +23,14 @@ if ROOT not in sys.path:
 
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 import matplotlib.pyplot as plt
 import requests
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-import lowscan_rules_v1 as rule1
+from low import lowscan_rules_v1 as rule1
 
 modules = [rule1]
 
@@ -53,10 +53,7 @@ from utils import (
     drop_trading_halt_rows,
     signal_any_drop,
     low_weekly_check,
-    extract_numbers_from_filenames,
     safe_read_pickle,
-    safe_rate,
-    to_float,
     round_float_features, get_stock_name
 )
 

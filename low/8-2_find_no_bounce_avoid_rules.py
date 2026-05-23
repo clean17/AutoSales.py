@@ -63,7 +63,7 @@ import pandas as pd
 #
 # =============================================================================
 
-CSV_PATH = "csv/low_result_7_desc.csv"
+CSV_PATH = "../csv/low_result_7_desc.csv"
 OUT_PATH = Path("lowscan_target0_highprob_rules.py")
 
 TARGET_CLASS = 0
