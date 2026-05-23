@@ -18,7 +18,6 @@ import lowscan_rules_260510_4t as rule1
 import lowscan_rules_260510_5t as rule2
 import lowscan_rules_260510_4tx as rule3
 import lowscan_rules_260510_5tx as rule4
-import lowscan_avoid_rules
 modules = [  # 전체 > 87% (67 / 77)
     rule1,  # 단독 제외 > 87% (65 / 74)
     # rule2,  # 단독 제외 > 87% (67 / 77)  >> 오늘 등락률 포함한 depth5는 필요 없음
@@ -44,18 +43,21 @@ else:
 
 from utils import get_kor_ticker_dict_list, add_technical_features, plot_candles_weekly, plot_candles_daily, \
     drop_sparse_columns, drop_trading_halt_rows, signal_any_drop, low_weekly_check, extract_numbers_from_filenames, \
-    sort_csv_by_today_desc, safe_read_pickle, safe_rate, to_float, round_float_features, pad_text, \
-    first_reach_day_from_rates, make_trade_labels
+    sort_csv_by_today_desc, safe_read_pickle, safe_rate, round_float_features, pad_text, make_trade_labels
+
 
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
-root_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(=루트)
-pickle_dir = os.path.join(root_dir, '../pickle')
-output_dir = 'F:\\5below20_test'
-# output_dir = 'F:\\5below20'
+script_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(root/low)
+project_root = os.path.dirname(script_dir)               # root
 
+pickle_dir = os.path.join(project_root, "pickle")
 
-CSV_PATH = r"../csv/low_result_7.csv"
-SORTED_CSV_PATH = r"../csv/low_result_7_desc.csv"
+csv_dir = os.path.join(project_root, "csv")
+os.makedirs(csv_dir, exist_ok=True)
+
+CSV_PATH = os.path.join(csv_dir, "low_result_7.csv")
+SORTED_CSV_PATH = os.path.join(csv_dir, "low_result_7_desc.csv")
+
 
 # 목표 검증 수익률
 VALIDATION_TARGET_RETURN = 7
