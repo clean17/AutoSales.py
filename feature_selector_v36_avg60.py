@@ -28,7 +28,7 @@ DEFAULT_FEATURES = [
     "recent_runup",
 
     # 파생 힘/수급 후보
-    # "intraday_body_power",
+    # "intraday_body_power",  # intraday_return과 상관이 높아 기본 제외
     "body_value_power",
     "intraday_return",
     "price_power_value",
@@ -53,10 +53,6 @@ DEFAULT_FEATURES = [
 
     # 마지막 확인 후보
     "upper_wick_ratio",
-    "tr_val_rank_20d",
-
-    # 구버전 호환 후보
-    "open_to_close_pct",
 ]
 
 
@@ -86,7 +82,6 @@ REGIME_FEATURES = [
 
 
 WEAK_HINT_FEATURES = [
-    "tr_val_rank_20d",
     "upper_wick_ratio",
 ]
 
@@ -121,9 +116,6 @@ ALLOWED_OPS = {
     "room_to_20d_high": [">=", "<="],
 
     "upper_wick_ratio": ["<="],
-    "tr_val_rank_20d": [">=", "<="],
-
-    "open_to_close_pct": [">="],
 }
 
 
@@ -463,9 +455,6 @@ def default_extra_thresholds() -> Dict[str, List[Tuple[str, float]]]:
             ("<=", -16), ("<=", -12), ("<=", -10.7),
             ("<=", -8), ("<=", -5), ("<=", 0),
         ],
-        # "intraday_body_power": [
-        #     (">=", 3), (">=", 5), (">=", 8), (">=", 10), (">=", 15),
-        # ],
         "body_value_power": [
             (">=", 5), (">=", 10), (">=", 15), (">=", 20), (">=", 30),
         ],
@@ -528,9 +517,6 @@ def default_extra_thresholds() -> Dict[str, List[Tuple[str, float]]]:
         "upper_wick_ratio": [
             ("<=", 0), ("<=", 0.02), ("<=", 0.05),
             ("<=", 0.1), ("<=", 0.2), ("<=", 0.3),
-        ],
-        "open_to_close_pct": [
-            (">=", 3), (">=", 5), (">=", 8), (">=", 10), (">=", 15),
         ],
     }
 
@@ -966,13 +952,185 @@ def rules_to_df(rules):
     return pd.DataFrame(rows)
 
 
+def parse_rule_text_to_atoms(rule_text: str) -> List[Atom]:
+    atoms = []
+
+    if not rule_text or rule_text == "nan":
+        return atoms
+
+    for part in rule_text.split(" AND "):
+        part = part.strip()
+
+        if " >= " in part:
+            f, th = part.split(" >= ")
+            try:
+                atoms.append(Atom(f.strip(), ">=", float(th)))
+            except Exception:
+                pass
+
+        elif " <= " in part:
+            f, th = part.split(" <= ")
+            try:
+                atoms.append(Atom(f.strip(), "<=", float(th)))
+            except Exception:
+                pass
+
+    return atoms
+
+
+def rule_feature_tuple(rule_text: str) -> Tuple[str, ...]:
+    atoms = parse_rule_text_to_atoms(str(rule_text))
+    return tuple(sorted(set(a.feature for a in atoms)))
+
+
+def rule_feature_pair_keys(rule_text: str) -> List[Tuple[str, str]]:
+    feats = list(rule_feature_tuple(rule_text))
+    pairs = []
+
+    for i, a in enumerate(feats):
+        for b in feats[i + 1:]:
+            pairs.append((a, b))
+
+    return pairs
+
+
+def atom_signature(atom: Atom) -> Tuple[str, str, float]:
+    """
+    near-duplicate rule 제거용.
+    threshold를 너무 정밀하게 보지 않고 피쳐별로 적당히 둥글린다.
+    """
+    f = atom.feature
+    th = float(atom.threshold)
+
+    if f in [
+        "BB_perc",
+        "vol_ratio_5_15",
+        "body_ratio",
+        "market_breadth_up_ratio",
+    ]:
+        rounded = round(th, 2)
+
+    elif f in [
+        "gap_pct",
+        "market_today_pct",
+        "market_5d_pct",
+        "lower_wick_ratio",
+        "upper_wick_ratio",
+    ]:
+        rounded = round(th, 1)
+
+    elif f in [
+        "vol5",
+        "today_pct",
+        "max_drop_7d",
+        "recent_runup",
+        "rebound_from_7d_low",
+        "dist_to_ma5",
+        "pct_vs_lastweek",
+        "room_to_20d_high",
+        "room_to_60d_high",
+        "rebound_vs_prior_drop",
+        "intraday_return",
+        "body_value_power",
+        "price_power_value",
+        "today_tr_val_eok",
+    ]:
+        rounded = round(th, 0)
+
+    else:
+        rounded = round(th, 2)
+
+    return f, atom.op, rounded
+
+
+def rule_signature(rule_text: str) -> Tuple[Tuple[str, str, float], ...]:
+    atoms = parse_rule_text_to_atoms(str(rule_text))
+    sig = tuple(sorted(atom_signature(a) for a in atoms))
+    return sig
+
+
+def rule_family_signature(rule_text: str) -> Tuple[Tuple[str, str], ...]:
+    """
+    threshold는 무시하고 feature + op 조합만 본다.
+    """
+    atoms = parse_rule_text_to_atoms(str(rule_text))
+    sig = tuple(sorted((a.feature, a.op) for a in atoms))
+    return sig
+
+
+def add_rule_signature_columns(rules_df: pd.DataFrame) -> pd.DataFrame:
+    if len(rules_df) == 0:
+        return rules_df.copy()
+
+    out = rules_df.copy()
+
+    out["feature_tuple"] = out["rule"].apply(rule_feature_tuple)
+    out["feature_set_key"] = out["feature_tuple"].apply(lambda x: "|".join(x))
+    out["rule_signature"] = out["rule"].apply(rule_signature)
+    out["rule_signature_key"] = out["rule_signature"].apply(lambda x: str(x))
+    out["rule_family"] = out["rule"].apply(rule_family_signature)
+    out["rule_family_key"] = out["rule_family"].apply(lambda x: str(x))
+
+    return out
+
+
+def summarize_selected_portfolio(selected_df: pd.DataFrame) -> Dict:
+    if len(selected_df) == 0:
+        return {
+            "rule_count": 0,
+            "avg_valid_precision": np.nan,
+            "avg_valid_lift": np.nan,
+            "avg_valid_count": np.nan,
+            "pass_valid_60_count": 0,
+            "unique_feature_sets": 0,
+            "unique_rule_families": 0,
+        }
+
+    return {
+        "rule_count": len(selected_df),
+        "avg_valid_precision": selected_df["valid_precision"].mean(),
+        "avg_valid_lift": selected_df["valid_lift"].mean(),
+        "avg_valid_count": selected_df["valid_count"].mean(),
+        "pass_valid_60_count": int(selected_df["pass_valid_60"].sum())
+        if "pass_valid_60" in selected_df.columns else 0,
+        "unique_feature_sets": selected_df["feature_set_key"].nunique()
+        if "feature_set_key" in selected_df.columns else np.nan,
+        "unique_rule_families": selected_df["rule_family_key"].nunique()
+        if "rule_family_key" in selected_df.columns else np.nan,
+    }
+
+
+def save_portfolio_summary(selected_df: pd.DataFrame, out_dir: str):
+    summary = summarize_selected_portfolio(selected_df)
+    summary_df = pd.DataFrame([summary])
+
+    summary_df.to_csv(
+        os.path.join(out_dir, "04_selected_avg60_rules_summary.csv"),
+        index=False,
+        encoding="utf-8-sig",
+    )
+
+    return summary_df
+
+
 def select_avg60_rule_portfolio(
         rules_df,
         target_avg_precision,
         min_rule_count,
         max_rule_count,
         min_valid_count,
+        max_same_feature_set=3,
+        max_same_rule_family=2,
+        max_same_feature_pair=8,
+        min_precision_floor=0.55,
+        prefer_monthly_stable=False,
+        monthly_summary_df=None,
 ):
+    """
+    valid precision 평균 60% 이상을 유지하면서,
+    중복 룰을 줄이고 다양한 feature 조합을 고르는 포트폴리오 선택 함수.
+    """
+
     if len(rules_df) == 0:
         return pd.DataFrame()
 
@@ -980,51 +1138,153 @@ def select_avg60_rule_portfolio(
         (rules_df["valid_count"] >= min_valid_count)
         & (rules_df["valid_precision"].notna())
         & (rules_df["valid_lift"].notna())
+        & (rules_df["valid_precision"] >= min_precision_floor)
         ].copy()
 
     if len(use) == 0:
         return pd.DataFrame()
 
+    use = add_rule_signature_columns(use)
+
+    # 완전히 비슷한 룰 제거.
+    # 같은 rounded signature이면 valid_precision 높은 것만 남긴다.
     use = use.sort_values(
-        ["valid_precision", "valid_lift", "valid_count"],
-        ascending=[False, False, False],
+        ["rule_signature_key", "valid_precision", "valid_lift", "valid_count"],
+        ascending=[True, False, False, False],
+    )
+
+    use = use.drop_duplicates(
+        subset=["rule_signature_key"],
+        keep="first",
+    )
+
+    if prefer_monthly_stable and monthly_summary_df is not None and len(monthly_summary_df):
+        ms = monthly_summary_df.copy()
+        ms_cols = [
+            "rule",
+            "months_used",
+            "median_month_precision",
+            "min_month_precision",
+            "bad_months_precision_lt_50",
+            "bad_months_lift_lt_1",
+        ]
+        ms_cols = [c for c in ms_cols if c in ms.columns]
+
+        use = use.merge(
+            ms[ms_cols],
+            on="rule",
+            how="left",
+        )
+
+        use["months_used"] = use["months_used"].fillna(0)
+        use["bad_months_precision_lt_50"] = use["bad_months_precision_lt_50"].fillna(99)
+        use["bad_months_lift_lt_1"] = use["bad_months_lift_lt_1"].fillna(99)
+        use["median_month_precision"] = use["median_month_precision"].fillna(0)
+
+        use["portfolio_sort_score"] = (
+                use["valid_precision"] * 100
+                + use["valid_lift"] * 8
+                + np.log1p(use["valid_count"]) * 2
+                + use["months_used"] * 2
+                + use["median_month_precision"] * 5
+                - use["bad_months_precision_lt_50"] * 3
+                - use["bad_months_lift_lt_1"] * 3
+        )
+    else:
+        use["portfolio_sort_score"] = (
+                use["valid_precision"] * 100
+                + use["valid_lift"] * 8
+                + np.log1p(use["valid_count"]) * 2
+        )
+
+    use = use.sort_values(
+        ["portfolio_sort_score", "valid_precision", "valid_lift", "valid_count"],
+        ascending=[False, False, False, False],
     ).reset_index(drop=True)
 
     selected = []
 
-    for _, r in use.iterrows():
-        candidate = selected + [r]
+    feature_set_counts = {}
+    rule_family_counts = {}
+    feature_pair_counts = {}
 
+    for _, r in use.iterrows():
+        fs_key = r["feature_set_key"]
+        fam_key = r["rule_family_key"]
+        pair_keys = rule_feature_pair_keys(r["rule"])
+
+        if feature_set_counts.get(fs_key, 0) >= max_same_feature_set:
+            continue
+
+        if rule_family_counts.get(fam_key, 0) >= max_same_rule_family:
+            continue
+
+        pair_too_many = False
+        for p in pair_keys:
+            if feature_pair_counts.get(p, 0) >= max_same_feature_pair:
+                pair_too_many = True
+                break
+
+        if pair_too_many:
+            continue
+
+        candidate = selected + [r]
         avg_precision = np.mean([x["valid_precision"] for x in candidate])
 
-        if avg_precision >= target_avg_precision:
-            selected.append(r)
-        else:
-            # 이미 최소 룰 수를 확보했으면 낮은 precision 룰은 중단
-            if len(selected) >= min_rule_count:
-                continue
-
-            # 최소 룰 수가 부족하면 아직은 추가하지 않음
-            # 평균 60을 깨는 룰은 목적과 맞지 않음
+        if avg_precision < target_avg_precision:
             continue
+
+        selected.append(r)
+
+        feature_set_counts[fs_key] = feature_set_counts.get(fs_key, 0) + 1
+        rule_family_counts[fam_key] = rule_family_counts.get(fam_key, 0) + 1
+
+        for p in pair_keys:
+            feature_pair_counts[p] = feature_pair_counts.get(p, 0) + 1
 
         if len(selected) >= max_rule_count:
             break
 
     out = pd.DataFrame(selected)
 
-    # 만약 너무 적으면 valid_precision 60 이상 룰만이라도 반환
+    # 너무 적게 잡히면 제한을 완화해서 fallback
     if len(out) < min_rule_count:
-        fallback = use[use["valid_precision"] >= target_avg_precision].copy()
-        fallback = fallback.head(max_rule_count)
-        if len(fallback):
-            out = fallback
+        selected = []
+
+        feature_set_counts = {}
+        rule_family_counts = {}
+
+        fallback = use[
+            use["valid_precision"] >= target_avg_precision
+            ].copy()
+
+        for _, r in fallback.iterrows():
+            fs_key = r["feature_set_key"]
+            fam_key = r["rule_family_key"]
+
+            if feature_set_counts.get(fs_key, 0) >= max_same_feature_set + 2:
+                continue
+
+            if rule_family_counts.get(fam_key, 0) >= max_same_rule_family + 2:
+                continue
+
+            selected.append(r)
+
+            feature_set_counts[fs_key] = feature_set_counts.get(fs_key, 0) + 1
+            rule_family_counts[fam_key] = rule_family_counts.get(fam_key, 0) + 1
+
+            if len(selected) >= max_rule_count:
+                break
+
+        out = pd.DataFrame(selected)
 
     if len(out):
         out = out.copy()
         out["portfolio_avg_valid_precision"] = out["valid_precision"].mean()
         out["portfolio_avg_valid_lift"] = out["valid_lift"].mean()
         out["portfolio_rule_count"] = len(out)
+        out["portfolio_unique_feature_sets"] = out["feature_set_key"].nunique()
+        out["portfolio_unique_rule_families"] = out["rule_family_key"].nunique()
 
     return out
 
@@ -1184,32 +1444,6 @@ def monthly_rule_stability(valid, rules_df, target_col):
             })
 
     return pd.DataFrame(rows)
-
-
-def parse_rule_text_to_atoms(rule_text: str) -> List[Atom]:
-    atoms = []
-
-    if not rule_text or rule_text == "nan":
-        return atoms
-
-    for part in rule_text.split(" AND "):
-        part = part.strip()
-
-        if " >= " in part:
-            f, th = part.split(" >= ")
-            try:
-                atoms.append(Atom(f.strip(), ">=", float(th)))
-            except Exception:
-                pass
-
-        elif " <= " in part:
-            f, th = part.split(" <= ")
-            try:
-                atoms.append(Atom(f.strip(), "<=", float(th)))
-            except Exception:
-                pass
-
-    return atoms
 
 
 def conditional_feature_contribution(
@@ -1470,38 +1704,74 @@ def grade_features(
         if f in WEAK_HINT_FEATURES:
             score -= 2
 
+        # ============================================================
+        # 강화된 등급 기준
+        # ============================================================
+        enough_usage_for_s = total_usage_count >= 4
+        enough_usage_for_a = total_usage_count >= 2
+
+        conditional_not_bad = (
+                not np.isfinite(mean_valid_precision_gain)
+                or mean_valid_precision_gain >= -0.005
+        )
+
         is_core_signal = (
                 direction_ok
                 and not is_non_mono
+                and enough_usage_for_s
+                and conditional_not_bad
                 and (
-                        pass_valid_60_count >= 2
-                        or (np.isfinite(avg_valid_precision) and avg_valid_precision >= 0.60)
-                        or (np.isfinite(auc_oriented) and auc_oriented >= 0.565)
+                        pass_valid_60_count >= 3
+                        or (
+                                np.isfinite(avg_valid_precision)
+                                and avg_valid_precision >= 0.62
+                                and np.isfinite(avg_valid_lift)
+                                and avg_valid_lift >= 1.45
+                        )
+                        or (
+                                np.isfinite(auc_oriented)
+                                and auc_oriented >= 0.575
+                                and pass_valid_60_count >= 1
+                        )
                 )
         )
 
         is_regime_filter = (
                 is_regime
+                and enough_usage_for_a
+                and conditional_not_bad
                 and (
-                        pass_valid_60_count > 0
-                        or (np.isfinite(best_bin_lift) and best_bin_lift >= 1.30)
-                        or (np.isfinite(avg_valid_lift) and avg_valid_lift >= 1.30)
+                        pass_valid_60_count >= 2
+                        or (
+                                np.isfinite(avg_valid_lift)
+                                and avg_valid_lift >= 1.35
+                                and np.isfinite(avg_valid_precision)
+                                and avg_valid_precision >= 0.60
+                        )
+                        or (
+                                np.isfinite(best_bin_lift)
+                                and best_bin_lift >= 1.35
+                                and pass_valid_60_count >= 1
+                        )
                 )
         )
 
         is_conditional_filter = (
                 is_non_mono
+                and enough_usage_for_a
                 and (
-                        pass_valid_60_count > 0
+                        pass_valid_60_count >= 2
                         or (
-                                rules_used_conditional > 0
-                                and (
-                                        positive_gain_rate >= 0.25
-                                        or (
-                                                np.isfinite(mean_valid_precision_gain)
-                                                and mean_valid_precision_gain > 0.005
-                                        )
-                                )
+                                rules_used_conditional >= 2
+                                and positive_gain_rate >= 0.30
+                                and np.isfinite(mean_valid_precision_gain)
+                                and mean_valid_precision_gain > 0.005
+                        )
+                        or (
+                                rules_used_conditional >= 1
+                                and np.isfinite(max_valid_precision_gain)
+                                and max_valid_precision_gain >= 0.04
+                                and pass_valid_60_count >= 1
                         )
                 )
         )
@@ -1517,7 +1787,7 @@ def grade_features(
             grade = "S"
             role = "REGIME_FILTER"
             action = "KEEP"
-            reason = "avg60 룰에서 장세 필터로 기여"
+            reason = "avg60 룰에서 장세 필터로 반복 기여"
 
         elif is_core_signal:
             grade = "S"
@@ -1600,11 +1870,30 @@ def grade_features(
 
 
 def write_feature_grade_text(feature_grade_df, out_dir):
+    s_core = feature_grade_df[
+        (feature_grade_df["grade"] == "S")
+        & (feature_grade_df["role"] == "CORE_SIGNAL")
+        ]
+
+    s_regime = feature_grade_df[
+        (feature_grade_df["grade"] == "S")
+        & (feature_grade_df["role"] == "REGIME_FILTER")
+        ]
+
+    a_filter = feature_grade_df[
+        (feature_grade_df["grade"] == "A")
+        & (feature_grade_df["role"] == "CONDITIONAL_FILTER")
+        ]
+
+    b_test = feature_grade_df[feature_grade_df["grade"] == "B"]
+    c_drop = feature_grade_df[feature_grade_df["grade"] == "C"]
+
     groups = [
-        ("S_KEEP", feature_grade_df[feature_grade_df["grade"] == "S"]),
-        ("A_CONDITIONAL_FILTERS", feature_grade_df[feature_grade_df["grade"] == "A"]),
-        ("B_TEST_CANDIDATES", feature_grade_df[feature_grade_df["grade"] == "B"]),
-        ("C_DROP_CANDIDATES", feature_grade_df[feature_grade_df["grade"] == "C"]),
+        ("S_CORE_SIGNAL", s_core),
+        ("S_REGIME_FILTER", s_regime),
+        ("A_CONDITIONAL_FILTERS", a_filter),
+        ("B_TEST_CANDIDATES", b_test),
+        ("C_DROP_CANDIDATES", c_drop),
     ]
 
     lines = []
@@ -1645,6 +1934,12 @@ def main():
     parser.add_argument("--portfolio-min-rule-count", type=int, default=10)
     parser.add_argument("--portfolio-max-rule-count", type=int, default=80)
     parser.add_argument("--portfolio-min-valid-count", type=int, default=25)
+
+    # 중복 룰 방지 옵션
+    parser.add_argument("--max-same-feature-set", type=int, default=3)
+    parser.add_argument("--max-same-rule-family", type=int, default=2)
+    parser.add_argument("--max-same-feature-pair", type=int, default=8)
+    parser.add_argument("--portfolio-min-precision-floor", type=float, default=0.55)
 
     args = parser.parse_args()
 
@@ -1759,12 +2054,21 @@ def main():
         min_rule_count=args.portfolio_min_rule_count,
         max_rule_count=args.portfolio_max_rule_count,
         min_valid_count=args.portfolio_min_valid_count,
+        max_same_feature_set=args.max_same_feature_set,
+        max_same_rule_family=args.max_same_rule_family,
+        max_same_feature_pair=args.max_same_feature_pair,
+        min_precision_floor=args.portfolio_min_precision_floor,
     )
 
     selected_rules_df.to_csv(
         os.path.join(args.out, "04_selected_avg60_rules.csv"),
         index=False,
         encoding="utf-8-sig",
+    )
+
+    save_portfolio_summary(
+        selected_df=selected_rules_df,
+        out_dir=args.out,
     )
 
     if len(selected_rules_df) == 0:
@@ -1852,6 +2156,10 @@ def main():
         print("avg_valid_precision:", selected_rules_df["valid_precision"].mean())
         print("avg_valid_lift:", selected_rules_df["valid_lift"].mean())
 
+        if "portfolio_unique_feature_sets" in selected_rules_df.columns:
+            print("unique_feature_sets:", selected_rules_df["portfolio_unique_feature_sets"].iloc[0])
+            print("unique_rule_families:", selected_rules_df["portfolio_unique_rule_families"].iloc[0])
+
         show_cols = [
             "profile",
             "rank",
@@ -1863,6 +2171,8 @@ def main():
             "valid_precision",
             "valid_lift",
             "pass_valid_60",
+            "feature_set_key",
+            "rule_family_key",
         ]
         show_cols = [c for c in show_cols if c in selected_rules_df.columns]
         print(selected_rules_df[show_cols].head(50).to_string(index=False))
@@ -1913,7 +2223,7 @@ if __name__ == "__main__":
 기본 실행:
 python feature_selector_v36_avg60.py ^
   --csv csv/low_result_7_desc.csv ^
-  --out feature_selector_v36_avg60_out ^
+  --out feature_selector_v36_avg60_out_dedup ^
   --date-col today ^
   --max-depth 5 ^
   --beam-width 600 ^
@@ -1923,12 +2233,16 @@ python feature_selector_v36_avg60.py ^
   --target-avg-valid-precision 0.60 ^
   --portfolio-min-rule-count 10 ^
   --portfolio-max-rule-count 80 ^
-  --portfolio-min-valid-count 25
+  --portfolio-min-valid-count 25 ^
+  --max-same-feature-set 3 ^
+  --max-same-rule-family 2 ^
+  --max-same-feature-pair 8 ^
+  --portfolio-min-precision-floor 0.55
 
 더 넓게:
 python feature_selector_v36_avg60.py ^
   --csv csv/low_result_7_desc.csv ^
-  --out feature_selector_v36_avg60_out_wide ^
+  --out feature_selector_v36_avg60_out_dedup_wide ^
   --date-col today ^
   --max-depth 6 ^
   --beam-width 1000 ^
@@ -1938,5 +2252,9 @@ python feature_selector_v36_avg60.py ^
   --target-avg-valid-precision 0.60 ^
   --portfolio-min-rule-count 10 ^
   --portfolio-max-rule-count 100 ^
-  --portfolio-min-valid-count 25
+  --portfolio-min-valid-count 25 ^
+  --max-same-feature-set 4 ^
+  --max-same-rule-family 2 ^
+  --max-same-feature-pair 10 ^
+  --portfolio-min-precision-floor 0.55
 """
