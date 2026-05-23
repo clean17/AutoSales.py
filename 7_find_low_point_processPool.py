@@ -489,7 +489,9 @@ def process_one_with_df(df, idx, ticker, tickers_dict, market_context):
 
     # 캔들에서 몸통의 비율 (추세 강도)
     body_ratio = abs(last["종가"] - last["시가"]) / (last["고가"] - last["저가"] + 1e-9)
+    # 당일 등락률(today_pct)과 거래대금(today_tr_val_eok)을 결합한 지표
     price_power_value = today_pct * np.log1p(max(today_tr_val_eok, 0))
+    # 당일 캔들의 “몸통(body)” 크기와 방향성, 당일 수익률, 거래대금 규모를 결합해서 만든 일종의 매수세 강도 지표
     body_value_power = (
             max(body_ratio, 0)
             * max(today_pct, 0)
@@ -539,6 +541,7 @@ def process_one_with_df(df, idx, ticker, tickers_dict, market_context):
     # selling_pressure_score = upper_wick_ratio * (1 - body_ratio)
     # 저점 대비 반등 위치(오늘 제외): 최근 급락 저점에서 오늘 종가가 얼마나 회복했는지
     _low_7d_before_today = data['저가'].iloc[-8:-1].min()
+    # 현재 종가가 7일 최저가보다 얼마나 위에 있는지 비율로 표현
     rebound_from_7d_low = (last['종가'] / _low_7d_before_today - 1) * 100
     # 최근 하락폭 대비 오늘까지 얼마나 반등했는가
     rebound_vs_prior_drop = rebound_from_7d_low / (abs(max_drop_7d) + 1e-9)
@@ -568,40 +571,37 @@ def process_one_with_df(df, idx, ticker, tickers_dict, market_context):
         "vol_ratio_5_15": _vol_ratio_5_15,                     # 성공군의 최근 단기 변동성 확장이 큼, 정밀도를 올려줌, 표본 부족
         "today_pct": today_pct,                                # 성공군의 마지막 날 반등 강도가 큼
         "max_drop_7d": max_drop_7d,                            # 성공군이 더 깊게 빠졌다가 반등
-
         "gap_pct": _gap_pct,                                   # gap_pct는 단독 분리력은 약하지만 today_pct와 조합하면 의미가 있을 수 있음, 비단조 주의, 룰 조합에서 강함, 핵심 피쳐
-        # "dist_to_ma20": dist_to_ma20,                          # 성공군이 20일선 대비 조금 더 아래, 비단조 주의, 룰 조합에서 강함, 핵심 피쳐
+
         "pct_vs_lastweek": result['pct_vs_lastweek'],          # 단독 AUC는 약하지만 룰 조합에서 강함, 없으면 데드캣 상승, 주요 피쳐
-
         "dist_to_ma5": dist_to_ma5,                            # dist_from_low_20d, pct_vs_lastweek, dist_to_ma20와 중복이 큼, 대체 가능
-        # "ma5_ma20_gap_chg_1d": _ma5_ma20_gap_chg_1d,           # best bin은 괜찮지만 전체 방향성이 거의 없음.. dist_to_ma5, dist_to_ma20, pct_vs_lastweek와 의미가 겹친다, 대체 가능
+        "ma5_chg_rate": ma5_chg_rate,                          # 5일선 기울기
+        "today_tr_val_eok": today_tr_val_eok,                  # 오늘 거래대금 (억)
+        "BB_perc": BB_perc,                                    # 볼린저밴드 위치
 
-        "ma5_chg_rate": ma5_chg_rate,                          # _ma5_ma20_gap_chg_1d 상관 0.930, 중복이므로 정리, 룰 조합에서 강함
+        "lower_wick_ratio": lower_wick_ratio,                  # 아랫꼬리 비율
+        "upper_wick_ratio": upper_wick_ratio,                  # 윗꼬리 비율
+        "body_ratio": body_ratio,                              # 몸통 비율
+        "intraday_return": intraday_return,                    # 시가 대비 종가가 얼마나 회복되었는가
+        "rebound_from_7d_low": rebound_from_7d_low,            # 현재 종가가 7일 최저가보다 얼마나 위에 있는지 비율로 표현
 
-        "today_tr_val_eok": today_tr_val_eok,
-        # "tr_val_rank_20d": tr_val_rank_20d,                    # 분리력 약함, 성공률 상승폭 작음
-        # "tr_value_ratio_5d": tr_value_ratio_5d,               # 단일 AUC 0.528, IV 0.023으로 약함. vol5, vol_ratio_5_15가 있으면 우선순위 낮음
-
-        "BB_perc": BB_perc,  # 볼린저밴드 위치
-
-        "lower_wick_ratio": lower_wick_ratio,
-        "upper_wick_ratio": upper_wick_ratio,
-        "body_ratio": body_ratio,
-        # "recent_runup": _recent_runup,
-        "intraday_return": intraday_return,
-
-        "rebound_from_7d_low": rebound_from_7d_low,
-
-        "price_power_value": price_power_value,
-        "body_value_power": body_value_power,
-        # "intraday_body_power": intraday_body_power,
-        "room_to_20d_high": room_to_20d_high,
+        "price_power_value": price_power_value,                # 당일 등락률(today_pct)과 거래대금(today_tr_val_eok)을 결합한 지표
+        "body_value_power": body_value_power,                  # 당일 캔들의 “몸통(body)” 크기와 방향성, 당일 수익률, 거래대금 규모를 결합해서 만든 일종의 매수세 강도 지표
+        "room_to_20d_high": room_to_20d_high,                  # 주가가 어느 정도 반등했는지 또는 앞으로 상승 여력이 얼마나 있는지를 보는 피쳐
         "room_to_60d_high": room_to_60d_high,
-        "rebound_vs_prior_drop": rebound_vs_prior_drop,
+        "rebound_vs_prior_drop": rebound_vs_prior_drop,        # 최근 하락폭 대비 오늘까지 얼마나 반등했는가
 
-        "market_today_pct": market_today_pct,                    # 해당 종목이 속한 시장의 당일 등락률
-        # "market_5d_pct": market_5d_pct,                          # 해당 종목이 속한 시장의 최근 5거래일 등락률
-        # "market_breadth_up_ratio": market_breadth_up_ratio,      # 같은 날짜, 같은 시장에서 상승한 종목 비율
+        "market_today_pct": market_today_pct,                  # 해당 종목이 속한 시장의 당일 등락률
+
+        # "recent_runup": _recent_runup,                         # 상관 0.9이상
+        # "intraday_body_power": intraday_body_power,            # 상관 0.9이상
+        # _ma5_ma20_gap_chg_1d                                   # 상관 0.930, 중복이므로 정리, 룰 조합에서 강함
+        # "dist_to_ma20": dist_to_ma20,                          # 성공군이 20일선 대비 조금 더 아래, 비단조 주의, 룰 조합에서 강함, 핵심 피쳐
+        # "ma5_ma20_gap_chg_1d": _ma5_ma20_gap_chg_1d,           # best bin은 괜찮지만 전체 방향성이 거의 없음.. dist_to_ma5, dist_to_ma20, pct_vs_lastweek와 의미가 겹친다, 대체 가능
+        # "tr_val_rank_20d": tr_val_rank_20d,                    # 분리력 약함, 성공률 상승폭 작음
+        # "tr_value_ratio_5d": tr_value_ratio_5d,                # 단일 AUC 0.528, IV 0.023으로 약함. vol5, vol_ratio_5_15가 있으면 우선순위 낮음
+        # "market_5d_pct": market_5d_pct,                        # 해당 종목이 속한 시장의 최근 5거래일 등락률
+        # "market_breadth_up_ratio": market_breadth_up_ratio,    # 같은 날짜, 같은 시장에서 상승한 종목 비율
         # "market_stock_count": market_stock_count,
 
         # 이전 피쳐
