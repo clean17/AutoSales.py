@@ -50,7 +50,7 @@ os.makedirs(csv_dir, exist_ok=True)
 CSV_PATH = os.path.join(csv_dir, "low_result_7_desc.csv")
 GOOD_OUT_PATH = Path("lowscan_good_rules.py")
 
-GOOD_EXPAND_RATIO = [0.32, 0.55, 0.73, 0.82, 0.85, 0,87]
+GOOD_EXPAND_RATIO = [0.32, 0.55, 0.71, 0.81, 0.85, 0,87]
 MIN_CNT = 120
 MAX_DEPTH = 6
 # MIN_RATE = GOOD_EXPAND_RATIO[(MAX_DEPTH-1)]
@@ -120,9 +120,6 @@ def get_feature_groups():
 
         "room_to_20d_high": "HIGH_ROOM",
         "room_to_60d_high": "HIGH_ROOM",
-
-        "market_today_pct": "MARKET",
-        "market_5d_pct": "MARKET",
     }
 
     group_limits = {
@@ -140,7 +137,6 @@ def get_feature_groups():
         "REBOUND": 2,
         "POWER": 1,
         "HIGH_ROOM": 1,
-        "MARKET": 1,
     }
 
     return feature_groups, group_limits
@@ -554,6 +550,7 @@ def find_good_rule(m_ratio, m_count):
             "train_n", len(f["train_idx"]),
             "valid_n", len(f["valid_idx"])
         )
+    print("\n")
 
     # 룰 생성은 train으로만 한다
     features = get_features(train)
@@ -769,9 +766,46 @@ def eval_combined_good_rules(df, selected, title=""):
 
     sub = df[buy_mask]
 
+    total_count = len(df)
+    selected_count = len(sub)  # 룰 합집합에 의해 선택된 행 수
+
+    target_mask_all = (df["target_before_stop_7"] == 1)
+    positive_total = int(target_mask_all.sum())
+
+    if selected_count > 0:
+        target_mask_selected = (sub["target_before_stop_7"] == 1)
+        positive_count = int(target_mask_selected.sum())
+    else:
+        positive_count = 0
+
+    # 선택은 했는데 정답이 아님
+    false_positive_count = selected_count - positive_count
+    # 룰이 선택 못한 양성
+    missed_positive_count = positive_total - positive_count
+
+    # 정밀도
+    precision = positive_count / selected_count if selected_count else 0.0
+    # 전체 데이터의 양성 비율(베이스라인)
+    base_positive_rate = positive_total / total_count if total_count else 0.0
+    # 전체 중에서 룰이 선택한 비율, 룰이 얼마나 넓게 커버하느냐(선택 범위 크기)
+    selected_coverage = selected_count / total_count if total_count else 0.0
+    # 양성 커버리지, 재현율(Recall), 전체 양성 중에서 룰이 잡아낸 양성 비율
+    positive_coverage = positive_count / positive_total if positive_total else 0.0
+    # 룰 적용 후 양성비율이 베이스라인 대비 몇 배 좋아졌는지
+    lift = precision / base_positive_rate if base_positive_rate else 0.0
+
     print(f"\n[{title}] combined good rules")
     print("rule_count:", len(selected))
-    print("row_count:", len(sub))
+    print("total_count:", total_count)
+    print("selected_count:", selected_count)
+    print("selected_coverage:", round(selected_coverage * 100, 2), "%")
+    print("positive_count:", f"{positive_count} / {positive_total}")
+    print("precision:", round(precision * 100, 2), "%")
+    print("base_positive_rate:", round(base_positive_rate * 100, 2), "%")
+    print("lift:", round(lift, 3), "x")
+    print("positive_coverage:", round(positive_coverage * 100, 2), "%")
+    print("false_positive_count:", false_positive_count)
+    print("missed_positive_count:", missed_positive_count)
 
     if len(sub) == 0:
         return
