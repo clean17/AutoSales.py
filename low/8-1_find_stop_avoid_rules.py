@@ -24,7 +24,7 @@ stop_before_target_7 == 1 룰 생성 스크립트 - 적용 버전
     lowscan_stop_before_target_7_rule_report.csv
 """
 
-import os
+import os, sys
 import argparse
 import heapq
 from itertools import count
@@ -33,6 +33,16 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+# 자동 탐색 (utils.py를 찾을 때까지 위로 올라가 탐색)
+here = Path(__file__).resolve()
+for parent in [here.parent, *here.parents]:
+    if (parent / "utils.py").exists():
+        sys.path.insert(0, str(parent))
+        break
+else:
+    raise FileNotFoundError("utils.py를 상위 디렉터리에서 찾지 못했습니다.")
+
+from utils import get_features
 
 # =============================================================================
 # 기본 설정
@@ -285,14 +295,6 @@ def get_exclude_columns(df=None):
     return exclude
 
 
-def get_features(df):
-    exclude = get_exclude_columns(df)
-    return [
-        c for c in df.columns
-        if c not in exclude and pd.api.types.is_numeric_dtype(df[c])
-    ]
-
-
 def get_feature_groups():
     feature_groups = {
         "vol5": "VOLATILITY",
@@ -323,9 +325,6 @@ def get_feature_groups():
 
         "room_to_20d_high": "HIGH_ROOM",
         "room_to_60d_high": "HIGH_ROOM",
-
-        "market_today_pct": "MARKET",
-        "market_5d_pct": "MARKET",
     }
 
     group_limits = {
@@ -343,7 +342,6 @@ def get_feature_groups():
         "REBOUND": 2,
         "POWER": 1,
         "HIGH_ROOM": 1,
-        "MARKET": 1,
     }
 
     return feature_groups, group_limits
