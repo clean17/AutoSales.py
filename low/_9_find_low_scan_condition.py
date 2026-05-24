@@ -50,10 +50,6 @@ os.makedirs(csv_dir, exist_ok=True)
 CSV_PATH = os.path.join(csv_dir, "low_result_7_desc.csv")
 GOOD_OUT_PATH = Path("lowscan_good_rules.py")
 
-# ============================================================
-# CLASS23 RULE SETTINGS
-# 목적: target_class == 2 or 3 탐색
-# ============================================================
 GOOD_EXPAND_RATIO = [0.32, 0.55, 0.73, 0.82, 0.85, 0,87]
 MIN_CNT = 120
 MAX_DEPTH = 6
@@ -65,6 +61,24 @@ TOP_N = 3000
 VALID_MIN_RATE = 0.63
 VALID_MIN_CNT = 20
 VALID_RATIO = 0.20
+
+# ============================================================
+# TRAIN 내부 WALK-FORWARD 검증 설정
+# 목적: valid를 보기 전에 train 안에서 과거 -> 미래 검증을 여러 번 수행
+# train 내부에서 5개 fold를 만들고,
+# 각 fold의 미래 구간에서 룰이 60% 근처로 반복되는지 검사
+# ============================================================
+USE_TRAIN_WF_FILTER = True
+
+TRAIN_WF_FOLDS = 5
+TRAIN_WF_START_RATIO = 0.35
+TRAIN_WF_VALID_RATIO = 0.13
+
+TRAIN_WF_MIN_COUNT = 6
+TRAIN_WF_MIN_RATE = 0.60
+TRAIN_WF_MIN_MEAN_RATE = 0.60
+TRAIN_WF_MIN_RECENT_RATE = 0.55
+TRAIN_WF_MIN_PASS_FOLDS = 3
 
 redule_rule = 1  # 중복 룰 제거 조건
 
@@ -350,21 +364,203 @@ def test_good_condition(name, cond, df, min_count=20, verbose=False):
     return True
 
 
+def make_train_walk_forward_folds(df, n_folds=TRAIN_WF_FOLDS):
+    """
+    train 내부 walk-forward fold 생성.
+    각 fold는 train 내부에서 과거 구간을 학습으로 보고,
+    바로 다음 구간을 내부 검증 구간으로 사용한다.
+
+    반환 예:
+        [{"fold": 1, "train_idx": ..., "valid_idx": ...}, ...]
+    """
+    n = len(df)
+    folds = []
+
+    if n <= 0:
+        return folds
+
+    start_train_end = int(n * TRAIN_WF_START_RATIO)
+    valid_size = max(1, int(n * TRAIN_WF_VALID_RATIO))
+    remaining = n - start_train_end - valid_size
+
+    if remaining < 0:
+        return folds
+
+    step = max(1, remaining // max(1, n_folds - 1)) if n_folds > 1 else valid_size
+
+    for i in range(n_folds):
+        train_end = start_train_end + i * step
+        valid_start = train_end
+        valid_end = min(n, valid_start + valid_size)
+
+        if train_end <= 0 or valid_end <= valid_start:
+            continue
+
+        folds.append({
+            "fold": i + 1,
+            "train_idx": np.arange(0, train_end),
+            "valid_idx": np.arange(valid_start, valid_end),
+        })
+
+    return folds
+
+
+def eval_rule_train_walk_forward(train, conds, folds):
+    """
+    하나의 룰을 train 내부 walk-forward fold별로 평가한다.
+    target은 target_before_stop_7 == 1 기준으로 고정한다.
+    """
+    if not folds:
+        return {
+            "wf_pass": True,
+            "wf_active_folds": 0,
+            "wf_pass_folds": 0,
+            "wf_mean_rate": 0.0,
+            "wf_min_rate": 0.0,
+            "wf_recent_rate": 0.0,
+            "wf_total_count": 0,
+            "wf_total_success": 0,
+            "wf_rows": [],
+        }
+
+    full_mask = make_mask_from_conds(train, conds)
+    target = (train["target_before_stop_7"].to_numpy() == 1)
+
+    rows = []
+    active_rates = []
+    pass_folds = 0
+    total_count = 0
+    total_success = 0
+
+    for f in folds:
+        vi = f["valid_idx"]
+        m = full_mask[vi]
+        y = target[vi]
+
+        cnt = int(m.sum())
+        suc = int((m & y).sum())
+        rate = suc / cnt if cnt else 0.0
+
+        if cnt > 0:
+            active_rates.append(rate)
+            total_count += cnt
+            total_success += suc
+
+        if cnt >= TRAIN_WF_MIN_COUNT and rate >= TRAIN_WF_MIN_RATE:
+            pass_folds += 1
+
+        rows.append({
+            "fold": f["fold"],
+            "count": cnt,
+            "success": suc,
+            "rate": rate,
+        })
+
+    recent_rate = rows[-1]["rate"] if rows else 0.0
+    mean_rate = float(np.mean(active_rates)) if active_rates else 0.0
+    min_rate = float(np.min(active_rates)) if active_rates else 0.0
+    active_folds = len(active_rates)
+
+    wf_pass = (
+            pass_folds >= TRAIN_WF_MIN_PASS_FOLDS
+            and mean_rate >= TRAIN_WF_MIN_MEAN_RATE
+            and recent_rate >= TRAIN_WF_MIN_RECENT_RATE
+    )
+
+    return {
+        "wf_pass": wf_pass,
+        "wf_active_folds": active_folds,
+        "wf_pass_folds": pass_folds,
+        "wf_mean_rate": mean_rate,
+        "wf_min_rate": min_rate,
+        "wf_recent_rate": recent_rate,
+        "wf_total_count": total_count,
+        "wf_total_success": total_success,
+        "wf_rows": rows,
+    }
+
+
+def eval_selected_train_walk_forward(train, selected, folds, title="TRAIN_WF"):
+    """
+    최종 OR 룰셋을 train 내부 walk-forward 검증 구간들에서 평가한다.
+    """
+    if not folds:
+        print(f"\n[{title}] no walk-forward folds")
+        return
+
+    full_mask = np.zeros(len(train), dtype=bool)
+    for name, conds in selected:
+        full_mask |= make_mask_from_conds(train, conds)
+
+    target = (train["target_before_stop_7"].to_numpy() == 1)
+    oof_mask = np.zeros(len(train), dtype=bool)
+
+    print(f"\n[{title}] combined walk-forward")
+    print("rule_count:", len(selected))
+
+    total_cnt = 0
+    total_suc = 0
+    rates = []
+
+    for f in folds:
+        vi = f["valid_idx"]
+        m = full_mask[vi]
+        y = target[vi]
+
+        cnt = int(m.sum())
+        suc = int((m & y).sum())
+        rate = suc / cnt if cnt else 0.0
+
+        oof_mask[vi] = m
+
+        if cnt > 0:
+            rates.append(rate)
+            total_cnt += cnt
+            total_suc += suc
+
+        print(
+            f"fold {f['fold']}: count={cnt} success={suc} "
+            f"rate={rate * 100:.2f}%"
+        )
+
+    oof_cnt = int(oof_mask.sum())
+    oof_suc = int((oof_mask & target).sum())
+    oof_rate = oof_suc / oof_cnt if oof_cnt else 0.0
+
+    print("oof_count:", oof_cnt)
+    print("oof_success:", oof_suc)
+    print("oof_rate:", round(oof_rate * 100, 2), "%")
+    print("mean_active_fold_rate:", round(float(np.mean(rates)) * 100, 2) if rates else 0.0, "%")
+    print("min_active_fold_rate:", round(float(np.min(rates)) * 100, 2) if rates else 0.0, "%")
+    print("recent_fold_rate:", round(rates[-1] * 100, 2) if rates else 0.0, "%")
+
 
 def find_good_rule(m_ratio, m_count):
     df = pd.read_csv(CSV_PATH, low_memory=False)
 
-    df["today"] = pd.to_datetime(df["today"], errors="coerce")
-    df = df.dropna(subset=["today"])
+    df["today"] = pd.to_datetime(df["today"], errors="coerce")  # 문자열 > 시간, 에러나면 NaT 변환
+    df = df.dropna(subset=["today"])  # NaT 제거
 
     train, valid, split_date = split_train_valid_by_date_ratio(df, valid_ratio=VALID_RATIO)
+
+    # train 내부 walk-forward 검증 fold 생성
+    train_wf_folds = make_train_walk_forward_folds(train)
+
+    print("[TRAIN WF] fold_count:", len(train_wf_folds))
+    for f in train_wf_folds:
+        print(
+            "[TRAIN WF]",
+            "fold", f["fold"],
+            "train_n", len(f["train_idx"]),
+            "valid_n", len(f["valid_idx"])
+        )
 
     # 룰 생성은 train으로만 한다
     features = get_features(train)
     literals, literal_masks = build_literals(train, features)
 
     feature_groups, group_limits = get_feature_groups()
-    target = train["target_before_stop_7"].to_numpy() == 1
+    target = train["target_before_stop_7"].to_numpy() == 1  # metric 통일
 
     rules = mine_good_rules(
         df=train,
@@ -385,6 +581,7 @@ def find_good_rule(m_ratio, m_count):
         "train_ratio": 0,
         "valid_count": 0,
         "valid_ratio": 0,
+        "train_wf": 0,
         "selected": 0,
     }
 
@@ -418,6 +615,8 @@ def find_good_rule(m_ratio, m_count):
             valid_up = 0
             valid_ratio = 0.0
 
+        wf = eval_rule_train_walk_forward(train, conds, train_wf_folds)
+
         debug_candidates.append({
             "train_count": train_cnt,
             "train_success_cnt": train_up,
@@ -427,6 +626,15 @@ def find_good_rule(m_ratio, m_count):
             "valid_success_rate": round(valid_ratio * 100, 1),
             "score": round(float(score), 6),
             "conds": conds,
+
+            "wf_pass": wf["wf_pass"],
+            "wf_active_folds": wf["wf_active_folds"],
+            "wf_pass_folds": wf["wf_pass_folds"],
+            "wf_total_count": wf["wf_total_count"],
+            "wf_total_success": wf["wf_total_success"],
+            "wf_mean_rate": round(wf["wf_mean_rate"] * 100, 1),
+            "wf_min_rate": round(wf["wf_min_rate"] * 100, 1),
+            "wf_recent_rate": round(wf["wf_recent_rate"] * 100, 1),
         })
 
         if train_cnt < m_count:
@@ -435,6 +643,10 @@ def find_good_rule(m_ratio, m_count):
 
         if train_ratio < m_ratio:
             fail_reason["train_ratio"] += 1
+            continue
+
+        if USE_TRAIN_WF_FILTER and not wf["wf_pass"]:
+            fail_reason["train_wf"] += 1
             continue
 
         if valid_cnt < VALID_MIN_CNT:
@@ -455,6 +667,13 @@ def find_good_rule(m_ratio, m_count):
             "valid_count": valid_cnt,
             "valid_success_cnt": valid_up,
             "valid_ratio": valid_ratio,
+
+            "wf_active_folds": wf["wf_active_folds"],
+            "wf_pass_folds": wf["wf_pass_folds"],
+            "wf_mean_rate": wf["wf_mean_rate"],
+            "wf_min_rate": wf["wf_min_rate"],
+            "wf_recent_rate": wf["wf_recent_rate"],
+
             "score": score,
         })
 
@@ -480,8 +699,15 @@ def find_good_rule(m_ratio, m_count):
             tmp.head(30)[[
                 "train_count",
                 "train_success_rate",
+
+                "wf_pass",
+                "wf_pass_folds",
+                "wf_mean_rate",
+                "wf_recent_rate",
+
                 "valid_count",
                 "valid_success_rate",
+
                 "conds",
             ]].to_string(index=False)
         )
@@ -499,6 +725,10 @@ def find_good_rule(m_ratio, m_count):
                 tmp2.head(30)[[
                     "train_count",
                     "train_success_rate",
+                    "wf_pass",
+                    "wf_pass_folds",
+                    "wf_mean_rate",
+                    "wf_recent_rate",
                     "valid_count",
                     "valid_success_rate",
                     "conds",
@@ -530,6 +760,8 @@ def find_good_rule(m_ratio, m_count):
         key=lambda x: (
             x["valid_ratio"],
             x["valid_count"],
+            x["wf_mean_rate"],
+            x["wf_recent_rate"],
             x["train_ratio"],
             x["train_count"],
         ),
@@ -561,6 +793,7 @@ def find_good_rule(m_ratio, m_count):
     # 최종 선택 룰 평가 / 저장
     # ============================================================
     eval_combined_good_rules(train, selected, title="TRAIN")
+    eval_selected_train_walk_forward(train, selected, train_wf_folds, title="TRAIN_WF")
     eval_combined_good_rules(valid, selected, title="VALID")
 
     write_rule_file(
@@ -572,6 +805,11 @@ def find_good_rule(m_ratio, m_count):
             f"# split_date: {pd.to_datetime(split_date).date()}\n"
             f"# train_min_rate: {m_ratio}\n"
             f"# train_min_count: {m_count}\n"
+            f"# train_wf_filter: {USE_TRAIN_WF_FILTER}\n"
+            f"# train_wf_min_rate: {TRAIN_WF_MIN_RATE}\n"
+            f"# train_wf_min_mean_rate: {TRAIN_WF_MIN_MEAN_RATE}\n"
+            f"# train_wf_min_recent_rate: {TRAIN_WF_MIN_RECENT_RATE}\n"
+            f"# train_wf_min_pass_folds: {TRAIN_WF_MIN_PASS_FOLDS}\n"
             f"# valid_min_rate: {VALID_MIN_RATE}\n"
             f"# valid_min_count: {VALID_MIN_CNT}\n"
             "# usage:\n"
