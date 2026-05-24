@@ -43,7 +43,7 @@ output_dir = 'F:\\5below20_us'
 def process_one(idx, count, ticker, exchangeRate):
     filepath = os.path.join(pickle_dir, f'{ticker}.pkl')
     if not os.path.exists(filepath):
-        print(f"[idx={idx}] {ticker} 파일 없음")
+        # print(f"[idx={idx}] {ticker} 파일 없음")
         return
 
     # df = pd.read_pickle(filepath)

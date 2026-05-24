@@ -295,44 +295,54 @@ def get_features(df):
 
 def get_feature_groups():
     feature_groups = {
-        "today_pct": "PRICE",
-        "intraday_return": "PRICE",
-        "max_drop_7d": "DROP",
-        "rebound_from_7d_low": "REBOUND",
-        "rebound_vs_prior_drop": "REBOUND",
-        "room_to_20d_high": "ROOM",
-        "room_to_60d_high": "ROOM",
-        "dist_to_ma5": "POSITION",
-        "pct_vs_lastweek": "WEEK_POSITION",
-        "ma5_chg_rate": "TREND",
-        "gap_pct": "GAP",
-        "today_tr_val_eok": "VOLUME",
         "vol5": "VOLATILITY",
         "vol_ratio_5_15": "VOLATILITY",
+
+        "today_pct": "PRICE",
+        "max_drop_7d": "DROP",
+        "gap_pct": "GAP",
+
+        "pct_vs_lastweek": "WEEK_POSITION",
+        "dist_to_ma5": "POSITION",
+        "ma5_chg_rate": "TREND",
+
+        "today_tr_val_eok": "VOLUME",
+
         "BB_perc": "BAND",
-        "body_ratio": "CANDLE",
+
         "lower_wick_ratio": "CANDLE",
         "upper_wick_ratio": "CANDLE",
+        "body_ratio": "CANDLE",
+        "intraday_return": "INTRADAY",
+
+        "rebound_from_7d_low": "REBOUND",
+        "rebound_vs_prior_drop": "REBOUND",
+
         "price_power_value": "POWER",
         "body_value_power": "POWER",
+
+        "room_to_20d_high": "HIGH_ROOM",
+        "room_to_60d_high": "HIGH_ROOM",
+
         "market_today_pct": "MARKET",
         "market_5d_pct": "MARKET",
     }
 
     group_limits = {
+        "VOLATILITY": 2,
         "PRICE": 1,
         "DROP": 1,
-        "REBOUND": 1,
-        "ROOM": 1,
-        "POSITION": 1,
-        "WEEK_POSITION": 1,
-        "TREND": 1,
         "GAP": 1,
-        "VOLATILITY": 2,
+        "WEEK_POSITION": 1,
+        "POSITION": 1,
+        "TREND": 1,
         "VOLUME": 1,
         "BAND": 1,
-        "CANDLE": 1,
+        "CANDLE": 2,
+        "INTRADAY": 1,
+        "REBOUND": 2,
         "POWER": 1,
+        "HIGH_ROOM": 1,
         "MARKET": 1,
     }
 
