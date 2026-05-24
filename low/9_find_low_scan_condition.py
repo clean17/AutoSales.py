@@ -33,16 +33,6 @@ from utils import build_literals, split_train_valid_by_date_ratio, write_rule_fi
 
 CSV_PATH = "../csv/low_result_7_desc.csv"
 
-DEPTH0_FEATURES = {
-    "ATR_pct",
-    "vol5",
-    "today_pct",
-    "max_drop_7d",
-    "gap_pct",
-    "pct_vs_lastweek",
-    "dist_to_ma20",
-}
-
 # ============================================================
 # CLASS23 RULE SETTINGS
 # 목적: target_class == 2 or 3 탐색
@@ -65,15 +55,6 @@ redule_rule = 1  # 중복 룰 제거 조건
 
 
 
-def is_literal_allowed_at_depth(feat, depth):
-    """
-    모든 룰 마이닝에서 depth 0은 상위 피처만 허용.
-    depth 1 이상에서는 전체 피처 허용.
-    """
-    if depth == 0:
-        return feat in DEPTH0_FEATURES
-
-    return True
 
 
 def get_exclude_columns(df=None):
@@ -266,10 +247,6 @@ def mine_good_rules(
 
             for (lit, lmask) in zip(literals, literal_masks):  # zip() 이용한 동시 순회
                 feat = lit[0]
-
-                # depth 0에서는 상위 피처만 시작 조건으로 허용
-                if not is_literal_allowed_at_depth(feat, depth):
-                    continue
 
                 # 동일 feature 중복 금지
                 if feat in used_feats:
