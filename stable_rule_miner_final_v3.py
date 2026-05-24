@@ -1839,6 +1839,7 @@ python stable_rule_miner_final_v3.py \
   --csv csv/low_result_7_desc.csv \
   --out stable_rule_miner_final_v3_next \
   --date-col today \
+  --n-jobs -4 \
   --max-depth 6 \
   --beam-width 1500 \
   --top-k 150 \
