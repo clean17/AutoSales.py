@@ -54,7 +54,7 @@ OUT_PATH = Path("lowscan_target0_highprob_rules.py")
 
 TARGET_CLASS = 0
 DATE_COL = "today"
-VALID_RATIO = 0.10
+VALID_RATIO = 0.20
 
 TARGET_CLASS0_COVERAGE = 0.050
 MAX_CLASS23_FINAL = 0.050
