@@ -1835,44 +1835,44 @@ if __name__ == "__main__":
     main()
 
 """
-python stable_rule_miner_final_v3.py \
-  --csv csv/low_result_7_desc.csv \
-  --out stable_rule_miner_final_v3_next \
-  --date-col today \
-  --max-depth 6 \
-  --beam-width 1500 \
-  --top-k 150 \
-  --min-train-count 60 \
-  --min-valid-count 40 \
-  --min-train-precision 0.55 \
-  --min-valid-precision 0.62 \
-  --min-train-lift 1.25 \
-  --min-valid-lift 1.50 \
-  --max-precision-gap 0.18 \
-  --min-month-count 5 \
-  --month-pass-precision 0.55 \
-  --month-crash-precision 0.45 \
-  --min-valid-month-min-precision 0.55 \
-  --max-valid-crash-months 0 \
-  --valid-count-weight 7 \
-  --wf-top-rules 150 \
-  --wf-min-precision 0.60 \
-  --wf-crash-precision 0.45 \
-  --final-min-train-precision 0.60 \
-  --final-min-valid-precision 0.70 \
-  --final-min-valid-count 50 \
-  --final-min-wf-mean-precision 0.70 \
-  --final-min-wf-min-precision 0.55 \
-  --final-min-wf-pass-split-rate 0.70 \
-  --final-min-wf-total-count 50 \
-  --final-max-wf-crash-splits 0 \
-  --or-top-rules 15 \
-  --or-max-size 3 \
-  --or-min-valid-precision 0.70 \
-  --or-min-valid-count 70 \
-  --or-min-wf-mean-precision 0.70 \
-  --or-min-wf-min-precision 0.55 \
-  --or-min-wf-pass-split-rate 0.70 \
-  --or-max-wf-crash-splits 0 \
+python stable_rule_miner_final_v3.py ^
+  --csv csv/low_result_7_desc.csv ^
+  --out stable_rule_miner_final_v3_next ^
+  --date-col today ^
+  --max-depth 6 ^
+  --beam-width 1500 ^
+  --top-k 150 ^
+  --min-train-count 60 ^
+  --min-valid-count 40 ^
+  --min-train-precision 0.55 ^
+  --min-valid-precision 0.62 ^
+  --min-train-lift 1.25 ^
+  --min-valid-lift 1.50 ^
+  --max-precision-gap 0.18 ^
+  --min-month-count 5 ^
+  --month-pass-precision 0.55 ^
+  --month-crash-precision 0.45 ^
+  --min-valid-month-min-precision 0.55 ^
+  --max-valid-crash-months 0 ^
+  --valid-count-weight 7 ^
+  --wf-top-rules 150 ^
+  --wf-min-precision 0.60 ^
+  --wf-crash-precision 0.45 ^
+  --final-min-train-precision 0.60 ^
+  --final-min-valid-precision 0.70 ^
+  --final-min-valid-count 50 ^
+  --final-min-wf-mean-precision 0.70 ^
+  --final-min-wf-min-precision 0.55 ^
+  --final-min-wf-pass-split-rate 0.70 ^
+  --final-min-wf-total-count 50 ^
+  --final-max-wf-crash-splits 0 ^
+  --or-top-rules 15 ^
+  --or-max-size 3 ^
+  --or-min-valid-precision 0.70 ^
+  --or-min-valid-count 70 ^
+  --or-min-wf-mean-precision 0.70 ^
+  --or-min-wf-min-precision 0.55 ^
+  --or-min-wf-pass-split-rate 0.70 ^
+  --or-max-wf-crash-splits 0 ^
   --simplify
 """

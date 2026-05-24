@@ -49,14 +49,15 @@ os.makedirs(csv_dir, exist_ok=True)
 
 CSV_PATH = os.path.join(csv_dir, "low_result_7_desc.csv")
 GOOD_OUT_PATH = Path("lowscan_good_rules.py")
+FEATURE_REPORT_PATH = GOOD_OUT_PATH.with_suffix(".feature_report.csv")
 
 GOOD_EXPAND_RATIO = [0.32, 0.52, 0.65, 0.70, 0.75, 0,80, 0.80]
 MIN_CNT = 150
 MAX_DEPTH = 7
 # MIN_RATE = GOOD_EXPAND_RATIO[(MAX_DEPTH-1)]
-MIN_RATE = 0.75
+MIN_RATE = 0.70
 BEAM = 30000
-TOP_N = 10000
+TOP_N = 50000
 
 VALID_RATIO = 0.20
 
@@ -798,6 +799,8 @@ def find_good_rule(m_ratio, m_count):
         )
     )
 
+    save_feature_report(FEATURE_REPORT_PATH, selected, train, final_valid)
+
 
 
 def eval_combined_good_rules(df, selected, title=""):
@@ -871,6 +874,128 @@ def eval_combined_good_rules(df, selected, title=""):
     if "validation_low_rate_min" in sub.columns:
         print("avg_low:", round(sub["validation_low_rate_min"].mean(), 2))
         print("median_low:", round(sub["validation_low_rate_min"].median(), 2))
+
+
+def save_feature_report(path, selected, train, final_valid):
+    """
+    최종 선택된 룰셋을 feature 단위로 분해해서 CSV 저장.
+    최소 수정:
+    - 기존 룰 선택 로직은 건드리지 않음
+    - selected 룰을 순서대로 OR 적용했을 때 각 룰/피쳐가 새로 추가한 행 기준 성과를 기록
+    - train / final_valid 둘 다 저장
+    """
+    rows = []
+
+    train_used_mask = np.zeros(len(train), dtype=bool)
+    valid_used_mask = np.zeros(len(final_valid), dtype=bool)
+
+    train_target = (train["target_before_stop_7"] == 1).to_numpy()
+    valid_target = (final_valid["target_before_stop_7"] == 1).to_numpy()
+
+    for order, (name, conds) in enumerate(selected, start=1):
+        train_rule_mask = make_mask_from_conds(train, conds)
+        valid_rule_mask = make_mask_from_conds(final_valid, conds)
+
+        train_add_mask = train_rule_mask & ~train_used_mask
+        valid_add_mask = valid_rule_mask & ~valid_used_mask
+
+        train_add_selected = int(train_add_mask.sum())
+        train_add_positive = int((train_add_mask & train_target).sum())
+        valid_add_selected = int(valid_add_mask.sum())
+        valid_add_positive = int((valid_add_mask & valid_target).sum())
+
+        train_add_precision = train_add_positive / train_add_selected if train_add_selected else 0.0
+        valid_add_precision = valid_add_positive / valid_add_selected if valid_add_selected else 0.0
+
+        train_rule_selected = int(train_rule_mask.sum())
+        train_rule_positive = int((train_rule_mask & train_target).sum())
+        valid_rule_selected = int(valid_rule_mask.sum())
+        valid_rule_positive = int((valid_rule_mask & valid_target).sum())
+
+        train_rule_precision = train_rule_positive / train_rule_selected if train_rule_selected else 0.0
+        valid_rule_precision = valid_rule_positive / valid_rule_selected if valid_rule_selected else 0.0
+
+        cond_text = " AND ".join(
+            f"{feat} {op} {float(th):.8g}"
+            for feat, op, th in conds
+        )
+
+        for feat in sorted({c[0] for c in conds}):
+            rows.append({
+                "section": "detail",
+                "rule_order": order,
+                "rule_name": name,
+                "feature": feat,
+                "conds": cond_text,
+
+                "train_add_selected": train_add_selected,
+                "train_add_positive": train_add_positive,
+                "train_add_precision": train_add_precision,
+
+                "final_valid_add_selected": valid_add_selected,
+                "final_valid_add_positive": valid_add_positive,
+                "final_valid_add_precision": valid_add_precision,
+
+                "train_rule_selected": train_rule_selected,
+                "train_rule_positive": train_rule_positive,
+                "train_rule_precision": train_rule_precision,
+
+                "final_valid_rule_selected": valid_rule_selected,
+                "final_valid_rule_positive": valid_rule_positive,
+                "final_valid_rule_precision": valid_rule_precision,
+            })
+
+        train_used_mask |= train_rule_mask
+        valid_used_mask |= valid_rule_mask
+
+    detail = pd.DataFrame(rows)
+
+    if detail.empty:
+        detail.to_csv(path, index=False, encoding="utf-8-sig")
+        print("[FEATURE REPORT] empty:", path)
+        return
+
+    agg = detail.groupby("feature", as_index=False).agg(
+        rule_count=("rule_name", "nunique"),
+
+        train_add_selected=("train_add_selected", "sum"),
+        train_add_positive=("train_add_positive", "sum"),
+        final_valid_add_selected=("final_valid_add_selected", "sum"),
+        final_valid_add_positive=("final_valid_add_positive", "sum"),
+
+        train_rule_selected=("train_rule_selected", "sum"),
+        train_rule_positive=("train_rule_positive", "sum"),
+        final_valid_rule_selected=("final_valid_rule_selected", "sum"),
+        final_valid_rule_positive=("final_valid_rule_positive", "sum"),
+    )
+
+    agg["train_add_precision"] = (
+            agg["train_add_positive"] / agg["train_add_selected"].replace(0, np.nan)
+    )
+    agg["final_valid_add_precision"] = (
+            agg["final_valid_add_positive"] / agg["final_valid_add_selected"].replace(0, np.nan)
+    )
+    agg["train_rule_precision"] = (
+            agg["train_rule_positive"] / agg["train_rule_selected"].replace(0, np.nan)
+    )
+    agg["final_valid_rule_precision"] = (
+            agg["final_valid_rule_positive"] / agg["final_valid_rule_selected"].replace(0, np.nan)
+    )
+
+    agg["section"] = "aggregate"
+    agg["rule_order"] = ""
+    agg["rule_name"] = ""
+    agg["conds"] = ""
+
+    out = pd.concat([agg, detail], ignore_index=True, sort=False)
+    out = out.sort_values(
+        ["section", "final_valid_add_precision", "final_valid_add_positive", "train_add_precision"],
+        ascending=[True, False, False, False],
+    )
+
+    out.to_csv(path, index=False, encoding="utf-8-sig")
+    print("[FEATURE REPORT] saved:", path)
+
 
 
 def reduce_rules_by_new_rows(df, selected, min_new_rows=2):
