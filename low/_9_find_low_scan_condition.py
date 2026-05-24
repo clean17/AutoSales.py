@@ -50,16 +50,14 @@ os.makedirs(csv_dir, exist_ok=True)
 CSV_PATH = os.path.join(csv_dir, "low_result_7_desc.csv")
 GOOD_OUT_PATH = Path("lowscan_good_rules.py")
 
-GOOD_EXPAND_RATIO = [0.32, 0.55, 0.71, 0.81, 0.85, 0,87]
+GOOD_EXPAND_RATIO = [0.32, 0.55, 0.71, 0.81, 0.85, 0,87, 0.89]
 MIN_CNT = 120
-MAX_DEPTH = 6
+MAX_DEPTH = 7
 # MIN_RATE = GOOD_EXPAND_RATIO[(MAX_DEPTH-1)]
 MIN_RATE = 0.75
 BEAM = 10000
 TOP_N = 3000
 
-VALID_MIN_RATE = 0.63
-VALID_MIN_CNT = 20
 VALID_RATIO = 0.20
 
 # ============================================================
@@ -154,7 +152,7 @@ def mine_good_rules(
         top_n=1000,
         feature_groups=None,
         group_limits=None,
-        cnt_priority_ratio=0.85,
+        cnt_priority_ratio=0.80,
 ):
     """
     beam : 단계별 상위 수량만 다음 뎁스로 가져간다, 한 depth에서 유지할 후보 개수
@@ -187,8 +185,6 @@ def mine_good_rules(
         "\nmax_depth", max_depth,
         "\nexpand_ratio", GOOD_EXPAND_RATIO,
         "\ntop_n", top_n,
-        "\nvalid_min_rate", VALID_MIN_RATE,
-        "\nvalid_min_cnt", VALID_MIN_CNT,
         "\n"
     )
 
