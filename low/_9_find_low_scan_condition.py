@@ -50,13 +50,13 @@ os.makedirs(csv_dir, exist_ok=True)
 CSV_PATH = os.path.join(csv_dir, "low_result_7_desc.csv")
 GOOD_OUT_PATH = Path("lowscan_good_rules.py")
 
-GOOD_EXPAND_RATIO = [0.32, 0.55, 0.71, 0.81, 0.85, 0,87, 0.89]
-MIN_CNT = 120
+GOOD_EXPAND_RATIO = [0.32, 0.52, 0.65, 0.70, 0.75, 0,80, 0.80]
+MIN_CNT = 150
 MAX_DEPTH = 7
 # MIN_RATE = GOOD_EXPAND_RATIO[(MAX_DEPTH-1)]
 MIN_RATE = 0.75
-BEAM = 10000
-TOP_N = 3000
+BEAM = 30000
+TOP_N = 10000
 
 VALID_RATIO = 0.20
 
@@ -72,11 +72,22 @@ TRAIN_WF_FOLDS = 5
 TRAIN_WF_START_RATIO = 0.35
 TRAIN_WF_VALID_RATIO = 0.13
 
-TRAIN_WF_MIN_COUNT = 6
+TRAIN_WF_MIN_COUNT = 10
 TRAIN_WF_MIN_RATE = 0.60
 TRAIN_WF_MIN_MEAN_RATE = 0.60
 TRAIN_WF_MIN_RECENT_RATE = 0.55
 TRAIN_WF_MIN_PASS_FOLDS = 3
+TRAIN_WF_MIN_RECENT_COUNT = 8
+
+# ============================================================
+# Wilson lower bound 설정
+# 목적: 성공률이 같아도 표본 수가 작은 룰을 보수적으로 평가
+# 기본값 False: 기존 선택 결과는 바꾸지 않고 출력만 추가
+# True: train_wilson_low 기준 필터까지 적용
+# ============================================================
+USE_WILSON_FILTER = False
+TRAIN_WILSON_LOW_MIN = 0.45
+WILSON_Z = 1.96
 
 redule_rule = 1  # 중복 룰 제거 조건
 
@@ -140,6 +151,28 @@ def get_feature_groups():
     return feature_groups, group_limits
 
 
+def wilson_lower_bound(success, total, z=WILSON_Z):
+    """
+    Wilson score interval lower bound.
+    단순 성공률보다 표본 수가 작은 룰을 보수적으로 평가한다.
+
+    예:
+        8/10 = 80%
+        80/100 = 80%
+
+    단순 성공률은 같지만 Wilson lower bound는 80/100 쪽이 더 높다.
+    """
+    if total <= 0:
+        return 0.0
+
+    p = success / total
+    denom = 1.0 + (z * z / total)
+    center = p + (z * z / (2 * total))
+    margin = z * np.sqrt((p * (1 - p) + (z * z / (4 * total))) / total)
+
+    return max(0.0, (center - margin) / denom)
+
+
 def mine_good_rules(
         df,
         literals,
@@ -180,11 +213,11 @@ def mine_good_rules(
 
     print(
         "\nbeam", beam,
+        "\ntop_n", top_n,
         "\nmin_ratio", min_ratio,
         "\nmin_count", min_count,
         "\nmax_depth", max_depth,
         "\nexpand_ratio", GOOD_EXPAND_RATIO,
-        "\ntop_n", top_n,
         "\n"
     )
 
@@ -448,6 +481,7 @@ def eval_rule_train_walk_forward(train, conds, folds):
             "rate": rate,
         })
 
+    recent_count = rows[-1]["count"] if rows else 0
     recent_rate = rows[-1]["rate"] if rows else 0.0
     mean_rate = float(np.mean(active_rates)) if active_rates else 0.0
     min_rate = float(np.min(active_rates)) if active_rates else 0.0
@@ -456,6 +490,7 @@ def eval_rule_train_walk_forward(train, conds, folds):
     wf_pass = (
             pass_folds >= TRAIN_WF_MIN_PASS_FOLDS
             and mean_rate >= TRAIN_WF_MIN_MEAN_RATE
+            and recent_count >= TRAIN_WF_MIN_RECENT_COUNT
             and recent_rate >= TRAIN_WF_MIN_RECENT_RATE
     )
 
@@ -573,6 +608,7 @@ def find_good_rule(m_ratio, m_count):
         "train_count": 0,
         "train_ratio": 0,
         "train_wf": 0,
+        "train_wilson": 0,
         "selected": 0,
     }
 
@@ -593,6 +629,10 @@ def find_good_rule(m_ratio, m_count):
             train_up = 0
             train_ratio = 0.0
 
+        train_wilson_low = wilson_lower_bound(train_up, train_cnt)
+        if USE_WILSON_FILTER and train_wilson_low < TRAIN_WILSON_LOW_MIN:
+            fail_reason["train_wilson"] += 1
+            continue
 
         wf = eval_rule_train_walk_forward(train, conds, train_wf_folds)
 
@@ -601,6 +641,7 @@ def find_good_rule(m_ratio, m_count):
             "train_success_cnt": train_up,
             "train_success_rate": round(train_ratio * 100, 1),
             "score": round(float(score), 6),
+            "train_wilson_low": round(train_wilson_low * 100, 1),
             "conds": conds,
 
             "wf_pass": wf["wf_pass"],
@@ -632,6 +673,7 @@ def find_good_rule(m_ratio, m_count):
             "train_count": train_cnt,
             "train_success_cnt": train_up,
             "train_ratio": train_ratio,
+            "train_wilson_low": train_wilson_low,
 
             "wf_active_folds": wf["wf_active_folds"],
             "wf_pass_folds": wf["wf_pass_folds"],
@@ -659,6 +701,7 @@ def find_good_rule(m_ratio, m_count):
             tmp.head(30)[[
                 "train_count",
                 "train_success_rate",
+                "train_wilson_low",
                 "wf_pass",
                 "wf_pass_folds",
                 "wf_mean_rate",
@@ -691,6 +734,7 @@ def find_good_rule(m_ratio, m_count):
         key=lambda x: (
             x["wf_mean_rate"],
             x["wf_recent_rate"],
+            x["train_wilson_low"],
             x["train_ratio"],
             x["train_count"],
             x["score"],
@@ -735,6 +779,8 @@ def find_good_rule(m_ratio, m_count):
             f"# split_date: {pd.to_datetime(split_date).date()}\n"
             f"# train_min_rate: {m_ratio}\n"
             f"# train_min_count: {m_count}\n"
+            f"# use_wilson_filter: {USE_WILSON_FILTER}\n"
+            f"# train_wilson_low_min: {TRAIN_WILSON_LOW_MIN}\n"
             f"# train_wf_filter: {USE_TRAIN_WF_FILTER}\n"
             f"# train_wf_min_rate: {TRAIN_WF_MIN_RATE}\n"
             f"# train_wf_min_mean_rate: {TRAIN_WF_MIN_MEAN_RATE}\n"
@@ -774,6 +820,8 @@ def eval_combined_good_rules(df, selected, title=""):
     else:
         positive_count = 0
 
+    wilson_low = wilson_lower_bound(positive_count, selected_count)
+
     # 선택은 했는데 정답이 아님
     false_positive_count = selected_count - positive_count
     # 룰이 선택 못한 양성
@@ -797,6 +845,7 @@ def eval_combined_good_rules(df, selected, title=""):
     print("selected_coverage:", round(selected_coverage * 100, 2), "%")
     print("positive_count:", f"{positive_count} / {positive_total}")
     print("precision:", round(precision * 100, 2), "%")
+    print("wilson_low:", round(wilson_low * 100, 2), "%")
     print("base_positive_rate:", round(base_positive_rate * 100, 2), "%")
     print("lift:", round(lift, 3), "x")
     print("positive_coverage:", round(positive_coverage * 100, 2), "%")
