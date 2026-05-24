@@ -51,13 +51,13 @@ CSV_PATH = os.path.join(csv_dir, "low_result_7_desc.csv")
 GOOD_OUT_PATH = Path("lowscan_good_rules.py")
 FEATURE_REPORT_PATH = GOOD_OUT_PATH.with_suffix(".feature_report.csv")
 
-GOOD_EXPAND_RATIO = [0.32, 0.52, 0.65, 0.70, 0.75, 0,80, 0.80]
+GOOD_EXPAND_RATIO = [0.32, 0.52, 0.65, 0.70, 0.75]
 MIN_CNT = 150
-MAX_DEPTH = 7
+MAX_DEPTH = 5
 # MIN_RATE = GOOD_EXPAND_RATIO[(MAX_DEPTH-1)]
 MIN_RATE = 0.70
-BEAM = 30000
-TOP_N = 50000
+BEAM = 10000
+TOP_N = 10000
 
 VALID_RATIO = 0.20
 
@@ -73,11 +73,12 @@ TRAIN_WF_FOLDS = 5
 TRAIN_WF_START_RATIO = 0.35
 TRAIN_WF_VALID_RATIO = 0.13
 
-TRAIN_WF_MIN_COUNT = 10
-TRAIN_WF_MIN_RATE = 0.60
-TRAIN_WF_MIN_MEAN_RATE = 0.60
-TRAIN_WF_MIN_RECENT_RATE = 0.55
-TRAIN_WF_MIN_PASS_FOLDS = 3
+TRAIN_WF_MIN_COUNT = 3
+TRAIN_WF_MIN_RATE = 0.50
+TRAIN_WF_MIN_MEAN_RATE = 0.55
+TRAIN_WF_MIN_RECENT_RATE = 0.00
+TRAIN_WF_MIN_PASS_FOLDS = 2
+
 TRAIN_WF_MIN_RECENT_COUNT = 8
 
 # ============================================================
@@ -186,7 +187,7 @@ def mine_good_rules(
         top_n=1000,
         feature_groups=None,
         group_limits=None,
-        cnt_priority_ratio=0.80,
+        cnt_priority_ratio=0.75,
 ):
     """
     beam : 단계별 상위 수량만 다음 뎁스로 가져간다, 한 depth에서 유지할 후보 개수
@@ -436,6 +437,16 @@ def eval_rule_train_walk_forward(train, conds, folds):
     하나의 룰을 train 내부 walk-forward fold별로 평가한다.
     target은 target_before_stop_7 == 1 기준으로 고정한다.
     """
+    print(
+        "\nTRAIN_WF_MIN_COUNT", TRAIN_WF_MIN_COUNT,
+        "\nTRAIN_WF_MIN_RATE", TRAIN_WF_MIN_RATE,
+        "\nTRAIN_WF_MIN_MEAN_RATE", TRAIN_WF_MIN_MEAN_RATE,
+        "\nTRAIN_WF_MIN_RECENT_RATE", TRAIN_WF_MIN_RECENT_RATE,
+        "\nTRAIN_WF_MIN_PASS_FOLDS", TRAIN_WF_MIN_PASS_FOLDS,
+        "\nTRAIN_WF_MIN_RECENT_COUNT", TRAIN_WF_MIN_RECENT_COUNT,
+        "\n"
+    )
+
     if not folds:
         return {
             "wf_pass": True,
@@ -491,8 +502,8 @@ def eval_rule_train_walk_forward(train, conds, folds):
     wf_pass = (
             pass_folds >= TRAIN_WF_MIN_PASS_FOLDS
             and mean_rate >= TRAIN_WF_MIN_MEAN_RATE
-            and recent_count >= TRAIN_WF_MIN_RECENT_COUNT
-            and recent_rate >= TRAIN_WF_MIN_RECENT_RATE
+            # and recent_count >= TRAIN_WF_MIN_RECENT_COUNT
+            # and recent_rate >= TRAIN_WF_MIN_RECENT_RATE
     )
 
     return {
