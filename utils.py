@@ -2168,7 +2168,7 @@ def build_literals(df, features):
     literals = []
     literal_masks = []
 
-    print('[FEATURES]', features)
+    print(f'[{len(features)} FEATURES]\n', features)
     for f in features:
         col = df[f].astype(float).to_numpy()  # flaat 형변환 >  Series > Numpy 배열
         col_nonan = col[~np.isnan(col)]       # ~np.isnan() 으로 True 값만 남는다 > NaN 제거
@@ -2267,3 +2267,67 @@ def write_rule_file(out_path, selected, header_comment):
         f.write("    return conditions\n")
 
     print(f"saved to: {out_path.resolve()}")
+
+
+def get_exclude_columns(df=None):
+    """
+    제외할 피쳐 Set
+
+    df를 넘기면 패턴 기반으로 실제 존재하는 컬럼까지 자동 제외.
+    df를 안 넘겨도 기본 제외 컬럼 set 반환.
+    """
+    exclude = {
+        # 식별자 / 메타
+        "ticker",
+        "stock_name",
+        "predict_str",
+        "today",
+        "idx",
+        "sector_code",
+        "stock_market",
+
+        # stop / target / label
+        "stop_loss",
+        "stop_day",
+        "target_pct",
+        "target_class",
+
+        # 과거 실험용 / raw 후보
+        "_close_pos_20d",
+        "_tr_value_ratio",
+        "_tr_value_ratio_5d",
+        "_dist_to_high_20d",
+        "_BB_perc",
+        "_UltimateOsc",
+        "_CCI14",
+        "_ADX14",
+        "_gap_pct",
+        "_vol_ratio_15_60",
+        "_RSI_rebound",
+        "_rebound_power",
+        "_MACD_hist_1d",
+        "_MACD_acc",
+        "_MACD_hist_3d_close_norm",
+    }
+
+    if df is not None:
+        for c in df.columns:
+            if (
+                    c.startswith("validation_")
+                    or c.startswith("day_to_")
+                    or c.startswith("target_before_stop_")
+                    or c.startswith("stop_before_target_")
+                    or c.startswith("target_stop_same_day_")
+                    or c.startswith("no_target_no_stop_")
+                    or c.startswith("fast_success_")
+                    or c.startswith("slow_success_")
+                    or c.startswith("fail_success_")
+            ):
+                exclude.add(c)
+
+    return exclude
+
+
+def get_features(df):
+    exclude = get_exclude_columns(df)
+    return [c for c in df.columns if c not in exclude]

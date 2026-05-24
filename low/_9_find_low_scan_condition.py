@@ -23,32 +23,48 @@ final_avoid_mask = avoid_class0_mask | avoid_stop_mask
 final_buy_mask = buy_mask & ~final_avoid_mask
 """
 
+import os, sys
 import pandas as pd
 import numpy as np
 from pathlib import Path
 import heapq
 from itertools import count
 
-from utils import build_literals, split_train_valid_by_date_ratio, write_rule_file, make_mask_from_conds
+# 자동 탐색 (utils.py를 찾을 때까지 위로 올라가 탐색)
+here = Path(__file__).resolve()
+for parent in [here.parent, *here.parents]:
+    if (parent / "utils.py").exists():
+        sys.path.insert(0, str(parent))
+        break
+else:
+    raise FileNotFoundError("utils.py를 상위 디렉터리에서 찾지 못했습니다.")
 
-CSV_PATH = "../csv/low_result_7_desc.csv"
+from utils import build_literals, split_train_valid_by_date_ratio, write_rule_file, make_mask_from_conds, get_features
+
+script_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(root/low)
+project_root = os.path.dirname(script_dir)               # root
+
+csv_dir = os.path.join(project_root, "csv")
+os.makedirs(csv_dir, exist_ok=True)
+
+CSV_PATH = os.path.join(csv_dir, "low_result_7_desc.csv")
+GOOD_OUT_PATH = Path("lowscan_good_rules.py")
 
 # ============================================================
 # CLASS23 RULE SETTINGS
 # 목적: target_class == 2 or 3 탐색
 # ============================================================
-GOOD_OUT_PATH = Path("lowscan_rules.py")
-GOOD_EXPAND_RATIO = [0.32, 0.55, 0.73, 0.82, 0.85]
+GOOD_EXPAND_RATIO = [0.32, 0.55, 0.73, 0.82, 0.85, 0,87]
 MIN_CNT = 120
-MAX_DEPTH = 4
+MAX_DEPTH = 6
 # MIN_RATE = GOOD_EXPAND_RATIO[(MAX_DEPTH-1)]
 MIN_RATE = 0.75
-BEAM = 30000
+BEAM = 10000
 TOP_N = 3000
 
 VALID_MIN_RATE = 0.63
-VALID_MIN_CNT = 6
-VALID_RATIO = 0.15
+VALID_MIN_CNT = 20
+VALID_RATIO = 0.20
 
 redule_rule = 1  # 중복 룰 제거 조건
 
@@ -57,102 +73,60 @@ redule_rule = 1  # 중복 룰 제거 조건
 
 
 
-def get_exclude_columns(df=None):
-    """
-    제외할 피쳐 Set
 
-    df를 넘기면 패턴 기반으로 실제 존재하는 컬럼까지 자동 제외.
-    df를 안 넘겨도 기본 제외 컬럼 set 반환.
-    """
-    exclude = {
-        # 식별자 / 메타
-        "ticker",
-        "stock_name",
-        "predict_str",
-        "today",
-        "idx",
-
-        # stop / target / label
-        "stop_loss",
-        "stop_day",
-        "target_pct",
-        "target_class",
-
-        # 과거 실험용 / raw 후보
-        "_close_pos_20d",
-        "_tr_value_ratio",
-        "_tr_value_ratio_5d",
-        "_dist_to_high_20d",
-        "_BB_perc",
-        "_UltimateOsc",
-        "_CCI14",
-        "_ADX14",
-        "_gap_pct",
-        "_vol_ratio_15_60",
-        "_RSI_rebound",
-        "_rebound_power",
-        "_MACD_hist_1d",
-        "_MACD_acc",
-        "_MACD_hist_3d_close_norm",
-    }
-
-    if df is not None:
-        for c in df.columns:
-            if (
-                    c.startswith("validation_")
-                    or c.startswith("day_to_")
-                    or c.startswith("target_before_stop_")
-                    or c.startswith("stop_before_target_")
-                    or c.startswith("target_stop_same_day_")
-                    or c.startswith("no_target_no_stop_")
-                    or c.startswith("fast_success_")
-                    or c.startswith("slow_success_")
-                    or c.startswith("fail_success_")
-            ):
-                exclude.add(c)
-
-    return exclude
-
-
-def get_features(df):
-    exclude = get_exclude_columns(df)
-    return [c for c in df.columns if c not in exclude]
 
 
 def get_feature_groups():
     feature_groups = {
+        "vol5": "VOLATILITY",
+        "vol_ratio_5_15": "VOLATILITY",
+
         "today_pct": "PRICE",
-
         "max_drop_7d": "DROP",
-
-        "dist_to_ma5": "MA5_POSITION",
-        "dist_to_ma20": "MA20_POSITION",
-
-        "pct_vs_lastweek": "WEEK_POSITION",
-
-        "ma5_ma20_gap_chg_1d": "TREND",
-
         "gap_pct": "GAP",
 
-        "today_tr_val_eok": "VOLUME",
-        "tr_val_rank_20d": "VOLUME",
-        "tr_value_ratio_5d": "VOLUME",
+        "pct_vs_lastweek": "WEEK_POSITION",
+        "dist_to_ma5": "POSITION",
+        "ma5_chg_rate": "TREND",
 
-        "vol5": "VOLATILITY",
-        "ATR_pct": "VOLATILITY",
-        "vol_ratio_5_15": "VOLATILITY",
+        "today_tr_val_eok": "VOLUME",
+
+        "BB_perc": "BAND",
+
+        "lower_wick_ratio": "CANDLE",
+        "upper_wick_ratio": "CANDLE",
+        "body_ratio": "CANDLE",
+        "intraday_return": "INTRADAY",
+
+        "rebound_from_7d_low": "REBOUND",
+        "rebound_vs_prior_drop": "REBOUND",
+
+        "price_power_value": "POWER",
+        "body_value_power": "POWER",
+
+        "room_to_20d_high": "HIGH_ROOM",
+        "room_to_60d_high": "HIGH_ROOM",
+
+        "market_today_pct": "MARKET",
+        "market_5d_pct": "MARKET",
     }
 
     group_limits = {
+        "VOLATILITY": 2,
         "PRICE": 1,
         "DROP": 1,
-        "MA5_POSITION": 1,
-        "MA20_POSITION": 1,
-        "WEEK_POSITION": 1,
-        "TREND": 1,
         "GAP": 1,
-        "VOLATILITY": 2,
+        "WEEK_POSITION": 1,
+        "POSITION": 1,
+        "TREND": 1,
         "VOLUME": 1,
+        "BAND": 1,
+        "CANDLE": 2,
+        "INTRADAY": 1,
+        "REBOUND": 2,
+        "POWER": 1,
+        "HIGH_ROOM": 1,
+        "MARKET": 1,
     }
 
     return feature_groups, group_limits
@@ -163,8 +137,8 @@ def mine_good_rules(
         literals,
         literal_masks,
         target,
-        min_ratio=0.83,
-        min_count=25,
+        min_ratio=0.75,
+        min_count=50,
         max_depth=4,
         beam=30000,
         top_n=1000,
