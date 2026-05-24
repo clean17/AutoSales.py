@@ -2286,6 +2286,10 @@ def get_exclude_columns(df=None):
         "sector_code",
         "stock_market",
 
+        # 시장 피쳐는 regime 과적합 가능성이 커서 기본 제외
+        "market_today_pct",
+        "market_5d_pct",
+
         # stop / target / label
         "stop_loss",
         "stop_day",
@@ -2328,6 +2332,26 @@ def get_exclude_columns(df=None):
     return exclude
 
 
-def get_features(df):
+# def get_features(df):
+#     exclude = get_exclude_columns(df)
+#     return [c for c in df.columns if c not in exclude]
+
+def get_features(df: pd.DataFrame):
     exclude = get_exclude_columns(df)
-    return [c for c in df.columns if c not in exclude]
+    features: list[str] = []
+
+    for c in df.columns:
+        if c in exclude:
+            continue
+        # 숫자형만 통과
+        if not pd.api.types.is_numeric_dtype(df[c]):
+            continue
+        # 전부 NaN인 컬럼 제외
+        if df[c].notna().sum() == 0:
+            continue
+        # 서로 다른 값의 개수 (유니크 값 개수) 너무 적으면 제외
+        if df[c].nunique(dropna=True) < 8:
+            continue
+        features.append(c)
+
+    return features
