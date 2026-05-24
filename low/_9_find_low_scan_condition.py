@@ -541,7 +541,7 @@ def find_good_rule(m_ratio, m_count):
     df["today"] = pd.to_datetime(df["today"], errors="coerce")  # 문자열 > 시간, 에러나면 NaT 변환
     df = df.dropna(subset=["today"])  # NaT 제거
 
-    train, valid, split_date = split_train_valid_by_date_ratio(df, valid_ratio=VALID_RATIO)
+    train, final_valid, split_date = split_train_valid_by_date_ratio(df, valid_ratio=VALID_RATIO)
 
     # train 내부 walk-forward 검증 fold 생성
     train_wf_folds = make_train_walk_forward_folds(train)
@@ -579,27 +579,19 @@ def find_good_rule(m_ratio, m_count):
     fail_reason = {
         "train_count": 0,
         "train_ratio": 0,
-        "valid_count": 0,
-        "valid_ratio": 0,
         "train_wf": 0,
         "selected": 0,
     }
 
-    valid_counts = []
     debug_candidates = []
     passed = []
 
     for i, (cnt, ratio, up, conds, score) in enumerate(rules, start=1):
         train_mask = make_mask_from_conds(train, conds)
-        valid_mask = make_mask_from_conds(valid, conds)
 
         train_sub = train[train_mask]
-        valid_sub = valid[valid_mask]
 
         train_cnt = len(train_sub)
-        valid_cnt = len(valid_sub)
-
-        valid_counts.append(valid_cnt)
 
         if train_cnt > 0:
             train_up = int((train_sub["target_before_stop_7"] == 1).sum())
@@ -608,12 +600,6 @@ def find_good_rule(m_ratio, m_count):
             train_up = 0
             train_ratio = 0.0
 
-        if valid_cnt > 0:
-            valid_up = int((valid_sub["target_before_stop_7"] == 1).sum())
-            valid_ratio = valid_up / valid_cnt
-        else:
-            valid_up = 0
-            valid_ratio = 0.0
 
         wf = eval_rule_train_walk_forward(train, conds, train_wf_folds)
 
@@ -621,9 +607,6 @@ def find_good_rule(m_ratio, m_count):
             "train_count": train_cnt,
             "train_success_cnt": train_up,
             "train_success_rate": round(train_ratio * 100, 1),
-            "valid_count": valid_cnt,
-            "valid_success_cnt": valid_up,
-            "valid_success_rate": round(valid_ratio * 100, 1),
             "score": round(float(score), 6),
             "conds": conds,
 
@@ -649,14 +632,6 @@ def find_good_rule(m_ratio, m_count):
             fail_reason["train_wf"] += 1
             continue
 
-        if valid_cnt < VALID_MIN_CNT:
-            fail_reason["valid_count"] += 1
-            continue
-
-        if valid_ratio < VALID_MIN_RATE:
-            fail_reason["valid_ratio"] += 1
-            continue
-
         fail_reason["selected"] += 1
 
         passed.append({
@@ -664,9 +639,6 @@ def find_good_rule(m_ratio, m_count):
             "train_count": train_cnt,
             "train_success_cnt": train_up,
             "train_ratio": train_ratio,
-            "valid_count": valid_cnt,
-            "valid_success_cnt": valid_up,
-            "valid_ratio": valid_ratio,
 
             "wf_active_folds": wf["wf_active_folds"],
             "wf_pass_folds": wf["wf_pass_folds"],
@@ -680,90 +652,55 @@ def find_good_rule(m_ratio, m_count):
     # ============================================================
     # DEBUG 출력
     # ============================================================
-    print("valid_count max:", max(valid_counts) if valid_counts else 0)
-    print("valid_count p95:", np.percentile(valid_counts, 95) if valid_counts else 0)
-    print("valid_count p90:", np.percentile(valid_counts, 90) if valid_counts else 0)
-    print("valid_count p50:", np.percentile(valid_counts, 50) if valid_counts else 0)
-    print("valid_count >= 10:", sum(c >= 10 for c in valid_counts))
-    print("valid_count >= 15:", sum(c >= 15 for c in valid_counts))
-
     debug_df = pd.DataFrame(debug_candidates)
 
     if len(debug_df):
-        print("\n[DEBUG] top valid_count candidates")
+        print("\n[DEBUG] top train/wf candidates")
+
         tmp = debug_df.sort_values(
-            ["valid_count", "valid_success_rate", "train_success_rate"],
-            ascending=[False, False, False],
+            ["wf_pass", "wf_mean_rate", "wf_recent_rate", "train_success_rate", "train_count"],
+            ascending=[False, False, False, False, False],
         )
+
         print(
             tmp.head(30)[[
                 "train_count",
                 "train_success_rate",
-
                 "wf_pass",
                 "wf_pass_folds",
                 "wf_mean_rate",
+                "wf_min_rate",
                 "wf_recent_rate",
-
-                "valid_count",
-                "valid_success_rate",
-
+                "wf_total_count",
+                "wf_total_success",
                 "conds",
             ]].to_string(index=False)
         )
 
-        print("\n[DEBUG] valid_count >= VALID_MIN_CNT candidates")
-        tmp2 = debug_df[debug_df["valid_count"] >= VALID_MIN_CNT].copy()
-
-        if len(tmp2):
-            tmp2 = tmp2.sort_values(
-                ["valid_success_rate", "valid_count", "train_success_rate"],
-                ascending=[False, False, False],
-            )
-
-            print(
-                tmp2.head(30)[[
-                    "train_count",
-                    "train_success_rate",
-                    "wf_pass",
-                    "wf_pass_folds",
-                    "wf_mean_rate",
-                    "wf_recent_rate",
-                    "valid_count",
-                    "valid_success_rate",
-                    "conds",
-                ]].to_string(index=False)
-            )
-
-            print("\n[DEBUG] valid_count >= VALID_MIN_CNT summary")
-            print("candidate_count:", len(tmp2))
-            print("valid_success_rate max:", tmp2["valid_success_rate"].max())
-            print("valid_success_rate p90:", np.percentile(tmp2["valid_success_rate"], 90))
-            print("valid_success_rate p50:", np.percentile(tmp2["valid_success_rate"], 50))
-            print("valid_success_rate >= 50:", int((tmp2["valid_success_rate"] >= 50).sum()))
-            print("valid_success_rate >= 55:", int((tmp2["valid_success_rate"] >= 55).sum()))
-            print("valid_success_rate >= 60:", int((tmp2["valid_success_rate"] >= 60).sum()))
-            print("valid_success_rate >= 65:", int((tmp2["valid_success_rate"] >= 65).sum()))
-            print("valid_success_rate >= 70:", int((tmp2["valid_success_rate"] >= 70).sum()))
-            print("valid_success_rate >= 75:", int((tmp2["valid_success_rate"] >= 75).sum()))
-        else:
-            print("없음")
+        print("\n[DEBUG] train/wf candidate summary")
+        print("candidate_count:", len(debug_df))
+        print("wf_pass count:", int(debug_df["wf_pass"].sum()))
+        print("wf_mean_rate max:", debug_df["wf_mean_rate"].max())
+        print("wf_mean_rate p90:", np.percentile(debug_df["wf_mean_rate"], 90))
+        print("wf_mean_rate p50:", np.percentile(debug_df["wf_mean_rate"], 50))
+        print("wf_recent_rate max:", debug_df["wf_recent_rate"].max())
+        print("wf_recent_rate p90:", np.percentile(debug_df["wf_recent_rate"], 90))
+        print("wf_recent_rate p50:", np.percentile(debug_df["wf_recent_rate"], 50))
 
     print("[GOOD] fail reason:", fail_reason)
-    print(f"\n[GOOD] valid 통과 룰 개수: {len(passed)} / {len(rules)}")
+    print(f"\n[GOOD] train/wf 통과 룰 개수: {len(passed)} / {len(rules)}")
 
     # ============================================================
-    # valid 성능순으로 통과 룰 정렬
+    # WF/train 성능순으로 통과 룰 정렬
     # ============================================================
     passed = sorted(
         passed,
         key=lambda x: (
-            x["valid_ratio"],
-            x["valid_count"],
             x["wf_mean_rate"],
             x["wf_recent_rate"],
             x["train_ratio"],
             x["train_count"],
+            x["score"],
         ),
         reverse=True,
     )
@@ -779,7 +716,7 @@ def find_good_rule(m_ratio, m_count):
     # ============================================================
     if redule_rule == 1:
         print(f"[GOOD] before reduce: {len(selected)}")
-        selected = reduce_rules_by_new_rows(valid, selected, min_new_rows=3)
+        selected = reduce_rules_by_new_rows(train, selected, min_new_rows=3)
         print(f"[GOOD] after reduce: {len(selected)}")
 
     # reduce 이후 이름 재정렬
@@ -794,7 +731,7 @@ def find_good_rule(m_ratio, m_count):
     # ============================================================
     eval_combined_good_rules(train, selected, title="TRAIN")
     eval_selected_train_walk_forward(train, selected, train_wf_folds, title="TRAIN_WF")
-    eval_combined_good_rules(valid, selected, title="VALID")
+    eval_combined_good_rules(final_valid, selected, title="FINAL_VALID")
 
     write_rule_file(
         GOOD_OUT_PATH,
@@ -810,8 +747,6 @@ def find_good_rule(m_ratio, m_count):
             f"# train_wf_min_mean_rate: {TRAIN_WF_MIN_MEAN_RATE}\n"
             f"# train_wf_min_recent_rate: {TRAIN_WF_MIN_RECENT_RATE}\n"
             f"# train_wf_min_pass_folds: {TRAIN_WF_MIN_PASS_FOLDS}\n"
-            f"# valid_min_rate: {VALID_MIN_RATE}\n"
-            f"# valid_min_count: {VALID_MIN_CNT}\n"
             "# usage:\n"
             "#    import lowscan_rules\n"
             "#    buy_conditions = lowscan_rules.build_conditions(df)\n"
