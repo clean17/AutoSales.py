@@ -91,7 +91,7 @@ USE_WILSON_FILTER = False
 TRAIN_WILSON_LOW_MIN = 0.45
 WILSON_Z = 1.96
 
-redule_rule = 1  # 중복 룰 제거 조건
+redule_rule = 0  # 중복 룰 제거 조건
 
 
 
@@ -1010,13 +1010,16 @@ def save_feature_report(path, selected, train, final_valid):
 
 
 def reduce_rules_by_new_rows(df, selected, min_new_rows=2):
+    """
+    룰의 순서가 결과에 영향을 준다
+    """
     final = []
     used_mask = np.zeros(len(df), dtype=bool)
 
     for name, conds in selected:
         rule_mask = make_mask_from_conds(df, conds)
-        new_rows = rule_mask & ~used_mask
-        new_cnt = int(new_rows.sum())
+        new_rows = rule_mask & ~used_mask  # 이미 이전 룰들이 커버한 행 제외
+        new_cnt = int(new_rows.sum())      # 각 룰이 새롭게 추가로 커버하는 행 수
         total_cnt = int(rule_mask.sum())
 
         if new_cnt >= min_new_rows:
@@ -1030,7 +1033,9 @@ def reduce_rules_by_new_rows(df, selected, min_new_rows=2):
                 f"[REDUCE DROP] {name} total_cnt={total_cnt} new_cnt={new_cnt} conds={conds}"
             )
 
+    # 살아남은 룰 수
     print("[REDUCE] final_rule_count:", len(final))
+    # 룰이 커버한 전체 행 수(중복 제외)
     print("[REDUCE] final_row_count:", int(used_mask.sum()))
 
     return final
