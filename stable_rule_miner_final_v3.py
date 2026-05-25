@@ -1441,7 +1441,7 @@ def main():
     parser.add_argument("--out", default="stable_rule_miner_final_v3_out")
     parser.add_argument("--target", default=TARGET_COL)
     parser.add_argument("--date-col", default=None)
-    parser.add_argument("--valid-ratio", type=float, default=0.30)
+    parser.add_argument("--valid-ratio", type=float, default=0.20)
 
     parser.add_argument("--max-depth", type=int, default=6)
     parser.add_argument("--beam-width", type=int, default=1500)
