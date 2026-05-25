@@ -8,76 +8,69 @@ import numpy as np
 import pandas as pd
 
 """
-"valid 평균 60%를 만드는 피쳐를 알고 싶다"
+"피쳐가 유용한지 알고 싶다 - custom feature pool"
 
-valid precision 평균 60% 이상 룰 포트폴리오를 만들고 그 룰 묶음에서 유용한 피쳐를 판별
+“이 피쳐가 유용한가?”
+“단독으로 약해도 룰 조합에서 필터 역할을 하는가?”
+
+좋은 룰을 많이 뽑고, 그 룰들에서 피쳐 유용성을 평가하는 방식
 
 >>>
+전체 룰 후보 기준으로 피쳐 유용성 평가
+조건부 기여도 추가
+비단조 피쳐 예외 처리
+수동 threshold + ALLOWED_OPS 적용
+
 좋은 점:
-실제 valid 60% 목표에 직접 맞음
-고정밀 룰에 필요한 피쳐를 좁히기 좋음
-중복 룰을 줄이는 옵션이 있음
+현재 네 목적 “유용한 피쳐를 알고 싶다”에 가장 잘 맞음
+BB_perc, dist_to_ma5, gap_pct 같은 필터 피쳐를 더 공정하게 봄
 
 나쁜 점:
-선택된 avg60 룰에 안 들어간 피쳐는 낮게 평가될 수 있음
-전체적으로 유용한 피쳐라도 avg60 룰 밖이면 밀림
-데이터 split이나 룰 선택 조건에 민감함
+S 등급이 넓게 나올 수 있음
+valid 평균 60%를 보장하지 않음
 """
-
 TARGET_COL = "target_before_stop_7"
 
 
 # ============================================================
 # Feature pool
-# 목적:
-# - valid precision 평균 60% 이상 룰 묶음을 만들고
-# - 그 룰 묶음에서 유용한 피쳐를 판별
+# 현재 rule_features + stable_rule_miner에서 쓰는 후보를 같이 커버
+# 실제 CSV에 없는 컬럼은 자동 skip
 # ============================================================
+
 DEFAULT_FEATURES = [
-    # 핵심 신호 후보
-    "rebound_from_7d_low",
     "vol5",
-    "today_pct",
     "vol_ratio_5_15",
-    "market_today_pct",
+    "today_pct",
     "max_drop_7d",
-    "recent_runup",
-
-    # 파생 힘/수급 후보
-    # "intraday_body_power",  # intraday_return과 상관이 높아 기본 제외
-    "body_value_power",
-    "intraday_return",
-    "price_power_value",
-    "today_tr_val_eok",
-    "lower_wick_ratio",
-
-    # 조건부 필터 후보
-    "BB_perc",
     "gap_pct",
+
     "pct_vs_lastweek",
     "dist_to_ma5",
+    "ma5_chg_rate",
+    "today_tr_val_eok",
+    "BB_perc",
+
+    "lower_wick_ratio",
+    "upper_wick_ratio",
     "body_ratio",
+    "intraday_return",
+    "rebound_from_7d_low",
+
+    "price_power_value",
+    "body_value_power",
+    "room_to_20d_high",
+    "room_to_60d_high",
     "rebound_vs_prior_drop",
 
-    # 장세 후보
+    "market_today_pct",
     "market_5d_pct",
-    "market_breadth_up_ratio",
-
-    # 별도 검증 후보
-    "room_to_60d_high",
-    "room_to_20d_high",
-
-    # 마지막 확인 후보
-    "upper_wick_ratio",
 ]
 
 
-# recent_runup과 ma5_chg_rate 중 recent_runup만 사용
-EXCLUDE_FEATURES = [
-    "ma5_chg_rate",
-]
-
-
+# 단조 방향으로 보기 어려운 피쳐.
+# AUC 방향성과 룰 방향이 충돌해도 바로 감점하지 않고,
+# conditional contribution을 더 중요하게 본다.
 NON_MONOTONIC_FEATURES = [
     "room_to_20d_high",
     "room_to_60d_high",
@@ -87,51 +80,56 @@ NON_MONOTONIC_FEATURES = [
     "pct_vs_lastweek",
     "body_ratio",
     "rebound_vs_prior_drop",
+    "ma5_chg_rate",
 ]
 
 
+# 시장/장세 필터
 REGIME_FEATURES = [
     "market_today_pct",
     "market_5d_pct",
-    "market_breadth_up_ratio",
 ]
 
 
+# 반복적으로 약했던 피쳐.
+# 강제 제거는 아니고, 최종 등급에서 참고만 한다.
 WEAK_HINT_FEATURES = [
-    "upper_wick_ratio",
 ]
 
 
+# stable_rule_miner의 방향 제약을 반영.
+# 여기에 없으면 기본적으로 <=, >= 모두 허용.
 ALLOWED_OPS = {
-    "rebound_from_7d_low": [">="],
     "vol5": [">="],
-    "today_pct": [">="],
     "vol_ratio_5_15": [">="],
-    "market_today_pct": [">="],
+    "today_pct": [">="],
     "max_drop_7d": ["<="],
-    "recent_runup": ["<="],
 
-    # "intraday_body_power": [">="],
-    "body_value_power": [">="],
-    "intraday_return": [">="],
-    "price_power_value": [">="],
+    "gap_pct": ["<=", ">="],
+    "pct_vs_lastweek": ["<=", ">="],
+    "dist_to_ma5": ["<=", ">="],
+
     "today_tr_val_eok": [">=", "<="],
+
+    "BB_perc": ["<=", ">="],
     "lower_wick_ratio": ["<="],
-
-    "BB_perc": [">=", "<="],
-    "gap_pct": [">=", "<="],
-    "pct_vs_lastweek": [">=", "<="],
-    "dist_to_ma5": [">=", "<="],
-    "body_ratio": [">=", "<="],
-    "rebound_vs_prior_drop": [">=", "<="],
-
-    "market_5d_pct": [">=", "<="],
-    "market_breadth_up_ratio": [">="],
-
-    "room_to_60d_high": [">=", "<="],
-    "room_to_20d_high": [">=", "<="],
-
     "upper_wick_ratio": ["<="],
+    "body_ratio": [">=", "<="],
+    "recent_runup": ["<="],
+    "intraday_return": [">="],
+
+    "rebound_from_7d_low": [">="],
+    "price_power_value": [">="],
+    "room_to_20d_high": [">=", "<="],
+    "room_to_60d_high": [">=", "<="],
+
+    "market_today_pct": [">="],
+    "market_5d_pct": [">=", "<="],
+
+    "body_value_power": [">="],
+    "intraday_body_power": [">="],
+    "rebound_vs_prior_drop": [">=", "<="],
+    "ma5_chg_rate": [">=", "<="],
 }
 
 
@@ -161,7 +159,7 @@ class Rule:
 
 
 def find_date_col(df: pd.DataFrame) -> Optional[str]:
-    candidates = [
+    for c in [
         "today",
         "date",
         "Date",
@@ -173,12 +171,9 @@ def find_date_col(df: pd.DataFrame) -> Optional[str]:
         "기준일",
         "ymd",
         "YMD",
-    ]
-
-    for c in candidates:
+    ]:
         if c in df.columns:
             return c
-
     return None
 
 
@@ -414,7 +409,6 @@ def has_correlated_pair(features_in_rule: Set[str], new_feature: str, corr_pairs
     for f in features_in_rule:
         if frozenset([f, new_feature]) in corr_pairs:
             return True
-
     return False
 
 
@@ -441,98 +435,108 @@ def apply_rule(df, atoms):
 
 def default_extra_thresholds() -> Dict[str, List[Tuple[str, float]]]:
     return {
-        "rebound_from_7d_low": [
-            (">=", 20), (">=", 21.2556), (">=", 25), (">=", 30),
-            (">=", 32.9122), (">=", 35), (">=", 40), (">=", 45), (">=", 50),
-        ],
         "vol5": [
-            (">=", 4), (">=", 5), (">=", 6), (">=", 6.507),
-            (">=", 8), (">=", 8.467), (">=", 10), (">=", 10.5491),
+            (">=", 4.0), (">=", 5.0), (">=", 6.0), (">=", 6.507),
+            (">=", 8.0), (">=", 8.467), (">=", 10.0), (">=", 10.5491),
             (">=", 13.4364),
-        ],
-        "today_pct": [
-            (">=", 5), (">=", 8), (">=", 10), (">=", 11.253),
-            (">=", 13), (">=", 15), (">=", 15.86), (">=", 18),
-            (">=", 20), (">=", 22.2708),
         ],
         "vol_ratio_5_15": [
             (">=", 1.1), (">=", 1.2), (">=", 1.3), (">=", 1.5),
             (">=", 1.53), (">=", 1.64), (">=", 1.8), (">=", 2.0),
         ],
-        "market_today_pct": [
-            (">=", -2), (">=", -1), (">=", 0), (">=", 0.5),
-            (">=", 1), (">=", 2), (">=", 3),
+        "today_pct": [
+            (">=", 5.0), (">=", 8.0), (">=", 10.0), (">=", 11.253),
+            (">=", 13.0), (">=", 15.0), (">=", 15.86),
+            (">=", 18.0), (">=", 20.0), (">=", 22.2708),
         ],
         "max_drop_7d": [
-            ("<=", -3.54), ("<=", -3.7931), ("<=", -5),
-            ("<=", -7), ("<=", -10), ("<=", -12),
+            ("<=", -3.54), ("<=", -3.7931), ("<=", -5.0),
+            ("<=", -7.0), ("<=", -10.0), ("<=", -12.0),
+        ],
+        "gap_pct": [
+            ("<=", -2.0), ("<=", -1.0), ("<=", -0.5), ("<=", 0.0),
+            ("<=", 0.5), (">=", 2.0), (">=", 3.5), (">=", 4.7),
+        ],
+        "pct_vs_lastweek": [
+            ("<=", -5.0), ("<=", -3.0), ("<=", -1.0),
+            ("<=", 0.0), ("<=", 0.21),
+        ],
+        "dist_to_ma5": [
+            ("<=", -2.0), ("<=", -1.0), ("<=", -0.5), ("<=", -0.3),
+            ("<=", -0.0182), (">=", 8.0), (">=", 10.0),
+            (">=", 14.6684), (">=", 16.0),
+        ],
+        "BB_perc": [
+            ("<=", 0.05), ("<=", 0.1), ("<=", 0.1765),
+            ("<=", 0.25), ("<=", 0.3), (">=", 1.0),
+            (">=", 1.07), (">=", 1.2),
         ],
         "recent_runup": [
-            ("<=", -16), ("<=", -12), ("<=", -10.7),
-            ("<=", -8), ("<=", -5), ("<=", 0),
+            ("<=", -16.0), ("<=", -12.0), ("<=", -10.7),
+            ("<=", -8.0), ("<=", -5.0), ("<=", 0.0),
         ],
-        "body_value_power": [
-            (">=", 5), (">=", 10), (">=", 15), (">=", 20), (">=", 30),
+        "rebound_from_7d_low": [
+            (">=", 20.0), (">=", 25.0), (">=", 30.0),
+            (">=", 32.9122), (">=", 35.0), (">=", 40.0),
+            (">=", 40.7563), (">=", 45.0), (">=", 50.0),
         ],
-        "intraday_return": [
-            (">=", 4), (">=", 5), (">=", 6), (">=", 8), (">=", 10),
+        "room_to_20d_high": [
+            (">=", -10.0), (">=", -5.0), (">=", 0.0), (">=", 3.0),
+            (">=", 5.0), (">=", 10.0), ("<=", 5.0), ("<=", 10.0),
+            ("<=", 20.0), ("<=", 30.0), ("<=", 50.0),
         ],
-        "price_power_value": [
-            (">=", 20), (">=", 40), (">=", 60), (">=", 80), (">=", 100),
+        "room_to_60d_high": [
+            (">=", -10.0), (">=", -5.0), (">=", 0.0), (">=", 3.0),
+            (">=", 5.0), (">=", 10.0), ("<=", 5.0), ("<=", 10.0),
+            ("<=", 20.0), ("<=", 30.0), ("<=", 50.0),
+            (">=", 60.0), (">=", 65.0),
+        ],
+        "market_today_pct": [
+            (">=", -2.0), (">=", -1.0), (">=", 0.0),
+            (">=", 0.5), (">=", 1.0), (">=", 2.0),
+            (">=", 3.0),
+        ],
+        "market_5d_pct": [
+            ("<=", -10.0), ("<=", -5.0), ("<=", -3.0),
+            ("<=", -2.0), ("<=", -1.0), ("<=", 0.0),
+            (">=", 0.0), (">=", 1.0), (">=", 2.0),
+            (">=", 3.0), (">=", 5.0),
         ],
         "today_tr_val_eok": [
-            (">=", 3), (">=", 5), (">=", 8), (">=", 10),
-            (">=", 20), ("<=", 300), ("<=", 500), ("<=", 1000),
+            (">=", 3.0), (">=", 5.0), (">=", 8.0),
+            (">=", 10.0), (">=", 20.0), ("<=", 300.0),
+            ("<=", 500.0), ("<=", 1000.0),
+        ],
+        "body_ratio": [
+            ("<=", 0.3), (">=", 0.6), (">=", 0.7),
+            (">=", 0.8), (">=", 0.9),
+        ],
+        "upper_wick_ratio": [
+            ("<=", 0.0), ("<=", 0.02), ("<=", 0.05),
+            ("<=", 0.1), ("<=", 0.2), ("<=", 0.3),
         ],
         "lower_wick_ratio": [
             ("<=", 0.0), ("<=", 0.01), ("<=", 0.02), ("<=", 0.05),
         ],
-        "BB_perc": [
-            ("<=", 0.05), ("<=", 0.1), ("<=", 0.1765), ("<=", 0.25),
-            ("<=", 0.3), (">=", 1.0), (">=", 1.07), (">=", 1.2),
+        "intraday_return": [
+            (">=", 4.0), (">=", 5.0), (">=", 6.0),
+            (">=", 8.0), (">=", 10.0),
         ],
-        "gap_pct": [
-            ("<=", -2), ("<=", -1), ("<=", -0.5), ("<=", 0),
-            ("<=", 0.5), (">=", 2), (">=", 3.5), (">=", 4.7),
+        "price_power_value": [
+            (">=", 20.0), (">=", 40.0), (">=", 60.0),
+            (">=", 80.0), (">=", 100.0),
         ],
-        "pct_vs_lastweek": [
-            ("<=", -5), ("<=", -3), ("<=", -1), ("<=", 0), ("<=", 0.21),
-            (">=", 5), (">=", 10),
+        "body_value_power": [
+            (">=", 5.0), (">=", 10.0), (">=", 15.0),
+            (">=", 20.0), (">=", 30.0),
         ],
-        "dist_to_ma5": [
-            ("<=", -2), ("<=", -1), ("<=", -0.5), ("<=", -0.3),
-            ("<=", -0.0182), (">=", 8), (">=", 10),
-            (">=", 14.6684), (">=", 16),
-        ],
-        "body_ratio": [
-            ("<=", 0.3), (">=", 0.6), (">=", 0.7),
-            (">=", 0.8), (">=", 0.87), (">=", 0.909),
+        "intraday_body_power": [
+            (">=", 3.0), (">=", 5.0), (">=", 8.0),
+            (">=", 10.0), (">=", 15.0),
         ],
         "rebound_vs_prior_drop": [
-            (">=", 1), (">=", 2), (">=", 3), (">=", 5),
-            ("<=", 5), ("<=", 10),
-        ],
-        "market_5d_pct": [
-            ("<=", -10), ("<=", -5), ("<=", -3),
-            ("<=", -2), ("<=", -1.799), (">=", 3), (">=", 5),
-        ],
-        "market_breadth_up_ratio": [
-            (">=", 0.50), (">=", 0.60), (">=", 0.70),
-            (">=", 0.80), (">=", 0.85),
-        ],
-        "room_to_60d_high": [
-            (">=", -10), (">=", -5), (">=", 0), (">=", 3),
-            (">=", 5), (">=", 10), (">=", 60), (">=", 65),
-            ("<=", 5), ("<=", 10), ("<=", 20), ("<=", 30), ("<=", 50),
-        ],
-        "room_to_20d_high": [
-            (">=", -10), (">=", -5), (">=", 0), (">=", 3),
-            (">=", 5), (">=", 10),
-            ("<=", 5), ("<=", 10), ("<=", 20), ("<=", 30), ("<=", 50),
-        ],
-        "upper_wick_ratio": [
-            ("<=", 0), ("<=", 0.02), ("<=", 0.05),
-            ("<=", 0.1), ("<=", 0.2), ("<=", 0.3),
+            (">=", 1.0), (">=", 2.0), (">=", 3.0),
+            (">=", 5.0), ("<=", 5.0), ("<=", 10.0),
         ],
     }
 
@@ -571,13 +575,11 @@ def make_atoms(
             for op in ["<=", ">="]:
                 if f in allowed_ops and op not in allowed_ops[f]:
                     continue
-
                 raw_candidates.append((op, float(q)))
 
         for op, th in extra_thresholds.get(f, []):
             if f in allowed_ops and op not in allowed_ops[f]:
                 continue
-
             raw_candidates.append((op, float(th)))
 
         unique = {}
@@ -663,79 +665,79 @@ def make_profiles(args):
 
     return [
         {
-            "name": "avg60_broad",
+            "name": "usefulness_stable",
+            "max_depth": args.max_depth,
+            "beam_width": args.beam_width,
+            "top_k": args.top_k,
+            "quantiles": base_quantiles,
+
+            "min_atom_count": 80,
+            "min_atom_lift": 1.03,
+            "min_atom_precision": 0.42,
+
+            "min_train_count": 160,
+            "min_valid_count": 80,
+
+            "beam_min_train_precision": 0.42,
+            "beam_min_train_lift": 1.00,
+
+            "min_train_precision": 0.48,
+            "min_train_lift": 1.08,
+
+            "min_valid_precision": 0.52,
+            "min_valid_lift": 1.15,
+
+            "max_train_coverage": 0.65,
+        },
+        {
+            "name": "usefulness_precision",
             "max_depth": args.max_depth,
             "beam_width": args.beam_width,
             "top_k": args.top_k,
             "quantiles": base_quantiles,
 
             "min_atom_count": 60,
-            "min_atom_lift": 1.02,
-            "min_atom_precision": 0.41,
+            "min_atom_lift": 1.05,
+            "min_atom_precision": 0.45,
 
             "min_train_count": 100,
-            "min_valid_count": 40,
+            "min_valid_count": 50,
 
-            "beam_min_train_precision": 0.41,
+            "beam_min_train_precision": 0.43,
             "beam_min_train_lift": 1.00,
 
-            "min_train_precision": 0.47,
-            "min_train_lift": 1.08,
+            "min_train_precision": 0.50,
+            "min_train_lift": 1.12,
 
-            "min_valid_precision": 0.50,
-            "min_valid_lift": 1.10,
+            "min_valid_precision": 0.55,
+            "min_valid_lift": 1.25,
 
-            "max_train_coverage": 0.70,
+            "max_train_coverage": 0.50,
         },
         {
-            "name": "avg60_precision",
+            "name": "usefulness_high_precision_hint",
             "max_depth": args.max_depth,
             "beam_width": args.beam_width,
             "top_k": args.top_k,
             "quantiles": base_quantiles,
 
             "min_atom_count": 50,
-            "min_atom_lift": 1.04,
-            "min_atom_precision": 0.43,
+            "min_atom_lift": 1.08,
+            "min_atom_precision": 0.46,
 
-            "min_train_count": 70,
+            "min_train_count": 60,
             "min_valid_count": 30,
-
-            "beam_min_train_precision": 0.42,
-            "beam_min_train_lift": 1.00,
-
-            "min_train_precision": 0.50,
-            "min_train_lift": 1.15,
-
-            "min_valid_precision": 0.55,
-            "min_valid_lift": 1.25,
-
-            "max_train_coverage": 0.55,
-        },
-        {
-            "name": "avg60_high_precision",
-            "max_depth": args.max_depth,
-            "beam_width": args.beam_width,
-            "top_k": args.top_k,
-            "quantiles": base_quantiles,
-
-            "min_atom_count": 40,
-            "min_atom_lift": 1.06,
-            "min_atom_precision": 0.45,
-
-            "min_train_count": 50,
-            "min_valid_count": 25,
 
             "beam_min_train_precision": 0.43,
             "beam_min_train_lift": 1.00,
 
             "min_train_precision": 0.52,
-            "min_train_lift": 1.20,
+            "min_train_lift": 1.15,
 
             "min_valid_precision": 0.58,
             "min_valid_lift": 1.35,
 
-            "max_train_coverage": 0.45,
+            "max_train_coverage": 0.40,
         },
     ]
 
@@ -968,387 +970,49 @@ def rules_to_df(rules):
     return pd.DataFrame(rows)
 
 
-def parse_rule_text_to_atoms(rule_text: str) -> List[Atom]:
-    atoms = []
-
-    if not rule_text or rule_text == "nan":
-        return atoms
-
-    for part in rule_text.split(" AND "):
-        part = part.strip()
-
-        if " >= " in part:
-            f, th = part.split(" >= ")
-            try:
-                atoms.append(Atom(f.strip(), ">=", float(th)))
-            except Exception:
-                pass
-
-        elif " <= " in part:
-            f, th = part.split(" <= ")
-            try:
-                atoms.append(Atom(f.strip(), "<=", float(th)))
-            except Exception:
-                pass
-
-    return atoms
-
-
-def rule_feature_tuple(rule_text: str) -> Tuple[str, ...]:
-    atoms = parse_rule_text_to_atoms(str(rule_text))
-    return tuple(sorted(set(a.feature for a in atoms)))
-
-
-def rule_feature_pair_keys(rule_text: str) -> List[Tuple[str, str]]:
-    feats = list(rule_feature_tuple(rule_text))
-    pairs = []
-
-    for i, a in enumerate(feats):
-        for b in feats[i + 1:]:
-            pairs.append((a, b))
-
-    return pairs
-
-
-def atom_signature(atom: Atom) -> Tuple[str, str, float]:
-    """
-    near-duplicate rule 제거용.
-    threshold를 너무 정밀하게 보지 않고 피쳐별로 적당히 둥글린다.
-    """
-    f = atom.feature
-    th = float(atom.threshold)
-
-    if f in [
-        "BB_perc",
-        "vol_ratio_5_15",
-        "body_ratio",
-        "market_breadth_up_ratio",
-    ]:
-        rounded = round(th, 2)
-
-    elif f in [
-        "gap_pct",
-        "market_today_pct",
-        "market_5d_pct",
-        "lower_wick_ratio",
-        "upper_wick_ratio",
-    ]:
-        rounded = round(th, 1)
-
-    elif f in [
-        "vol5",
-        "today_pct",
-        "max_drop_7d",
-        "recent_runup",
-        "rebound_from_7d_low",
-        "dist_to_ma5",
-        "pct_vs_lastweek",
-        "room_to_20d_high",
-        "room_to_60d_high",
-        "rebound_vs_prior_drop",
-        "intraday_return",
-        "body_value_power",
-        "price_power_value",
-        "today_tr_val_eok",
-    ]:
-        rounded = round(th, 0)
-
-    else:
-        rounded = round(th, 2)
-
-    return f, atom.op, rounded
-
-
-def rule_signature(rule_text: str) -> Tuple[Tuple[str, str, float], ...]:
-    atoms = parse_rule_text_to_atoms(str(rule_text))
-    sig = tuple(sorted(atom_signature(a) for a in atoms))
-    return sig
-
-
-def rule_family_signature(rule_text: str) -> Tuple[Tuple[str, str], ...]:
-    """
-    threshold는 무시하고 feature + op 조합만 본다.
-    """
-    atoms = parse_rule_text_to_atoms(str(rule_text))
-    sig = tuple(sorted((a.feature, a.op) for a in atoms))
-    return sig
-
-
-def add_rule_signature_columns(rules_df: pd.DataFrame) -> pd.DataFrame:
-    if len(rules_df) == 0:
-        return rules_df.copy()
-
-    out = rules_df.copy()
-
-    out["feature_tuple"] = out["rule"].apply(rule_feature_tuple)
-    out["feature_set_key"] = out["feature_tuple"].apply(lambda x: "|".join(x))
-    out["rule_signature"] = out["rule"].apply(rule_signature)
-    out["rule_signature_key"] = out["rule_signature"].apply(lambda x: str(x))
-    out["rule_family"] = out["rule"].apply(rule_family_signature)
-    out["rule_family_key"] = out["rule_family"].apply(lambda x: str(x))
-
-    return out
-
-
-def summarize_selected_portfolio(selected_df: pd.DataFrame) -> Dict:
-    if len(selected_df) == 0:
-        return {
-            "rule_count": 0,
-            "avg_valid_precision": np.nan,
-            "avg_valid_lift": np.nan,
-            "avg_valid_count": np.nan,
-            "pass_valid_60_count": 0,
-            "unique_feature_sets": 0,
-            "unique_rule_families": 0,
-        }
-
-    return {
-        "rule_count": len(selected_df),
-        "avg_valid_precision": selected_df["valid_precision"].mean(),
-        "avg_valid_lift": selected_df["valid_lift"].mean(),
-        "avg_valid_count": selected_df["valid_count"].mean(),
-        "pass_valid_60_count": int(selected_df["pass_valid_60"].sum())
-        if "pass_valid_60" in selected_df.columns else 0,
-        "unique_feature_sets": selected_df["feature_set_key"].nunique()
-        if "feature_set_key" in selected_df.columns else np.nan,
-        "unique_rule_families": selected_df["rule_family_key"].nunique()
-        if "rule_family_key" in selected_df.columns else np.nan,
-    }
-
-
-def save_portfolio_summary(selected_df: pd.DataFrame, out_dir: str):
-    summary = summarize_selected_portfolio(selected_df)
-    summary_df = pd.DataFrame([summary])
-
-    summary_df.to_csv(
-        os.path.join(out_dir, "04_selected_avg60_rules_summary.csv"),
-        index=False,
-        encoding="utf-8-sig",
-    )
-
-    return summary_df
-
-
-def select_avg60_rule_portfolio(
-        rules_df,
-        target_avg_precision,
-        min_rule_count,
-        max_rule_count,
-        min_valid_count,
-        max_same_feature_set=3,
-        max_same_rule_family=2,
-        max_same_feature_pair=8,
-        min_precision_floor=0.55,
-        prefer_monthly_stable=False,
-        monthly_summary_df=None,
-):
-    """
-    valid precision 평균 60% 이상을 유지하면서,
-    중복 룰을 줄이고 다양한 feature 조합을 고르는 포트폴리오 선택 함수.
-    """
-
-    if len(rules_df) == 0:
-        return pd.DataFrame()
-
-    use = rules_df[
-        (rules_df["valid_count"] >= min_valid_count)
-        & (rules_df["valid_precision"].notna())
-        & (rules_df["valid_lift"].notna())
-        & (rules_df["valid_precision"] >= min_precision_floor)
-        ].copy()
-
-    if len(use) == 0:
-        return pd.DataFrame()
-
-    use = add_rule_signature_columns(use)
-
-    # 완전히 비슷한 룰 제거.
-    # 같은 rounded signature이면 valid_precision 높은 것만 남긴다.
-    use = use.sort_values(
-        ["rule_signature_key", "valid_precision", "valid_lift", "valid_count"],
-        ascending=[True, False, False, False],
-    )
-
-    use = use.drop_duplicates(
-        subset=["rule_signature_key"],
-        keep="first",
-    )
-
-    if prefer_monthly_stable and monthly_summary_df is not None and len(monthly_summary_df):
-        ms = monthly_summary_df.copy()
-        ms_cols = [
-            "rule",
-            "months_used",
-            "median_month_precision",
-            "min_month_precision",
-            "bad_months_precision_lt_50",
-            "bad_months_lift_lt_1",
-        ]
-        ms_cols = [c for c in ms_cols if c in ms.columns]
-
-        use = use.merge(
-            ms[ms_cols],
-            on="rule",
-            how="left",
-        )
-
-        use["months_used"] = use["months_used"].fillna(0)
-        use["bad_months_precision_lt_50"] = use["bad_months_precision_lt_50"].fillna(99)
-        use["bad_months_lift_lt_1"] = use["bad_months_lift_lt_1"].fillna(99)
-        use["median_month_precision"] = use["median_month_precision"].fillna(0)
-
-        use["portfolio_sort_score"] = (
-                use["valid_precision"] * 100
-                + use["valid_lift"] * 8
-                + np.log1p(use["valid_count"]) * 2
-                + use["months_used"] * 2
-                + use["median_month_precision"] * 5
-                - use["bad_months_precision_lt_50"] * 3
-                - use["bad_months_lift_lt_1"] * 3
-        )
-    else:
-        use["portfolio_sort_score"] = (
-                use["valid_precision"] * 100
-                + use["valid_lift"] * 8
-                + np.log1p(use["valid_count"]) * 2
-        )
-
-    use = use.sort_values(
-        ["portfolio_sort_score", "valid_precision", "valid_lift", "valid_count"],
-        ascending=[False, False, False, False],
-    ).reset_index(drop=True)
-
-    selected = []
-
-    feature_set_counts = {}
-    rule_family_counts = {}
-    feature_pair_counts = {}
-
-    for _, r in use.iterrows():
-        fs_key = r["feature_set_key"]
-        fam_key = r["rule_family_key"]
-        pair_keys = rule_feature_pair_keys(r["rule"])
-
-        if feature_set_counts.get(fs_key, 0) >= max_same_feature_set:
-            continue
-
-        if rule_family_counts.get(fam_key, 0) >= max_same_rule_family:
-            continue
-
-        pair_too_many = False
-        for p in pair_keys:
-            if feature_pair_counts.get(p, 0) >= max_same_feature_pair:
-                pair_too_many = True
-                break
-
-        if pair_too_many:
-            continue
-
-        candidate = selected + [r]
-        avg_precision = np.mean([x["valid_precision"] for x in candidate])
-
-        if avg_precision < target_avg_precision:
-            continue
-
-        selected.append(r)
-
-        feature_set_counts[fs_key] = feature_set_counts.get(fs_key, 0) + 1
-        rule_family_counts[fam_key] = rule_family_counts.get(fam_key, 0) + 1
-
-        for p in pair_keys:
-            feature_pair_counts[p] = feature_pair_counts.get(p, 0) + 1
-
-        if len(selected) >= max_rule_count:
-            break
-
-    out = pd.DataFrame(selected)
-
-    # 너무 적게 잡히면 제한을 완화해서 fallback
-    if len(out) < min_rule_count:
-        selected = []
-
-        feature_set_counts = {}
-        rule_family_counts = {}
-
-        fallback = use[
-            use["valid_precision"] >= target_avg_precision
-            ].copy()
-
-        for _, r in fallback.iterrows():
-            fs_key = r["feature_set_key"]
-            fam_key = r["rule_family_key"]
-
-            if feature_set_counts.get(fs_key, 0) >= max_same_feature_set + 2:
-                continue
-
-            if rule_family_counts.get(fam_key, 0) >= max_same_rule_family + 2:
-                continue
-
-            selected.append(r)
-
-            feature_set_counts[fs_key] = feature_set_counts.get(fs_key, 0) + 1
-            rule_family_counts[fam_key] = rule_family_counts.get(fam_key, 0) + 1
-
-            if len(selected) >= max_rule_count:
-                break
-
-        out = pd.DataFrame(selected)
-
-    if len(out):
-        out = out.copy()
-        out["portfolio_avg_valid_precision"] = out["valid_precision"].mean()
-        out["portfolio_avg_valid_lift"] = out["valid_lift"].mean()
-        out["portfolio_rule_count"] = len(out)
-        out["portfolio_unique_feature_sets"] = out["feature_set_key"].nunique()
-        out["portfolio_unique_rule_families"] = out["rule_family_key"].nunique()
-
-    return out
-
-
 def feature_usage_from_rules(rules_df, features, top_n):
     rows = []
 
     if len(rules_df) == 0:
         return pd.DataFrame()
 
-    top = rules_df.sort_values(
-        ["valid_precision", "valid_lift"],
-        ascending=[False, False],
-    ).head(top_n)
+    for profile_name, g in rules_df.groupby("profile"):
+        top = g.sort_values("rank").head(top_n)
 
-    for f in features:
-        used = top["features"].fillna("").apply(
-            lambda s: f in [x.strip() for x in str(s).split(",") if x.strip()]
-        )
+        for f in features:
+            used = top["features"].fillna("").apply(
+                lambda s: f in [x.strip() for x in str(s).split(",") if x.strip()]
+            )
 
-        used_df = top[used]
+            used_df = top[used]
 
-        row = {
-            "feature": f,
-            "top_usage_count": int(used.sum()),
-            "top_usage_rate": float(used.mean()) if len(top) else 0.0,
-        }
+            row = {
+                "profile": profile_name,
+                "feature": f,
+                "top_usage_count": int(used.sum()),
+                "top_usage_rate": float(used.mean()) if len(top) else 0.0,
+            }
 
-        if len(used_df):
-            row["avg_train_precision_when_used"] = used_df["train_precision"].mean()
-            row["avg_valid_precision_when_used"] = used_df["valid_precision"].mean()
-            row["avg_train_lift_when_used"] = used_df["train_lift"].mean()
-            row["avg_valid_lift_when_used"] = used_df["valid_lift"].mean()
-            row["avg_abs_precision_gap_when_used"] = used_df["abs_precision_gap"].mean()
-            row["best_valid_precision_when_used"] = used_df["valid_precision"].max()
-            row["best_valid_lift_when_used"] = used_df["valid_lift"].max()
-            row["pass_valid_60_count"] = int(used_df["pass_valid_60"].sum())
-        else:
-            row["avg_train_precision_when_used"] = np.nan
-            row["avg_valid_precision_when_used"] = np.nan
-            row["avg_train_lift_when_used"] = np.nan
-            row["avg_valid_lift_when_used"] = np.nan
-            row["avg_abs_precision_gap_when_used"] = np.nan
-            row["best_valid_precision_when_used"] = np.nan
-            row["best_valid_lift_when_used"] = np.nan
-            row["pass_valid_60_count"] = 0
+            if len(used_df):
+                row["avg_train_precision_when_used"] = used_df["train_precision"].mean()
+                row["avg_valid_precision_when_used"] = used_df["valid_precision"].mean()
+                row["avg_train_lift_when_used"] = used_df["train_lift"].mean()
+                row["avg_valid_lift_when_used"] = used_df["valid_lift"].mean()
+                row["avg_abs_precision_gap_when_used"] = used_df["abs_precision_gap"].mean()
+                row["best_valid_precision_when_used"] = used_df["valid_precision"].max()
+                row["best_valid_lift_when_used"] = used_df["valid_lift"].max()
+                row["pass_valid_60_count"] = int(used_df["pass_valid_60"].sum())
+            else:
+                row["avg_train_precision_when_used"] = np.nan
+                row["avg_valid_precision_when_used"] = np.nan
+                row["avg_train_lift_when_used"] = np.nan
+                row["avg_valid_lift_when_used"] = np.nan
+                row["avg_abs_precision_gap_when_used"] = np.nan
+                row["best_valid_precision_when_used"] = np.nan
+                row["best_valid_lift_when_used"] = np.nan
+                row["pass_valid_60_count"] = 0
 
-        rows.append(row)
+            rows.append(row)
 
     return pd.DataFrame(rows)
 
@@ -1359,75 +1023,74 @@ def direction_stability_report(rules_df, features, top_n):
     if len(rules_df) == 0:
         return pd.DataFrame()
 
-    top = rules_df.sort_values(
-        ["valid_precision", "valid_lift"],
-        ascending=[False, False],
-    ).head(top_n)
+    for profile_name, g in rules_df.groupby("profile"):
+        top = g.sort_values("rank").head(top_n)
 
-    for f in features:
-        op_list = []
-        threshold_list = []
-        used_rules = 0
+        for f in features:
+            op_list = []
+            threshold_list = []
+            used_rules = 0
 
-        for _, r in top.iterrows():
-            atoms = str(r["rule"]).split(" AND ")
+            for _, r in top.iterrows():
+                atoms = str(r["rule"]).split(" AND ")
 
-            used_here = False
+                used_here = False
 
-            for atom_text in atoms:
-                atom_text = atom_text.strip()
+                for atom_text in atoms:
+                    atom_text = atom_text.strip()
 
-                prefix_ge = f"{f} >= "
-                prefix_le = f"{f} <= "
+                    prefix_ge = f"{f} >= "
+                    prefix_le = f"{f} <= "
 
-                if atom_text.startswith(prefix_ge):
-                    op_list.append(">=")
-                    try:
-                        threshold_list.append(float(atom_text.replace(prefix_ge, "")))
-                    except Exception:
-                        pass
-                    used_here = True
+                    if atom_text.startswith(prefix_ge):
+                        op_list.append(">=")
+                        try:
+                            threshold_list.append(float(atom_text.replace(prefix_ge, "")))
+                        except Exception:
+                            pass
+                        used_here = True
 
-                elif atom_text.startswith(prefix_le):
-                    op_list.append("<=")
-                    try:
-                        threshold_list.append(float(atom_text.replace(prefix_le, "")))
-                    except Exception:
-                        pass
-                    used_here = True
+                    elif atom_text.startswith(prefix_le):
+                        op_list.append("<=")
+                        try:
+                            threshold_list.append(float(atom_text.replace(prefix_le, "")))
+                        except Exception:
+                            pass
+                        used_here = True
 
-            if used_here:
-                used_rules += 1
+                if used_here:
+                    used_rules += 1
 
-        ge_count = sum(1 for x in op_list if x == ">=")
-        le_count = sum(1 for x in op_list if x == "<=")
-        total = ge_count + le_count
+            ge_count = sum(1 for x in op_list if x == ">=")
+            le_count = sum(1 for x in op_list if x == "<=")
+            total = ge_count + le_count
 
-        if total > 0:
-            dominant_op = ">=" if ge_count >= le_count else "<="
-            dominant_count = max(ge_count, le_count)
-            direction_consistency = dominant_count / total
-            median_threshold = float(np.median(threshold_list)) if threshold_list else np.nan
-        else:
-            dominant_op = ""
-            direction_consistency = np.nan
-            median_threshold = np.nan
+            if total > 0:
+                dominant_op = ">=" if ge_count >= le_count else "<="
+                dominant_count = max(ge_count, le_count)
+                direction_consistency = dominant_count / total
+                median_threshold = float(np.median(threshold_list)) if threshold_list else np.nan
+            else:
+                dominant_op = ""
+                direction_consistency = np.nan
+                median_threshold = np.nan
 
-        rows.append({
-            "feature": f,
-            "used_rules": used_rules,
-            "ge_count": ge_count,
-            "le_count": le_count,
-            "dominant_op": dominant_op,
-            "direction_consistency": direction_consistency,
-            "median_threshold": median_threshold,
-        })
+            rows.append({
+                "profile": profile_name,
+                "feature": f,
+                "used_rules": used_rules,
+                "ge_count": ge_count,
+                "le_count": le_count,
+                "dominant_op": dominant_op,
+                "direction_consistency": direction_consistency,
+                "median_threshold": median_threshold,
+            })
 
     return pd.DataFrame(rows)
 
 
-def monthly_rule_stability(valid, rules_df, target_col):
-    if len(rules_df) == 0 or "month" not in valid.columns:
+def monthly_rule_stability(valid, rules, target_col):
+    if "month" not in valid.columns:
         return pd.DataFrame()
 
     tmp_valid = valid.copy().reset_index(drop=True)
@@ -1435,21 +1098,17 @@ def monthly_rule_stability(valid, rules_df, target_col):
 
     rows = []
 
-    for rule_idx, r in rules_df.reset_index(drop=True).iterrows():
-        atoms = parse_rule_text_to_atoms(str(r["rule"]))
-
-        if not atoms:
-            continue
-
-        mask_all = apply_rule(tmp_valid, tuple(atoms))
+    for rule_idx, r in enumerate(rules, start=1):
+        mask_all = apply_rule(tmp_valid, r.atoms)
 
         for month, idx_values in tmp_valid.groupby("month").groups.items():
             pos = np.array(list(idx_values), dtype=int)
             m = precision_recall_lift(y_all[pos], mask_all[pos])
 
             rows.append({
-                "rule_rank": rule_idx + 1,
-                "rule": r["rule"],
+                "profile": r.profile_name,
+                "rule_rank": rule_idx,
+                "rule": r.name(),
                 "month": month,
                 "month_count": m["count"],
                 "month_target_count": m["target_count"],
@@ -1462,36 +1121,67 @@ def monthly_rule_stability(valid, rules_df, target_col):
     return pd.DataFrame(rows)
 
 
+def summarize_monthly_stability(monthly_df, min_month_count=20):
+    if len(monthly_df) == 0:
+        return pd.DataFrame()
+
+    use = monthly_df[monthly_df["month_count"] >= min_month_count].copy()
+
+    if len(use) == 0:
+        return pd.DataFrame()
+
+    rows = []
+
+    for rule, g in use.groupby("rule"):
+        rows.append({
+            "rule": rule,
+            "months_used": g["month"].nunique(),
+            "mean_month_precision": g["month_precision"].mean(),
+            "median_month_precision": g["month_precision"].median(),
+            "min_month_precision": g["month_precision"].min(),
+            "mean_month_lift": g["month_lift"].mean(),
+            "median_month_lift": g["month_lift"].median(),
+            "min_month_lift": g["month_lift"].min(),
+            "bad_months_precision_lt_50": int((g["month_precision"] < 0.50).sum()),
+            "bad_months_lift_lt_1": int((g["month_lift"] < 1.0).sum()),
+        })
+
+    out = pd.DataFrame(rows)
+
+    out = out.sort_values(
+        [
+            "bad_months_lift_lt_1",
+            "bad_months_precision_lt_50",
+            "median_month_precision",
+        ],
+        ascending=[True, True, False],
+    )
+
+    return out
+
+
 def conditional_feature_contribution(
         train,
         valid,
-        rules_df,
+        rules,
         target_col,
 ):
     rows = []
 
-    if len(rules_df) == 0:
-        return pd.DataFrame()
-
     y_train = train[target_col].astype(int).values
     y_valid = valid[target_col].astype(int).values
 
-    for rule_idx, r in rules_df.reset_index(drop=True).iterrows():
-        atoms = tuple(parse_rule_text_to_atoms(str(r["rule"])))
-
-        if len(atoms) == 0:
-            continue
-
-        full_train_mask = apply_rule(train, atoms)
-        full_valid_mask = apply_rule(valid, atoms)
+    for rule_idx, r in enumerate(rules, start=1):
+        full_train_mask = apply_rule(train, r.atoms)
+        full_valid_mask = apply_rule(valid, r.atoms)
 
         full_train_m = precision_recall_lift(y_train, full_train_mask)
         full_valid_m = precision_recall_lift(y_valid, full_valid_mask)
 
-        rule_features = sorted(set(a.feature for a in atoms))
+        rule_features = sorted(set(a.feature for a in r.atoms))
 
         for f in rule_features:
-            reduced_atoms = tuple(a for a in atoms if a.feature != f)
+            reduced_atoms = tuple(a for a in r.atoms if a.feature != f)
 
             if len(reduced_atoms) == 0:
                 reduced_train_mask = np.ones(len(train), dtype=bool)
@@ -1504,8 +1194,9 @@ def conditional_feature_contribution(
             reduced_valid_m = precision_recall_lift(y_valid, reduced_valid_mask)
 
             rows.append({
-                "rule_rank": rule_idx + 1,
-                "rule": r["rule"],
+                "rule_rank": rule_idx,
+                "profile": r.profile_name,
+                "rule": r.name(),
                 "feature": f,
 
                 "full_valid_count": full_valid_m["count"],
@@ -1530,7 +1221,9 @@ def conditional_feature_contribution(
                     else np.nan
                 ),
 
-                "valid_count_change": full_valid_m["count"] - reduced_valid_m["count"],
+                "valid_count_change": (
+                        full_valid_m["count"] - reduced_valid_m["count"]
+                ),
 
                 "full_train_count": full_train_m["count"],
                 "full_train_precision": full_train_m["precision"],
@@ -1611,6 +1304,7 @@ def grade_features(
         usage_df,
         direction_df,
         conditional_summary_df,
+        monthly_df,
 ):
     rows = []
 
@@ -1636,14 +1330,16 @@ def grade_features(
             best_bin_lift = np.nan
 
         if len(u):
-            total_usage_count = int(u.iloc[0].get("top_usage_count", 0))
-            avg_valid_precision = u.iloc[0].get("avg_valid_precision_when_used", np.nan)
-            avg_valid_lift = u.iloc[0].get("avg_valid_lift_when_used", np.nan)
-            best_valid_precision = u.iloc[0].get("best_valid_precision_when_used", np.nan)
-            best_valid_lift = u.iloc[0].get("best_valid_lift_when_used", np.nan)
-            avg_gap = u.iloc[0].get("avg_abs_precision_gap_when_used", np.nan)
-            pass_valid_60_count = int(u.iloc[0].get("pass_valid_60_count", 0))
+            profiles_used = int((u["top_usage_count"] > 0).sum())
+            total_usage_count = int(u["top_usage_count"].sum())
+            avg_valid_precision = u["avg_valid_precision_when_used"].mean()
+            avg_valid_lift = u["avg_valid_lift_when_used"].mean()
+            best_valid_precision = u["best_valid_precision_when_used"].max()
+            best_valid_lift = u["best_valid_lift_when_used"].max()
+            avg_gap = u["avg_abs_precision_gap_when_used"].mean()
+            pass_valid_60_count = int(u["pass_valid_60_count"].sum())
         else:
+            profiles_used = 0
             total_usage_count = 0
             avg_valid_precision = np.nan
             avg_valid_lift = np.nan
@@ -1653,11 +1349,17 @@ def grade_features(
             pass_valid_60_count = 0
 
         if len(d):
-            dominant_op = d.iloc[0].get("dominant_op", "")
-            avg_direction_consistency = d.iloc[0].get("direction_consistency", np.nan)
+            used_d = d[d["used_rules"] > 0]
+            if len(used_d):
+                avg_direction_consistency = used_d["direction_consistency"].mean()
+                dominant_ops = used_d["dominant_op"].dropna().tolist()
+                dominant_op = max(set(dominant_ops), key=dominant_ops.count) if dominant_ops else ""
+            else:
+                avg_direction_consistency = np.nan
+                dominant_op = ""
         else:
-            dominant_op = ""
             avg_direction_consistency = np.nan
+            dominant_op = ""
 
         if len(c):
             rules_used_conditional = c.iloc[0].get("rules_used", 0)
@@ -1674,10 +1376,7 @@ def grade_features(
             positive_gain_rate = 0.0
             strong_gain_rate = 0.0
 
-        is_non_mono = f in NON_MONOTONIC_FEATURES
-        is_regime = f in REGIME_FEATURES
-
-        if is_non_mono:
+        if f in NON_MONOTONIC_FEATURES:
             direction_ok = True
         else:
             direction_ok = (
@@ -1685,6 +1384,9 @@ def grade_features(
                     or (auc_direction == "lower_success" and dominant_op == "<=")
                     or dominant_op == ""
             )
+
+        is_non_mono = f in NON_MONOTONIC_FEATURES
+        is_regime = f in REGIME_FEATURES
 
         score = 0.0
 
@@ -1695,21 +1397,22 @@ def grade_features(
             score += max(0.0, best_bin_lift - 1.0) * 12
 
         if np.isfinite(avg_valid_lift):
-            score += max(0.0, avg_valid_lift - 1.0) * 30
+            score += max(0.0, avg_valid_lift - 1.0) * 25
 
         if np.isfinite(avg_valid_precision):
-            score += max(0.0, avg_valid_precision - 0.5) * 80
+            score += max(0.0, avg_valid_precision - 0.5) * 70
 
         if np.isfinite(mean_valid_precision_gain):
-            score += max(0.0, mean_valid_precision_gain) * 150
+            score += max(0.0, mean_valid_precision_gain) * 120
 
         if np.isfinite(max_valid_precision_gain):
             score += max(0.0, max_valid_precision_gain) * 30
 
-        score += positive_gain_rate * 18
-        score += strong_gain_rate * 25
-        score += total_usage_count * 0.8
-        score += pass_valid_60_count * 10
+        score += positive_gain_rate * 15
+        score += strong_gain_rate * 20
+        score += profiles_used * 4
+        score += total_usage_count * 0.4
+        score += pass_valid_60_count * 8
 
         if np.isfinite(avg_gap):
             score -= avg_gap * 20
@@ -1720,75 +1423,35 @@ def grade_features(
         if f in WEAK_HINT_FEATURES:
             score -= 2
 
-        # ============================================================
-        # 강화된 등급 기준
-        # ============================================================
-        enough_usage_for_s = total_usage_count >= 4
-        enough_usage_for_a = total_usage_count >= 2
-
-        conditional_not_bad = (
-                not np.isfinite(mean_valid_precision_gain)
-                or mean_valid_precision_gain >= -0.005
-        )
-
         is_core_signal = (
                 direction_ok
                 and not is_non_mono
-                and enough_usage_for_s
-                and conditional_not_bad
                 and (
-                        pass_valid_60_count >= 3
-                        or (
-                                np.isfinite(avg_valid_precision)
-                                and avg_valid_precision >= 0.62
-                                and np.isfinite(avg_valid_lift)
-                                and avg_valid_lift >= 1.45
-                        )
-                        or (
-                                np.isfinite(auc_oriented)
-                                and auc_oriented >= 0.575
-                                and pass_valid_60_count >= 1
-                        )
+                        (np.isfinite(auc_oriented) and auc_oriented >= 0.555)
+                        or (np.isfinite(avg_valid_lift) and avg_valid_lift >= 1.35)
+                        or pass_valid_60_count > 0
                 )
         )
 
         is_regime_filter = (
                 is_regime
-                and enough_usage_for_a
-                and conditional_not_bad
                 and (
-                        pass_valid_60_count >= 2
-                        or (
-                                np.isfinite(avg_valid_lift)
-                                and avg_valid_lift >= 1.35
-                                and np.isfinite(avg_valid_precision)
-                                and avg_valid_precision >= 0.60
-                        )
-                        or (
-                                np.isfinite(best_bin_lift)
-                                and best_bin_lift >= 1.35
-                                and pass_valid_60_count >= 1
-                        )
+                        (np.isfinite(best_bin_lift) and best_bin_lift >= 1.30)
+                        or (np.isfinite(avg_valid_lift) and avg_valid_lift >= 1.30)
+                        or pass_valid_60_count > 0
                 )
         )
 
         is_conditional_filter = (
                 is_non_mono
-                and enough_usage_for_a
+                and rules_used_conditional > 0
                 and (
-                        pass_valid_60_count >= 2
+                        positive_gain_rate >= 0.25
                         or (
-                                rules_used_conditional >= 2
-                                and positive_gain_rate >= 0.30
-                                and np.isfinite(mean_valid_precision_gain)
+                                np.isfinite(mean_valid_precision_gain)
                                 and mean_valid_precision_gain > 0.005
                         )
-                        or (
-                                rules_used_conditional >= 1
-                                and np.isfinite(max_valid_precision_gain)
-                                and max_valid_precision_gain >= 0.04
-                                and pass_valid_60_count >= 1
-                        )
+                        or pass_valid_60_count > 0
                 )
         )
 
@@ -1803,31 +1466,31 @@ def grade_features(
             grade = "S"
             role = "REGIME_FILTER"
             action = "KEEP"
-            reason = "avg60 룰에서 장세 필터로 반복 기여"
+            reason = "시장/장세 필터로 valid lift 또는 best bin이 좋음"
 
         elif is_core_signal:
             grade = "S"
             role = "CORE_SIGNAL"
             action = "KEEP"
-            reason = "avg60 룰에서 평균 valid precision을 올리는 핵심 신호"
+            reason = "단독 방향성, AUC, 룰 성능이 좋은 핵심 신호"
 
         elif is_conditional_filter:
             grade = "A"
             role = "CONDITIONAL_FILTER"
             action = "KEEP_AS_FILTER"
-            reason = "단독보다 룰 조합에서 valid precision을 올리는 조건부 필터"
+            reason = "단독 AUC는 약해도 룰에서 제거 시 valid 성능이 떨어지는 조건부 필터"
 
         elif is_candidate:
             grade = "B"
             role = "CANDIDATE"
             action = "TEST"
-            reason = "조건부 가능성은 있으나 avg60 룰 기여는 제한적"
+            reason = "특정 구간/조합에서 유용 가능성"
 
         else:
             grade = "C"
             role = "DROP_CANDIDATE"
             action = "DROP_OR_LAST_CHECK"
-            reason = "avg60 룰 기준 근거 약함"
+            reason = "현재 기준 근거 약함"
 
         rows.append({
             "feature": f,
@@ -1840,6 +1503,7 @@ def grade_features(
             "is_non_monotonic": is_non_mono,
             "is_regime": is_regime,
 
+            "profiles_used": profiles_used,
             "total_usage_count": total_usage_count,
             "avg_valid_precision_when_used": avg_valid_precision,
             "avg_valid_lift_when_used": avg_valid_lift,
@@ -1886,30 +1550,11 @@ def grade_features(
 
 
 def write_feature_grade_text(feature_grade_df, out_dir):
-    s_core = feature_grade_df[
-        (feature_grade_df["grade"] == "S")
-        & (feature_grade_df["role"] == "CORE_SIGNAL")
-        ]
-
-    s_regime = feature_grade_df[
-        (feature_grade_df["grade"] == "S")
-        & (feature_grade_df["role"] == "REGIME_FILTER")
-        ]
-
-    a_filter = feature_grade_df[
-        (feature_grade_df["grade"] == "A")
-        & (feature_grade_df["role"] == "CONDITIONAL_FILTER")
-        ]
-
-    b_test = feature_grade_df[feature_grade_df["grade"] == "B"]
-    c_drop = feature_grade_df[feature_grade_df["grade"] == "C"]
-
     groups = [
-        ("S_CORE_SIGNAL", s_core),
-        ("S_REGIME_FILTER", s_regime),
-        ("A_CONDITIONAL_FILTERS", a_filter),
-        ("B_TEST_CANDIDATES", b_test),
-        ("C_DROP_CANDIDATES", c_drop),
+        ("S_KEEP", feature_grade_df[feature_grade_df["grade"] == "S"]),
+        ("A_CONDITIONAL_FILTERS", feature_grade_df[feature_grade_df["grade"] == "A"]),
+        ("B_TEST_CANDIDATES", feature_grade_df[feature_grade_df["grade"] == "B"]),
+        ("C_DROP_CANDIDATES", feature_grade_df[feature_grade_df["grade"] == "C"]),
     ]
 
     lines = []
@@ -1920,7 +1565,7 @@ def write_feature_grade_text(feature_grade_df, out_dir):
             lines.append(f'    "{f}",')
         lines.append("]\n")
 
-    path = os.path.join(out_dir, "13_recommended_feature_roles.txt")
+    path = os.path.join(out_dir, "11_recommended_feature_roles.txt")
 
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
@@ -1933,29 +1578,18 @@ def main():
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--csv", required=True)
-    parser.add_argument("--out", default="feature_selector_v36_avg60_out")
+    parser.add_argument("--out", default="feature_selector_v35_usefulness_out")
     parser.add_argument("--target", default=TARGET_COL)
     parser.add_argument("--date-col", default=None)
     parser.add_argument("--valid-ratio", type=float, default=0.30)
 
     parser.add_argument("--max-depth", type=int, default=5)
-    parser.add_argument("--beam-width", type=int, default=600)
-    parser.add_argument("--top-k", type=int, default=200)
-    parser.add_argument("--top-n-usage", type=int, default=120)
+    parser.add_argument("--beam-width", type=int, default=500)
+    parser.add_argument("--top-k", type=int, default=150)
+    parser.add_argument("--top-n-usage", type=int, default=80)
 
     parser.add_argument("--corr-threshold", type=float, default=0.90)
     parser.add_argument("--allow-correlated-in-rule", action="store_true")
-
-    parser.add_argument("--target-avg-valid-precision", type=float, default=0.60)
-    parser.add_argument("--portfolio-min-rule-count", type=int, default=10)
-    parser.add_argument("--portfolio-max-rule-count", type=int, default=80)
-    parser.add_argument("--portfolio-min-valid-count", type=int, default=25)
-
-    # 중복 룰 방지 옵션
-    parser.add_argument("--max-same-feature-set", type=int, default=3)
-    parser.add_argument("--max-same-rule-family", type=int, default=2)
-    parser.add_argument("--max-same-feature-pair", type=int, default=8)
-    parser.add_argument("--portfolio-min-precision-floor", type=float, default=0.55)
 
     args = parser.parse_args()
 
@@ -1971,11 +1605,7 @@ def main():
         date_col=date_col,
     )
 
-    features = [
-        f for f in DEFAULT_FEATURES
-        if f in df.columns and f not in EXCLUDE_FEATURES
-    ]
-
+    features = [f for f in DEFAULT_FEATURES if f in df.columns]
     missing = [f for f in DEFAULT_FEATURES if f not in df.columns]
 
     if missing:
@@ -1992,7 +1622,8 @@ def main():
     print("[INFO] valid rows:", len(valid), "target_rate:", valid[args.target].mean())
     print("[INFO] date_col:", date_col)
     print("[INFO] features:", features)
-    print("[INFO] goal: selected rule portfolio avg valid precision >= ", args.target_avg_valid_precision)
+    print("[SCRIPT_VERSION] feature_selector_v35_custom_feature_pool")
+    print("[INFO] goal: feature usefulness + valid precision improvement")
     print("=" * 80)
 
     corr_mat, high_corr_df, corr_pairs = build_corr_report(
@@ -2061,70 +1692,49 @@ def main():
     )
 
     if len(rules_df) == 0:
-        print("[WARN] No final rules found.")
+        print("[WARN] No final rules found. Try higher --beam-width or lower thresholds in make_profiles().")
         return
 
-    selected_rules_df = select_avg60_rule_portfolio(
-        rules_df=rules_df,
-        target_avg_precision=args.target_avg_valid_precision,
-        min_rule_count=args.portfolio_min_rule_count,
-        max_rule_count=args.portfolio_max_rule_count,
-        min_valid_count=args.portfolio_min_valid_count,
-        max_same_feature_set=args.max_same_feature_set,
-        max_same_rule_family=args.max_same_rule_family,
-        max_same_feature_pair=args.max_same_feature_pair,
-        min_precision_floor=args.portfolio_min_precision_floor,
-    )
-
-    selected_rules_df.to_csv(
-        os.path.join(args.out, "04_selected_avg60_rules.csv"),
-        index=False,
-        encoding="utf-8-sig",
-    )
-
-    save_portfolio_summary(
-        selected_df=selected_rules_df,
-        out_dir=args.out,
-    )
-
-    if len(selected_rules_df) == 0:
-        print("[WARN] No avg60 rule portfolio found. Falling back to all final rules.")
-        rules_for_analysis = rules_df.copy()
-    else:
-        rules_for_analysis = selected_rules_df.copy()
-
     usage_df = feature_usage_from_rules(
-        rules_df=rules_for_analysis,
+        rules_df=rules_df,
         features=features,
         top_n=args.top_n_usage,
     )
 
     usage_df.to_csv(
-        os.path.join(args.out, "05_feature_usage_avg60_rules.csv"),
+        os.path.join(args.out, "04_feature_usage_by_profile.csv"),
         index=False,
         encoding="utf-8-sig",
     )
 
     direction_df = direction_stability_report(
-        rules_df=rules_for_analysis,
+        rules_df=rules_df,
         features=features,
         top_n=args.top_n_usage,
     )
 
     direction_df.to_csv(
-        os.path.join(args.out, "06_feature_direction_avg60_rules.csv"),
+        os.path.join(args.out, "05_feature_direction_stability.csv"),
         index=False,
         encoding="utf-8-sig",
     )
 
     monthly_df = monthly_rule_stability(
         valid=valid,
-        rules_df=rules_for_analysis,
+        rules=all_rules,
         target_col=args.target,
     )
 
     monthly_df.to_csv(
-        os.path.join(args.out, "07_monthly_rule_stability_avg60.csv"),
+        os.path.join(args.out, "06_monthly_rule_stability.csv"),
+        index=False,
+        encoding="utf-8-sig",
+    )
+
+    monthly_summary_df = summarize_monthly_stability(monthly_df)
+
+    monthly_summary_df.to_csv(
+        os.path.join(args.out, "07_monthly_rule_stability_summary.csv"),
         index=False,
         encoding="utf-8-sig",
     )
@@ -2132,12 +1742,12 @@ def main():
     contrib_df = conditional_feature_contribution(
         train=train,
         valid=valid,
-        rules_df=rules_for_analysis,
+        rules=all_rules,
         target_col=args.target,
     )
 
     contrib_df.to_csv(
-        os.path.join(args.out, "08_conditional_feature_contribution_avg60.csv"),
+        os.path.join(args.out, "08_conditional_feature_contribution.csv"),
         index=False,
         encoding="utf-8-sig",
     )
@@ -2145,7 +1755,7 @@ def main():
     conditional_summary_df = summarize_conditional_contribution(contrib_df)
 
     conditional_summary_df.to_csv(
-        os.path.join(args.out, "09_conditional_feature_contribution_summary_avg60.csv"),
+        os.path.join(args.out, "09_conditional_feature_contribution_summary.csv"),
         index=False,
         encoding="utf-8-sig",
     )
@@ -2156,46 +1766,36 @@ def main():
         usage_df=usage_df,
         direction_df=direction_df,
         conditional_summary_df=conditional_summary_df,
+        monthly_df=monthly_df,
     )
 
     feature_grade_df.to_csv(
-        os.path.join(args.out, "10_feature_usefulness_grade_avg60.csv"),
+        os.path.join(args.out, "10_feature_usefulness_grade.csv"),
         index=False,
         encoding="utf-8-sig",
     )
 
     write_feature_grade_text(feature_grade_df, args.out)
 
-    print("\n[AVG60 RULE PORTFOLIO]")
-    if len(selected_rules_df):
-        print("rule_count:", len(selected_rules_df))
-        print("avg_valid_precision:", selected_rules_df["valid_precision"].mean())
-        print("avg_valid_lift:", selected_rules_df["valid_lift"].mean())
+    print("\n[TOP FINAL RULES]")
+    show_cols = [
+        "profile",
+        "rank",
+        "rule",
+        "features",
+        "train_count",
+        "train_precision",
+        "train_lift",
+        "valid_count",
+        "valid_precision",
+        "valid_lift",
+        "pass_valid_55",
+        "pass_valid_60",
+    ]
+    show_cols = [c for c in show_cols if c in rules_df.columns]
+    print(rules_df[show_cols].head(40).to_string(index=False))
 
-        if "portfolio_unique_feature_sets" in selected_rules_df.columns:
-            print("unique_feature_sets:", selected_rules_df["portfolio_unique_feature_sets"].iloc[0])
-            print("unique_rule_families:", selected_rules_df["portfolio_unique_rule_families"].iloc[0])
-
-        show_cols = [
-            "profile",
-            "rank",
-            "rule",
-            "features",
-            "train_count",
-            "train_precision",
-            "valid_count",
-            "valid_precision",
-            "valid_lift",
-            "pass_valid_60",
-            "feature_set_key",
-            "rule_family_key",
-        ]
-        show_cols = [c for c in show_cols if c in selected_rules_df.columns]
-        print(selected_rules_df[show_cols].head(50).to_string(index=False))
-    else:
-        print("[NONE]")
-
-    print("\n[FEATURE USEFULNESS GRADES - AVG60]")
+    print("\n[FEATURE USEFULNESS GRADES]")
     show_cols = [
         "feature",
         "grade",
@@ -2203,7 +1803,6 @@ def main():
         "action",
         "score",
         "reason",
-        "total_usage_count",
         "avg_valid_precision_when_used",
         "avg_valid_lift_when_used",
         "best_valid_precision_when_used",
@@ -2236,41 +1835,24 @@ if __name__ == "__main__":
 # 실행 예시
 # ============================================================
 """
-기본 실행:
-python feature_selector_v36_avg60.py ^
-  --csv csv/low_result_7_desc.csv ^
-  --out feature_selector_v36_avg60_out_dedup ^
+python feature_selector_v35_custom.py ^
+  --csv csv\low_result_7_desc.csv ^
+  --out feature_selector_v35_custom_out ^
   --date-col today ^
   --max-depth 5 ^
-  --beam-width 600 ^
-  --top-k 200 ^
-  --top-n-usage 120 ^
-  --corr-threshold 0.90 ^
-  --target-avg-valid-precision 0.60 ^
-  --portfolio-min-rule-count 10 ^
-  --portfolio-max-rule-count 80 ^
-  --portfolio-min-valid-count 25 ^
-  --max-same-feature-set 3 ^
-  --max-same-rule-family 2 ^
-  --max-same-feature-pair 8 ^
-  --portfolio-min-precision-floor 0.55
+  --beam-width 500 ^
+  --top-k 150 ^
+  --top-n-usage 80 ^
+  --corr-threshold 0.90
 
 더 넓게:
-python feature_selector_v36_avg60.py ^
-  --csv csv/low_result_7_desc.csv ^
-  --out feature_selector_v36_avg60_out_dedup_wide ^
+python feature_selector_v35_custom.py ^
+  --csv csv\low_result_7_desc.csv ^
+  --out feature_selector_v35_custom_out_wide ^
   --date-col today ^
   --max-depth 6 ^
-  --beam-width 1000 ^
-  --top-k 250 ^
-  --top-n-usage 150 ^
-  --corr-threshold 0.90 ^
-  --target-avg-valid-precision 0.60 ^
-  --portfolio-min-rule-count 10 ^
-  --portfolio-max-rule-count 100 ^
-  --portfolio-min-valid-count 25 ^
-  --max-same-feature-set 4 ^
-  --max-same-rule-family 2 ^
-  --max-same-feature-pair 10 ^
-  --portfolio-min-precision-floor 0.55
+  --beam-width 3000 ^
+  --top-k 200 ^
+  --top-n-usage 100 ^
+  --corr-threshold 0.90
 """
