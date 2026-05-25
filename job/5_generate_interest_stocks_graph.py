@@ -27,7 +27,7 @@ else:
 
 from utils import add_technical_features, plot_candles_weekly, plot_candles_daily, \
     drop_sparse_columns, drop_trading_halt_rows, get_kor_summary_ticker_dict_list, get_favorite_ticker_dict_list, \
-    get_stock_name
+    get_stock_name, is_korean_stock_business_day
 
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
 root_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(=루트)
@@ -107,6 +107,10 @@ def process_one(idx, count, ticker, tickers_dict):
 
 
 if __name__ == "__main__":
+    if not is_korean_stock_business_day(verbose=False):
+        # print("한국증시 영업일이 아니므로 실행하지 않습니다.")
+        sys.exit(0)
+
     start = time.time()   # 시작 시간(초)
     nowTime = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
     print(f'{nowTime} - 🕒 running 5_generate_interest_stocks_graph.py...')

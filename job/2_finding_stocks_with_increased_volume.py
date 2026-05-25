@@ -16,10 +16,6 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import time
 
-start = time.time()   # 시작 시간(초)
-nowTime = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
-print(f'{nowTime} - 🕒 running 2_finding_stocks_with_increased_volume.py...')
-
 # 자동 탐색 (utils.py를 찾을 때까지 위로 올라가 탐색)
 here = Path(__file__).resolve()
 for parent in [here.parent, *here.parents]:
@@ -30,7 +26,17 @@ else:
     raise FileNotFoundError("utils.py를 상위 디렉터리에서 찾지 못했습니다.")
 
 from utils import fetch_stock_data, get_kor_ticker_list, get_kor_ticker_dict_list, add_technical_features, \
-    plot_candles_weekly, plot_candles_daily, drop_trading_halt_rows, drop_sparse_columns, get_stock_name
+    plot_candles_weekly, plot_candles_daily, drop_trading_halt_rows, drop_sparse_columns, get_stock_name, \
+    is_korean_stock_business_day
+
+if not is_korean_stock_business_day(verbose=False):
+    # print("한국증시 영업일이 아니므로 실행하지 않습니다.")
+    sys.exit(0)
+
+
+start = time.time()   # 시작 시간(초)
+nowTime = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
+print(f'{nowTime} - 🕒 running 2_finding_stocks_with_increased_volume.py...')
 
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
 root_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(=루트)
