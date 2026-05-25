@@ -223,6 +223,16 @@ def mine_good_rules(
         "\n"
     )
 
+    print(
+        "\nTRAIN_WF_MIN_COUNT", TRAIN_WF_MIN_COUNT,
+        "\nTRAIN_WF_MIN_RATE", TRAIN_WF_MIN_RATE,
+        "\nTRAIN_WF_MIN_MEAN_RATE", TRAIN_WF_MIN_MEAN_RATE,
+        "\nTRAIN_WF_MIN_RECENT_RATE", TRAIN_WF_MIN_RECENT_RATE,
+        "\nTRAIN_WF_MIN_PASS_FOLDS", TRAIN_WF_MIN_PASS_FOLDS,
+        "\nTRAIN_WF_MIN_RECENT_COUNT", TRAIN_WF_MIN_RECENT_COUNT,
+        "\n"
+    )
+
     if feature_groups is None:
         feature_groups = {}
     if group_limits is None:
@@ -437,16 +447,6 @@ def eval_rule_train_walk_forward(train, conds, folds):
     하나의 룰을 train 내부 walk-forward fold별로 평가한다.
     target은 target_before_stop_7 == 1 기준으로 고정한다.
     """
-    print(
-        "\nTRAIN_WF_MIN_COUNT", TRAIN_WF_MIN_COUNT,
-        "\nTRAIN_WF_MIN_RATE", TRAIN_WF_MIN_RATE,
-        "\nTRAIN_WF_MIN_MEAN_RATE", TRAIN_WF_MIN_MEAN_RATE,
-        "\nTRAIN_WF_MIN_RECENT_RATE", TRAIN_WF_MIN_RECENT_RATE,
-        "\nTRAIN_WF_MIN_PASS_FOLDS", TRAIN_WF_MIN_PASS_FOLDS,
-        "\nTRAIN_WF_MIN_RECENT_COUNT", TRAIN_WF_MIN_RECENT_COUNT,
-        "\n"
-    )
-
     if not folds:
         return {
             "wf_pass": True,
