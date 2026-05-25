@@ -2287,8 +2287,8 @@ def get_exclude_columns(df=None):
         "stock_market",
 
         # 시장 피쳐는 regime 과적합 가능성이 커서 기본 제외
-        "market_today_pct",
-        "market_5d_pct",
+        # "market_today_pct",
+        # "market_5d_pct",
 
         # stop / target / label
         "stop_loss",

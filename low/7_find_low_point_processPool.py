@@ -578,20 +578,20 @@ def process_one_with_df(df, idx, ticker, tickers_dict, market_context):
         "pct_vs_lastweek": result['pct_vs_lastweek'],          # 단독 AUC는 약하지만 룰 조합에서 강함, 없으면 데드캣 상승, 주요 피쳐
         "dist_to_ma5": dist_to_ma5,                            # dist_from_low_20d, pct_vs_lastweek, dist_to_ma20와 중복이 큼, 대체 가능
         "ma5_chg_rate": ma5_chg_rate,                          # 5일선 기울기
-        "today_tr_val_eok": today_tr_val_eok,                  # 오늘 거래대금 (억)
         "BB_perc": BB_perc,                                    # 볼린저밴드 위치
+        # "today_tr_val_eok": today_tr_val_eok,                  # 오늘 거래대금 (억)
 
-        "lower_wick_ratio": lower_wick_ratio,                  # 아랫꼬리 비율
-        "upper_wick_ratio": upper_wick_ratio,                  # 윗꼬리 비율
+        # "lower_wick_ratio": lower_wick_ratio,                  # 아랫꼬리 비율
+        # "upper_wick_ratio": upper_wick_ratio,                  # 윗꼬리 비율
         "body_ratio": body_ratio,                              # 몸통 비율
         "intraday_return": intraday_return,                    # 시가 대비 종가가 얼마나 회복되었는가
         "rebound_from_7d_low": rebound_from_7d_low,            # 현재 종가가 7일 최저가보다 얼마나 위에 있는지 비율로 표현
 
         "price_power_value": price_power_value,                # 당일 등락률(today_pct)과 거래대금(today_tr_val_eok)을 결합한 지표
         "body_value_power": body_value_power,                  # 당일 캔들의 “몸통(body)” 크기와 방향성, 당일 수익률, 거래대금 규모를 결합해서 만든 일종의 매수세 강도 지표
-        "room_to_20d_high": room_to_20d_high,                  # 주가가 어느 정도 반등했는지 또는 앞으로 상승 여력이 얼마나 있는지를 보는 피쳐
-        "room_to_60d_high": room_to_60d_high,
         "rebound_vs_prior_drop": rebound_vs_prior_drop,        # 최근 하락폭 대비 오늘까지 얼마나 반등했는가
+        # "room_to_20d_high": room_to_20d_high,                  # 주가가 어느 정도 반등했는지 또는 앞으로 상승 여력이 얼마나 있는지를 보는 피쳐
+        # "room_to_60d_high": room_to_60d_high,
 
         "market_today_pct": market_today_pct,                  # 해당 종목이 속한 시장의 당일 등락률
         "market_5d_pct": market_5d_pct,                        # 해당 종목이 속한 시장의 최근 5거래일 등락률
