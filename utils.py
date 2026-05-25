@@ -2355,3 +2355,57 @@ def get_features(df: pd.DataFrame):
         features.append(c)
 
     return features
+
+
+import pytz
+KST = pytz.timezone("Asia/Seoul")
+
+
+def is_korean_stock_business_day(date=None, verbose=False):
+    if date is None:
+        date = datetime.now(KST).strftime("%Y%m%d")
+    elif isinstance(date, datetime):
+        date = date.strftime("%Y%m%d")
+    else:
+        date = str(date).replace("-", "")
+
+    dt = datetime.strptime(date, "%Y%m%d")
+
+    if dt.weekday() >= 5:
+        if verbose:
+            print(f"[market-day-check] date={date}, weekend=True")
+        return False
+
+    test_tickers = {
+        "005930": "삼성전자",
+        "000660": "SK하이닉스",
+        "035420": "NAVER",
+    }
+
+    success_count = 0
+
+    for ticker, name in test_tickers.items():
+        try:
+            df = stock.get_market_ohlcv_by_date(date, date, ticker)
+
+            has_data = df is not None and not df.empty
+
+            if verbose:
+                print(
+                    f"[market-day-check] {name}({ticker}) "
+                    f"rows={0 if df is None else len(df)}, has_data={has_data}"
+                )
+
+            if has_data:
+                success_count += 1
+
+        except Exception as e:
+            if verbose:
+                print(f"[market-day-check] {name}({ticker}) failed: {repr(e)}")
+
+    is_open = success_count > 0
+
+    if verbose:
+        print(f"[market-day-check] date={date}, success_count={success_count}, is_open={is_open}")
+
+    return is_open
