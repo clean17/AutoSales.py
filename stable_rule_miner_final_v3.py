@@ -147,12 +147,24 @@ def prepare_df(df: pd.DataFrame, target_col: str, date_col: str) -> pd.DataFrame
     return df
 
 
-def split_train_valid_by_date(df: pd.DataFrame, valid_ratio: float):
-    split_idx = int(len(df) * (1 - valid_ratio))
-    train = df.iloc[:split_idx].copy().reset_index(drop=True)
-    valid = df.iloc[split_idx:].copy().reset_index(drop=True)
-    return train, valid
+def split_train_valid_by_date(df: pd.DataFrame, valid_ratio: float, date_col: str):
+    work = df.sort_values(date_col).reset_index(drop=True).copy()
+    unique_dates = sorted(work[date_col].dropna().unique())
 
+    if len(unique_dates) < 2:
+        split_idx = int(len(work) * (1 - valid_ratio))
+        return work.iloc[:split_idx].copy(), work.iloc[split_idx:].copy()
+
+    cut_idx = int(len(unique_dates) * (1 - valid_ratio))
+    cut_idx = max(1, min(cut_idx, len(unique_dates) - 1))
+    split_date = unique_dates[cut_idx]
+
+    train = work[work[date_col] < split_date].copy().reset_index(drop=True)
+    valid = work[work[date_col] >= split_date].copy().reset_index(drop=True)
+
+    print("[INFO] split_date:", pd.to_datetime(split_date).date())
+
+    return train, valid
 
 def wilson_lcb(success: int, n: int, z: float = 1.64) -> float:
     if n <= 0:
@@ -1315,7 +1327,7 @@ def rules_to_df(rules: List[Rule]) -> pd.DataFrame:
             for k, v in mon.items():
                 row[f"{prefix}_{k}"] = v
 
-        row["pass_valid_60"] = (
+        row["pass_valid_60_n60"] = (
                 row["valid_precision"] >= 0.60
                 and row["valid_lift"] >= 1.45
                 and row["valid_count"] >= 60
@@ -1333,7 +1345,7 @@ def rules_to_df(rules: List[Rule]) -> pd.DataFrame:
                 and row["valid_count"] >= 50
         )
 
-        row["pass_valid_70"] = (
+        row["pass_valid_70_n30"] = (
                 row["valid_precision"] >= 0.70
                 and row["valid_lift"] >= 1.65
                 and row["valid_count"] >= 30
@@ -1531,6 +1543,7 @@ def main():
     train, valid = split_train_valid_by_date(
         df=df,
         valid_ratio=args.valid_ratio,
+        date_col=date_col,
     )
 
     print("=" * 80)
@@ -1638,8 +1651,8 @@ def main():
         encoding="utf-8-sig",
     )
 
-    rules_df[rules_df["pass_valid_60"]].to_csv(
-        os.path.join(args.out, "03_pass_valid_60.csv"),
+    rules_df[rules_df["pass_valid_60_n60"]].to_csv(
+        os.path.join(args.out, "03_pass_valid_60_n60.csv"),
         index=False,
         encoding="utf-8-sig",
     )
@@ -1650,8 +1663,8 @@ def main():
         encoding="utf-8-sig",
     )
 
-    rules_df[rules_df["pass_valid_70"]].to_csv(
-        os.path.join(args.out, "05_pass_valid_70.csv"),
+    rules_df[rules_df["pass_valid_70_n30"]].to_csv(
+        os.path.join(args.out, "05_pass_valid_70_n30.csv"),
         index=False,
         encoding="utf-8-sig",
     )
