@@ -56,6 +56,10 @@ MIN_CNT = 150
 MAX_DEPTH = 5
 # MIN_RATE = GOOD_EXPAND_RATIO[(MAX_DEPTH-1)]
 MIN_RATE = 0.70
+
+# OR 결합 후 전체 train precision 최소 기준
+# 개별 룰은 좋아도 OR로 합쳤을 때 precision이 무너지면 제외
+COMBINED_OR_MIN_PRECISION = 0.60
 BEAM = 10000
 TOP_N = 10000
 
@@ -73,13 +77,11 @@ TRAIN_WF_FOLDS = 5
 TRAIN_WF_START_RATIO = 0.35
 TRAIN_WF_VALID_RATIO = 0.13
 
-TRAIN_WF_MIN_COUNT = 3
-TRAIN_WF_MIN_RATE = 0.50
-TRAIN_WF_MIN_MEAN_RATE = 0.55
-TRAIN_WF_MIN_RECENT_RATE = 0.00
-TRAIN_WF_MIN_PASS_FOLDS = 2
-
-TRAIN_WF_MIN_RECENT_COUNT = 8
+TRAIN_WF_MIN_COUNT = 6
+TRAIN_WF_MIN_RATE = 0.60
+TRAIN_WF_MIN_MEAN_RATE = 0.60
+TRAIN_WF_MIN_RECENT_RATE = 0.55
+TRAIN_WF_MIN_PASS_FOLDS = 3
 
 # ============================================================
 # Wilson lower bound 설정
@@ -91,7 +93,7 @@ USE_WILSON_FILTER = False
 TRAIN_WILSON_LOW_MIN = 0.45
 WILSON_Z = 1.96
 
-redule_rule = 0  # 중복 룰 제거 조건
+redule_rule = 1  # 중복 룰 제거 조건
 
 
 
@@ -220,16 +222,6 @@ def mine_good_rules(
         "\nmin_count", min_count,
         "\nmax_depth", max_depth,
         "\nexpand_ratio", GOOD_EXPAND_RATIO,
-        "\n"
-    )
-
-    print(
-        "\nTRAIN_WF_MIN_COUNT", TRAIN_WF_MIN_COUNT,
-        "\nTRAIN_WF_MIN_RATE", TRAIN_WF_MIN_RATE,
-        "\nTRAIN_WF_MIN_MEAN_RATE", TRAIN_WF_MIN_MEAN_RATE,
-        "\nTRAIN_WF_MIN_RECENT_RATE", TRAIN_WF_MIN_RECENT_RATE,
-        "\nTRAIN_WF_MIN_PASS_FOLDS", TRAIN_WF_MIN_PASS_FOLDS,
-        "\nTRAIN_WF_MIN_RECENT_COUNT", TRAIN_WF_MIN_RECENT_COUNT,
         "\n"
     )
 
@@ -493,7 +485,6 @@ def eval_rule_train_walk_forward(train, conds, folds):
             "rate": rate,
         })
 
-    recent_count = rows[-1]["count"] if rows else 0
     recent_rate = rows[-1]["rate"] if rows else 0.0
     mean_rate = float(np.mean(active_rates)) if active_rates else 0.0
     min_rate = float(np.min(active_rates)) if active_rates else 0.0
@@ -502,8 +493,7 @@ def eval_rule_train_walk_forward(train, conds, folds):
     wf_pass = (
             pass_folds >= TRAIN_WF_MIN_PASS_FOLDS
             and mean_rate >= TRAIN_WF_MIN_MEAN_RATE
-            # and recent_count >= TRAIN_WF_MIN_RECENT_COUNT
-            # and recent_rate >= TRAIN_WF_MIN_RECENT_RATE
+            and recent_rate >= TRAIN_WF_MIN_RECENT_RATE
     )
 
     return {
@@ -594,6 +584,15 @@ def find_good_rule(m_ratio, m_count):
             "valid_n", len(f["valid_idx"])
         )
     print("\n")
+
+    print(
+        "\n[TRAIN WF] TRAIN_WF_MIN_COUNT", TRAIN_WF_MIN_COUNT,
+        "\n[TRAIN WF] TRAIN_WF_MIN_RATE", TRAIN_WF_MIN_RATE,
+        "\n[TRAIN WF] TRAIN_WF_MIN_MEAN_RATE", TRAIN_WF_MIN_MEAN_RATE,
+        "\n[TRAIN WF] TRAIN_WF_MIN_RECENT_RATE", TRAIN_WF_MIN_RECENT_RATE,
+        "\n[TRAIN WF] TRAIN_WF_MIN_PASS_FOLDS", TRAIN_WF_MIN_PASS_FOLDS,
+        "\n"
+    )
 
     # 룰 생성은 train으로만 한다
     features = get_features(train)
@@ -735,8 +734,8 @@ def find_good_rule(m_ratio, m_count):
         print("wf_recent_rate p90:", np.percentile(debug_df["wf_recent_rate"], 90))
         print("wf_recent_rate p50:", np.percentile(debug_df["wf_recent_rate"], 50))
 
-    print("[GOOD] fail reason:", fail_reason)
-    print(f"\n[GOOD] train/wf 통과 룰 개수: {len(passed)} / {len(rules)}")
+    print("\n[GOOD] fail reason:", fail_reason)
+    print(f"[GOOD] train/wf 통과 룰 개수: {len(passed)} / {len(rules)}")
 
     # ============================================================
     # WF/train 성능순으로 통과 룰 정렬
@@ -756,9 +755,66 @@ def find_good_rule(m_ratio, m_count):
 
     selected = []
 
+    # ============================================================
+    # OR 결합 후 precision 검사
+    # 목적:
+    #   개별 룰 precision은 좋아도 OR로 합치면 전체 precision이 낮아질 수 있음.
+    #   따라서 룰을 하나씩 추가할 때마다 train 기준 OR 전체 precision을 계산해서
+    #   COMBINED_OR_MIN_PRECISION 미만이면 selected에 추가하지 않음.
+    # ============================================================
+    selected_mask = np.zeros(len(train), dtype=bool)
+    train_target = (train["target_before_stop_7"].to_numpy() == 1)
+
+    select_fail_reason = {
+        "add_cnt": 0,
+        "combined_precision": 0,
+        "selected": 0,
+    }
+
     for row in passed:
         name = f"rule_{len(selected) + 1:03d}"
-        selected.append((name, row["conds"]))
+        conds = row["conds"]
+
+        # 현재 룰이 잡는 행 계산
+        rule_mask = make_mask_from_conds(train, conds)
+        # 기존과 겹치치 않는 이번 룰이 가져오는 데이터
+        add_mask = rule_mask & ~selected_mask
+        add_cnt = int(add_mask.sum())
+
+        # 이미 선택된 룰과 거의 겹치면 추가하지 않음.. 가치 없음
+        if add_cnt < 3:
+            select_fail_reason["add_cnt"] += 1
+            continue
+
+        # 지금까지 선택된 + 현재 룰까지 포함한 전체 커버
+        candidate_mask = selected_mask | rule_mask
+        # 전체 커버 수
+        candidate_cnt = int(candidate_mask.sum())
+        # 그 중 정답(True) 개수
+        candidate_pos = int((candidate_mask & train_target).sum())
+        # 전체 정확도
+        candidate_precision = candidate_pos / candidate_cnt if candidate_cnt else 0.0
+
+        # 합쳤는데 정확도가 떨어지면 패스
+        if candidate_precision < COMBINED_OR_MIN_PRECISION:
+            select_fail_reason["combined_precision"] += 1
+            continue
+
+        selected.append((name, conds))
+        selected_mask = candidate_mask
+        select_fail_reason["selected"] += 1
+
+        print(
+            "[OR KEEP]",
+            name,
+            f"add_cnt={add_cnt}",
+            f"combined_selected={candidate_cnt}",
+            f"combined_pos={candidate_pos}",
+            f"combined_precision={candidate_precision * 100:.2f}%",
+            f"conds={conds}",
+        )
+
+    print("[OR SELECT] fail reason:", select_fail_reason)
 
     # ============================================================
     # 중복 룰 제거
@@ -1025,13 +1081,14 @@ def reduce_rules_by_new_rows(df, selected, min_new_rows=2):
         if new_cnt >= min_new_rows:
             final.append((name, conds))
             used_mask |= rule_mask
-            print(
-                f"[REDUCE KEEP] {name} total_cnt={total_cnt} new_cnt={new_cnt} conds={conds}"
-            )
+            # print(
+            #     f"[REDUCE KEEP] {name} total_cnt={total_cnt} new_cnt={new_cnt} conds={conds}"
+            # )
         else:
-            print(
-                f"[REDUCE DROP] {name} total_cnt={total_cnt} new_cnt={new_cnt} conds={conds}"
-            )
+            # print(
+            #     f"[REDUCE DROP] {name} total_cnt={total_cnt} new_cnt={new_cnt} conds={conds}"
+            # )
+            pass
 
     # 살아남은 룰 수
     print("[REDUCE] final_rule_count:", len(final))
