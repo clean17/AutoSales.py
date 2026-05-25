@@ -51,17 +51,17 @@ CSV_PATH = os.path.join(csv_dir, "low_result_7_desc.csv")
 GOOD_OUT_PATH = Path("lowscan_good_rules.py")
 FEATURE_REPORT_PATH = GOOD_OUT_PATH.with_suffix(".feature_report.csv")
 
-GOOD_EXPAND_RATIO = [0.32, 0.52, 0.65, 0.70, 0.75]
-MIN_CNT = 150
-MAX_DEPTH = 5
+GOOD_EXPAND_RATIO = [0.45, 0.55, 0.65, 0.75, 0.80]
+MIN_CNT = 50
+MAX_DEPTH = 4
 # MIN_RATE = GOOD_EXPAND_RATIO[(MAX_DEPTH-1)]
 MIN_RATE = 0.70
 
 # OR 결합 후 전체 train precision 최소 기준
 # 개별 룰은 좋아도 OR로 합쳤을 때 precision이 무너지면 제외
 COMBINED_OR_MIN_PRECISION = 0.60
-BEAM = 10000
-TOP_N = 10000
+BEAM = 200000
+TOP_N = 300000
 
 VALID_RATIO = 0.20
 
@@ -583,7 +583,6 @@ def find_good_rule(m_ratio, m_count):
             "train_n", len(f["train_idx"]),
             "valid_n", len(f["valid_idx"])
         )
-    print("\n")
 
     print(
         "\n[TRAIN WF] TRAIN_WF_MIN_COUNT", TRAIN_WF_MIN_COUNT,
@@ -804,15 +803,15 @@ def find_good_rule(m_ratio, m_count):
         selected_mask = candidate_mask
         select_fail_reason["selected"] += 1
 
-        print(
-            "[OR KEEP]",
-            name,
-            f"add_cnt={add_cnt}",
-            f"combined_selected={candidate_cnt}",
-            f"combined_pos={candidate_pos}",
-            f"combined_precision={candidate_precision * 100:.2f}%",
-            f"conds={conds}",
-        )
+        # print(
+        #     "[OR KEEP]",
+        #     name,
+        #     f"add_cnt={add_cnt}",
+        #     f"combined_selected={candidate_cnt}",
+        #     f"combined_pos={candidate_pos}",
+        #     f"combined_precision={candidate_precision * 100:.2f}%",
+        #     f"conds={conds}",
+        # )
 
     print("[OR SELECT] fail reason:", select_fail_reason)
 
@@ -907,6 +906,9 @@ def eval_combined_good_rules(df, selected, title=""):
     positive_coverage = positive_count / positive_total if positive_total else 0.0
     # 룰 적용 후 양성비율이 베이스라인 대비 몇 배 좋아졌는지
     lift = precision / base_positive_rate if base_positive_rate else 0.0
+
+    # if lift < 1:
+    #     return
 
     print(f"\n[{title}] combined good rules")
     print("rule_count:", len(selected))
