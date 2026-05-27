@@ -14,6 +14,33 @@ import itertools
 import time
 import pandas as pd
 
+
+import configparser
+from pathlib import Path
+from urllib.parse import quote
+
+
+def get_mudfish_proxies():
+    config = configparser.ConfigParser()
+
+    cfg_path = Path(__file__).resolve().parent.parent / "config" / "config.ini"
+    read_files = config.read(cfg_path, encoding="utf-8")
+
+    if not read_files:
+        raise FileNotFoundError(f"config.ini 파일을 읽지 못했습니다: {cfg_path}")
+
+    mud_vpn = config["vpn"]["mud_vpn"]
+    encoded_username = quote(config["vpn"]["mudfish_username"])
+    encoded_password = quote(config["vpn"]["mudfish_password"])
+
+    proxies = {
+        "http": f"socks5h://{encoded_username}:{encoded_password}@{mud_vpn}",
+        "https": f"socks5h://{encoded_username}:{encoded_password}@{mud_vpn}",
+    }
+
+    return proxies
+
+
 KIND_LIST_URL = "https://kind.krx.co.kr/corpgeneral/corpList.do?method=download&searchType=13"
 
 def fetch_kospi_kosdaq_payload_from_kind(url: str = KIND_LIST_URL) -> list:
@@ -22,13 +49,24 @@ def fetch_kospi_kosdaq_payload_from_kind(url: str = KIND_LIST_URL) -> list:
     회사명/시장구분/종목코드/업종을 가져와 payload 리스트로 반환.
     - 시장구분: '유가' -> stock_market='kospi', '코스닥' -> 'kosdaq'
     """
+    proxies = get_mudfish_proxies()
 
     headers = {
-        "User-Agent": "Mozilla/5.0",
-        "Referer": "https://kind.krx.co.kr/",
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/125.0.0.0 Safari/537.36"
+        ),
+        "Referer": "https://kind.krx.co.kr/corpgeneral/corpList.do?method=loadInitPage",
+        "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
     }
 
-    r = requests.get(url, headers=headers, timeout=30)
+    r = requests.get(
+        url,
+        headers=headers,
+        proxies=proxies,
+        timeout=30,
+    )
     r.raise_for_status()
 
     # KIND는 한글 인코딩이 cp949/euc-kr인 경우가 흔함
