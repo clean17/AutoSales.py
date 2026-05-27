@@ -21,6 +21,11 @@ v2에서는 month_crash_precision, max_valid_crash_months, wf_crash_precision, f
 
 이 버전의 목적은
 valid 70% + 월별 안정성 + walk-forward 안정성까지 통과한 단일 룰만 남기기
+
+한계
+OR 룰셋 없음
+coverage 확장 어려움
+train/valid 2분할이라 valid가 룰 선택과 검증을 동시에 담당
 """
 
 TARGET_COL = "target_before_stop_7"

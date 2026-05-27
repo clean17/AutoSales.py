@@ -17,6 +17,7 @@ import pandas as pd
 - 12_or_rule_sets.csv 출력
 
 단일 룰 여러 개를 OR로 묶어 평가
+>> 커버리지 증가, 정확도 감소
 """
 
 TARGET_COL = "target_before_stop_7"
