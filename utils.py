@@ -1214,6 +1214,7 @@ def plot_candles_weekly(
         ax_price=None,
         ax_volume=None,
         date_tick=10,
+        today=None,
 ):
     # 입력 표준화
     df = pd.DataFrame(data).copy()
@@ -1288,6 +1289,40 @@ def plot_candles_weekly(
         ax_price.plot(x, ub, '--', color=GRAY1, alpha=0.85, label='볼린저밴드 상한선', zorder=0)
         ax_price.plot(x, lb, '--', color=GRAY1, alpha=0.85, label='볼린저밴드 하한선', zorder=0)
         ax_price.fill_between(x, ub, lb, color=GRAY2, alpha=0.18, zorder=-1)
+
+    # 오늘 위치 표시: daily today -> weekly index(W-FRI)로 변환
+    if today is not None:
+        today_ts = pd.to_datetime(today).normalize()
+
+        if today_ts in df.index.normalize():
+            week_label = today_ts.to_period('W-FRI').end_time.normalize()
+
+            if week_label in w.index:
+                x_pos = w.index.get_loc(week_label)
+                mark_idx = week_label
+            else:
+                # 혹시 week_label이 없으면 today 이전/같은 마지막 주봉 선택
+                candidates = w.index[w.index <= week_label]
+                if len(candidates) == 0:
+                    mark_idx = None
+                else:
+                    mark_idx = candidates[-1]
+                    x_pos = w.index.get_loc(mark_idx)
+
+            if mark_idx is not None:
+                high_price = w.loc[mark_idx, col_h]
+                y_pos = high_price * 1.01
+
+                ax_price.text(
+                    x_pos,
+                    y_pos,
+                    '◀◀◀',
+                    ha='center',
+                    va='bottom',
+                    fontsize=8,
+                    rotation=90,
+                    zorder=10,
+                )
 
     # ax_price.tick_params(axis='x', which='both', labelbottom=False)  # 위 축 날짜 라벨 숨김
     ax_price.tick_params(axis='x', which='both', labelbottom=True)   # 윗 축 라벨 표시
@@ -2132,6 +2167,109 @@ def make_trade_labels(high_rates, low_rates, close_rates, stop_loss):
     return labels
 
 
+def make_trade_labels_v2(high_rates, low_rates, close_rates, stop_loss):
+    """
+    high_rates  : 고가 기준 일별 수익률 리스트
+    low_rates   : 저가 기준 일별 수익률 리스트
+    close_rates : 종가 기준 일별 수익률 리스트
+    stop_loss   : 예: -4, -5, -6
+    """
+
+    # 목표치 도달일
+    day_to_5 = first_reach_day_from_rates(high_rates, 5, mode="up")
+    day_to_10 = first_reach_day_from_rates(high_rates, 10, mode="up")
+    day_to_15 = first_reach_day_from_rates(high_rates, 15, mode="up")
+
+    # stop_loss 보다 낮아진 날 (이탈한 날)
+    stop_day = first_reach_day_from_rates(low_rates, stop_loss, mode="down")
+
+    def relation(target_day):
+        # 횡보
+        if target_day is None and stop_day is None:
+            return {
+                "target_before_stop": False,    # 이탈 보다 먼저 성공
+                "stop_before_target": False,    # 성공 보다 먼저 이탈
+                "target_stop_same_day": False,  # 이탈과, 성공이 같은 날
+                "no_target_no_stop": True,      # 이탈도 성공도 아닌 횡보
+            }
+
+        # 성공
+        if target_day is not None and stop_day is None:
+            return {
+                "target_before_stop": True,
+                "stop_before_target": False,
+                "target_stop_same_day": False,
+                "no_target_no_stop": False,
+            }
+
+        # 이탈
+        if target_day is None and stop_day is not None:
+            return {
+                "target_before_stop": False,
+                "stop_before_target": True,
+                "target_stop_same_day": False,
+                "no_target_no_stop": False,
+            }
+
+        # 성공
+        if target_day < stop_day:
+            return {
+                "target_before_stop": True,
+                "stop_before_target": False,
+                "target_stop_same_day": False,
+                "no_target_no_stop": False,
+            }
+
+        # 이탈 후 성공
+        if stop_day < target_day:
+            return {
+                "target_before_stop": False,
+                "stop_before_target": True,
+                "target_stop_same_day": False,
+                "no_target_no_stop": False,
+            }
+
+        # 같은 날 이탈 + 성공
+        return {
+            "target_before_stop": False,
+            "stop_before_target": False,
+            "target_stop_same_day": True,
+            "no_target_no_stop": False,
+        }
+
+    rel10 = relation(day_to_10)
+    rel15 = relation(day_to_15)
+
+    labels = {
+        "day_to_5": day_to_5 if day_to_5 is not None else 0,      # 4% 도달 날짜
+        "day_to_10": day_to_10 if day_to_10 is not None else 0,      # 7% 도달 날짜
+        "day_to_15": day_to_15 if day_to_15 is not None else 0,   # 12% 도달 날짜
+        "stop_day": stop_day if stop_day is not None else 0,      # 이탈 발생 날짜
+
+        "target_before_stop_10": rel10["target_before_stop"],
+        "stop_before_target_10": rel10["stop_before_target"],
+        "target_stop_same_day_10": rel10["target_stop_same_day"],
+        "no_target_no_stop_10": rel10["no_target_no_stop"],
+
+        "target_before_stop_15": rel15["target_before_stop"],
+        "stop_before_target_15": rel15["stop_before_target"],
+        "target_stop_same_day_15": rel15["target_stop_same_day"],
+        "no_target_no_stop_15": rel15["no_target_no_stop"],
+
+        # 속도 라벨: 반드시 target_before_stop 조건을 같이 봐야 함
+        "fast_success_10": rel10["target_before_stop"] and day_to_10 is not None and day_to_10 <= 4,
+        "slow_success_10": rel10["target_before_stop"] and day_to_10 is not None and 5 <= day_to_10 <= 7,
+        "fail_success_10": not rel10["target_before_stop"],
+
+        "fast_success_15": rel15["target_before_stop"] and day_to_15 is not None and day_to_15 <= 4,
+        "slow_success_15": rel15["target_before_stop"] and day_to_15 is not None and 5 <= day_to_15 <= 7,
+        "fail_success_15": not rel15["target_before_stop"],
+    }
+
+    return labels
+
+
+
 def split_train_valid_by_date_ratio(df, valid_ratio=0.10):
     """
     날짜 기준 train/valid 분리.
@@ -2409,3 +2547,160 @@ def is_korean_stock_business_day(date=None, verbose=False):
         print(f"[market-day-check] date={date}, success_count={success_count}, is_open={is_open}")
 
     return is_open
+
+
+
+def get_market_features_for_row(today, stock_market, market_context):
+    today_str = pd.to_datetime(today).strftime("%Y-%m-%d")
+    market = str(stock_market).lower()
+
+    item = market_context.get((today_str, market), None)
+
+    if item is None:
+        return {
+            "market_today_pct": np.nan,
+            "market_5d_pct": np.nan,
+            "market_breadth_up_ratio": np.nan,
+            "market_stock_count": 0,
+        }
+
+    return item
+
+
+def get_ticker_info(ticker, tickers_dict):
+    ticker = str(ticker).zfill(6)
+    info = tickers_dict.get(ticker, {})
+
+    if isinstance(info, dict):
+        stock_name = info.get("stock_name", "Unknown Stock")
+        stock_market = str(info.get("stock_market", "")).lower()
+        sector_code = info.get("sector_code", None)
+    else:
+        stock_name = info if info else "Unknown Stock"
+        stock_market = ""
+        sector_code = None
+
+    return {
+        "ticker": ticker,
+        "stock_name": stock_name,
+        "stock_market": stock_market,
+        "sector_code": sector_code,
+    }
+
+
+def normalize_price_df_for_market(df, ticker, tickers_dict):
+    """
+    시장 피쳐 계산용으로 종목 df를 정리한다.
+    원본 df index가 날짜인 구조를 기준으로 함.
+    """
+    info = get_ticker_info(ticker, tickers_dict)
+
+    if df is None or df.empty:
+        return None
+
+    tmp = df.copy()
+
+    # 날짜 index -> today 컬럼
+    if "today" not in tmp.columns:
+        tmp = tmp.reset_index()
+        first_col = tmp.columns[0]
+        tmp = tmp.rename(columns={first_col: "today"})
+
+    tmp["today"] = pd.to_datetime(tmp["today"], errors="coerce")
+    tmp["ticker"] = info["ticker"]
+    tmp["stock_market"] = info["stock_market"]
+
+    if "등락률" not in tmp.columns or "종가" not in tmp.columns:
+        return None
+
+    tmp["등락률"] = pd.to_numeric(tmp["등락률"], errors="coerce")
+    tmp["종가"] = pd.to_numeric(tmp["종가"], errors="coerce")
+
+    tmp = tmp.sort_values("today").reset_index(drop=True)
+
+    # 종목 자체 5일 수익률
+    tmp["stock_5d_pct"] = (tmp["종가"] / tmp["종가"].shift(5) - 1) * 100
+
+    return tmp[[
+        "today",
+        "ticker",
+        "stock_market",
+        "등락률",
+        "stock_5d_pct",
+    ]]
+
+
+def build_market_context_from_pickles(tickers, tickers_dict, pickle_dir):
+    """
+    전체 종목 pickle을 훑어서 날짜별/시장별 피쳐를 만든다.
+
+    생성:
+    - market_today_pct: 같은 시장 종목들의 당일 평균 등락률
+    - market_5d_pct: 같은 시장 종목들의 5일 수익률 평균
+    - market_breadth_up_ratio: 같은 시장 상승 종목 비율
+    - market_stock_count: 계산에 사용된 종목 수
+
+    반환:
+    market_context[(YYYY-MM-DD, stock_market)] = dict
+    """
+    parts = []
+
+    for ticker in tickers:
+        ticker = str(ticker).zfill(6)
+        filepath = os.path.join(pickle_dir, f"{ticker}.pkl")
+
+        if not os.path.exists(filepath):
+            continue
+
+        try:
+            one = safe_read_pickle(filepath)
+            one = normalize_price_df_for_market(one, ticker, tickers_dict)
+
+            if one is not None and not one.empty:
+                parts.append(one)
+
+        except Exception as e:
+            print(f"[market_context] skip {ticker}: {e}")
+            continue
+
+    if not parts:
+        print("[market_context] no data")
+        return {}
+
+    market_base = pd.concat(parts, ignore_index=True)
+
+    market_base = market_base[
+        market_base["today"].notna()
+        & market_base["stock_market"].notna()
+        & (market_base["stock_market"] != "")
+        ].copy()
+
+    market_daily = (
+        market_base
+        .groupby(["today", "stock_market"])
+        .agg(
+            market_today_pct=("등락률", "mean"),
+            market_5d_pct=("stock_5d_pct", "mean"),
+            market_breadth_up_ratio=("등락률", lambda s: (s > 0).mean()),
+            market_stock_count=("등락률", "count"),
+        )
+        .reset_index()
+    )
+
+    market_daily["today_str"] = market_daily["today"].dt.strftime("%Y-%m-%d")
+
+    market_context = {}
+
+    for _, r in market_daily.iterrows():
+        key = (r["today_str"], str(r["stock_market"]).lower())
+
+        market_context[key] = {
+            "market_today_pct": float(r["market_today_pct"]) if pd.notna(r["market_today_pct"]) else np.nan,
+            "market_5d_pct": float(r["market_5d_pct"]) if pd.notna(r["market_5d_pct"]) else np.nan,
+            "market_breadth_up_ratio": float(r["market_breadth_up_ratio"]) if pd.notna(r["market_breadth_up_ratio"]) else np.nan,
+            "market_stock_count": int(r["market_stock_count"]) if pd.notna(r["market_stock_count"]) else 0,
+        }
+
+    print(f"[market_context] built: {len(market_context)} date-market rows")
+
+    return market_context

@@ -1,0 +1,864 @@
+'''
+저점을 찾는 스크립트 (저점매수 + 반등 + 모멘텀)
+signal_any_drop 를 통해서 5일선이 20일선보다 아래에 있으면서 최근 -3%이 존재 + 오늘 4% 이상 상승
+'''
+import matplotlib
+matplotlib.use("Agg")  # 비인터랙티브 백엔드 (창 안 띄움)
+import os, sys
+import numpy as np
+import pandas as pd
+from datetime import datetime, timedelta
+from pathlib import Path
+import matplotlib.pyplot as plt
+import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
+
+
+
+# log_file = open("csv/output.log", "w", encoding="utf-8")
+# sys.stdout = log_file
+# sys.stderr = log_file
+# print("이건 파일로 감")
+# raise Exception("에러도 파일로 감")
+
+
+# 자동 탐색 (utils.py를 찾을 때까지 위로 올라가 탐색)
+here = Path(__file__).resolve()
+for parent in [here.parent, *here.parents]:
+    if (parent / "utils.py").exists():
+        sys.path.insert(0, str(parent))
+        break
+else:
+    raise FileNotFoundError("utils.py를 상위 디렉터리에서 찾지 못했습니다.")
+
+from utils import get_kor_ticker_dict_list, add_technical_features, plot_candles_weekly, plot_candles_daily, \
+    drop_sparse_columns, drop_trading_halt_rows, signal_any_drop, low_weekly_check, extract_numbers_from_filenames, \
+    sort_csv_by_today_desc, safe_read_pickle, safe_rate, round_float_features, pad_text, make_trade_labels_v2, \
+    get_market_features_for_row, get_ticker_info, build_market_context_from_pickles
+
+# 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
+script_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(root/low)
+project_root = os.path.dirname(script_dir)               # root
+
+pickle_dir = os.path.join(project_root, "pickle")
+# output_dir = 'F:\\5below20'
+output_dir = 'F:\\5below20_test'
+
+csv_dir = os.path.join(project_root, "csv")
+os.makedirs(csv_dir, exist_ok=True)
+
+CSV_PATH = os.path.join(csv_dir, "low_result_7_v2.csv")
+SORTED_CSV_PATH = os.path.join(csv_dir, "low_result_7_v2_desc.csv")
+
+
+# 목표 검증 수익률
+VALIDATION_TARGET_RETURN = 10
+EXECUTION_RATIO = 1
+# 최고가 판매는 힘드니까 보수적으로
+REQUIRED_HIGH_RETURN = VALIDATION_TARGET_RETURN * EXECUTION_RATIO
+VALIDATION_DAYS = 7
+STOP_LOSS = -6
+render_graph = 0
+
+# TEST_OFFSET = 90      # 2026부터 테스트
+TEST_OFFSET = 0
+START_OFFSET = 7      # 1이면 어제 기준부터 검증 가능.. 7일 검증을 사용하려면 7사용
+END_OFFSET = 600      # 2024년 ~ 2025년 학습
+
+if render_graph == 1:
+    START_OFFSET = START_OFFSET + 8
+else:
+    END_OFFSET = END_OFFSET - TEST_OFFSET  # df = df[:-TEST_OFFSET] 테스트 데이터를 자른만큼
+
+
+
+
+
+
+
+
+
+
+def process_ticker(ticker, tickers_dict, i, market_context):
+    results = []
+
+    info = get_ticker_info(ticker, tickers_dict)
+    ticker = info["ticker"]
+    stock_name = info["stock_name"]
+    # stock_name = get_stock_name(tickers_dict, ticker)
+
+    filepath = os.path.join(pickle_dir, f'{ticker}.pkl')
+    if not os.path.exists(filepath):
+        print(f"[process_ticker] [idx={i}] {ticker} 파일 없음")
+        return results
+
+    df = safe_read_pickle(filepath)
+
+    # 데이터가 부족하면 패스
+    if df is None or df.empty or len(df) < 70:
+        return None
+
+    # 거래정지/이상치 행 제거
+    df, _ = drop_trading_halt_rows(df)
+
+    # 2차 생성 feature
+    df = add_technical_features(df)
+
+    # 결측 제거
+    df, _ = drop_sparse_columns(df, threshold=0.10, check_inf=True, inplace=True)
+
+    # drop 이후 다시 생성
+    df = add_technical_features(df)
+
+    # 데이터가 부족하면 패스
+    if df.empty or len(df) < 70:
+        return None
+
+    # 거래대금
+    df["trading_value"] = df["종가"] * df["거래량"]
+
+    last_date = df.index[-1].strftime("%Y-%m-%d")
+    first_index = min(len(df), END_OFFSET)
+    first_date = df.index[-first_index].strftime("%Y-%m-%d")
+    # print(f"[idx={i}] {stock_name:<15} ({ticker})")  #  문자열을 왼쪽 정렬하고, 전체 너비를 15칸
+    print(f"{pad_text(i, 4)} | {first_date} - {last_date} | {ticker} | {pad_text(stock_name, 26)} | {len(df)}")  #  문자열을 왼쪽 정렬하고, 전체 너비를 15칸
+
+    for idx in range(START_OFFSET, END_OFFSET + 1):
+        res = process_one_with_df(df, idx, ticker, tickers_dict, market_context=market_context)
+        if res is not None:
+            results.append(res)
+
+    return results
+
+def process_one_with_df(df, idx, ticker, tickers_dict, market_context):
+    info = get_ticker_info(ticker, tickers_dict)
+
+    ticker = info["ticker"]
+    stock_name = info["stock_name"]
+    stock_market = info["stock_market"]
+    sector_code = info["sector_code"]
+    # stock_name = get_stock_name(tickers_dict, ticker)
+
+    # 과거 데이터(data)와 / 검증 데이터(remaining_data)로 분리
+    # [0:150](0~149), idx = 10 >> [0:140](0~139) / [140:](140~149)
+    if idx != 0:
+        data = df[:-idx]
+        remaining_data = df[len(df)-idx:]
+    else:
+        data = df
+        remaining_data = None
+
+    # 데이터가 부족하면 패스
+    if data.empty or len(data) < 70:
+        return
+
+    # print('─────────────────────────────────────────────────────────────')
+    # print(data.index[-1].date())
+    # print('─────────────────────────────────────────────────────────────')
+
+    ########################################################################
+
+    # closes = data['종가'].values
+    trading_value = data['trading_value']                            # 거래대금
+    today_tr_val = round(trading_value.iloc[-1], 2)                  # 마지막 거래일 거래대금
+    today_tr_val_eok = today_tr_val / 100_000_000                    # 마지막 거래일 거래대금(억)
+    mean_prev3 = round(trading_value.iloc[:-1].tail(3).mean(), 2)    # 마지막 3일 거래대금 평균
+    mean_prev5 = round(trading_value.iloc[:-1].tail(5).mean(), 2)    # 마지막 3일 거래대금 평균
+    mean_prev20 = round(trading_value.iloc[:-1].tail(20).mean(), 2)  # 마지막 20일 거래대금 평균
+    _mean_prev5_eok = mean_prev5 / 100_000_000
+    _mean_prev20_eok = mean_prev20 / 100_000_000
+
+    # ★★★★★ 오늘 거래대금 4억보다 작으면 패스 ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+    if today_tr_val_eok < 4:
+        return
+
+    # ★★★★★ 20거래일 평균 거래대금 3억보다 작으면 패스 ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+    if mean_prev20 / 100_000_000 < 3:
+        # if START_OFFSET == idx:
+        #     print('거래대금 미달', round(_mean_prev20_eok, 1))
+        return
+
+    # 5일, 20일 이동평균선 없으면 패스
+    REQUIRED_COLS = ["MA5", "MA20", "등락률"]
+
+    for col in REQUIRED_COLS:
+        if col not in data.columns:
+            return
+
+    """
+    depth4 (진입 gate) >> 실패 줄이기
+    - 오늘 +3% 이상
+    - 최근 7일 하락 존재
+    - 거래량 증가
+    """
+    # 오늘 제외 최근 7일 5일선이 20일선보다 계속 낮은데 -3.0% 하락이 있으면서 오늘 3.x% 상승 ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+    signal = signal_any_drop(data, 7, 3.3, -3.0)
+    # signal = signal_any_drop(data, 7, 2, -2.5)
+    if not signal:
+        return
+
+    ########################################################################
+    # feature 만들기
+    last = data.iloc[-1]
+
+    # 오늘의 5일션 변동율
+    _ma5_today          = data['MA5'].iloc[-1]
+    _ma5_yesterday      = data['MA5'].iloc[-2]
+    ma5_chg_rate        = safe_rate(_ma5_today, _ma5_yesterday)
+
+    ma5_recovery_rate_3d  = safe_rate(data["MA5"].iloc[-1], data["MA5"].iloc[-4])
+    # ma20_recovery_rate_3d = safe_rate(data["MA20"].iloc[-1], data["MA20"].iloc[-4])
+    # trend_signal_pct      = ma5_recovery_rate_3d - ma20_recovery_rate_3d * 0.5
+
+    vol5                = data['등락률'].tail(5).std()
+    vol15               = data['등락률'].tail(15).std()
+    # last20_ret          = data['등락률'].tail(20)
+
+    # 양봉 비율.. 의미없음
+    # pos20_ratio = (last20_ret > 0).mean()
+
+    # 거래대금 변동률
+    tr_value_ratio_3d = 0
+    tr_value_ratio_5d = 0
+    tr_value_ratio_20d = 0
+
+    if mean_prev3 > 0 and np.isfinite(mean_prev3):
+        tr_value_ratio_3d = today_tr_val / (mean_prev3 + 1e-9)
+
+    if mean_prev5 > 0 and np.isfinite(mean_prev5):
+        tr_value_ratio_5d = today_tr_val / (mean_prev5 + 1e-9)
+        log_tr_value_ratio_5d = np.log1p(tr_value_ratio_5d)
+
+    if mean_prev20 > 0 and np.isfinite(mean_prev20):
+        tr_value_ratio_20d = today_tr_val / (mean_prev20 + 1e-9)
+
+    # 최근 대비 오늘 거래대금 변동률 (중복)
+    # _tr_value_ratio       = tr_value_ratio_3d * 0.4 + tr_value_ratio_5d * 0.6
+    tr_val_rank_20d      = (trading_value.iloc[-20:] <= today_tr_val).mean()
+    # tr_val_rank_60d    = (trading_value.iloc[-60:] <= today_tr_val).mean()
+
+    # 최근 7거래일 최대 하락 (오늘 제외, 어제 포함)
+    _recent_7_ret        = data['등락률'].iloc[-8:-1]
+    max_drop_7d          = _recent_7_ret.min()
+
+    # 오늘 등락률
+    today_pct            = round(last['등락률'], 2)
+
+    # 20일 최저/최고 대비 몇 % 올라왔는지
+    _low_20d              = data['저가'].iloc[-20:].min()
+    _low_60d              = data['저가'].iloc[-60:].min()
+    _high_20d             = data["고가"].iloc[-20:].max()
+    _high_60d             = data["고가"].iloc[-60:].max()
+    dist_from_low_20d     = safe_rate(last['종가'], _low_20d)
+    # dist_from_low_60d     = safe_rate(last['종가'], _low_60d)  # 3달 저가 대비 종가는 너무 멀다
+
+    room_to_20d_high = (_high_20d / last['종가'] - 1) * 100
+    room_to_60d_high = (_high_60d / last['종가'] - 1) * 100
+
+    # 이평선 대비 종가의 변동률
+    dist_to_ma5           = safe_rate(last['종가'], last['MA5'])
+    dist_to_ma20          = safe_rate(last['종가'], last["MA20"])
+
+    # 5일선 자체의 저점 대비 회복률 (중복)
+    # _ma5_low_20d          = data["MA5"].iloc[-20:].min()
+    # dist_from_ma5_low_20d = safe_rate(last['MA5'], _ma5_low_20d)  # 중복
+
+    # 이평선 1일, 3일 전의 갭
+    _ma5_ma20_gap_1d_ago  = safe_rate(data["MA5"].iloc[-2], data["MA20"].iloc[-2])
+    _ma5_ma20_gap_3d_ago  = safe_rate(data["MA5"].iloc[-4], data["MA20"].iloc[-4])
+    _ma5_ma20_gap         = safe_rate(last["MA5"], last["MA20"])
+    _ma5_ma20_gap_chg_1d   = _ma5_ma20_gap - _ma5_ma20_gap_1d_ago
+    _ma5_ma20_gap_chg_3d   = _ma5_ma20_gap - _ma5_ma20_gap_3d_ago  # 중복
+
+    # 20일 저가~고가 구간에서 현재 종가가 어디쯤 있는지를 보는 값 (dist_to_ma20 상관 0.882)
+    _close_pos_20d        = (last["종가"] - _low_20d) / (_high_20d - _low_20d + 1e-9)
+
+    # -------------------------------
+    # 지표
+    # -------------------------------
+    # 하루 변화량 : 빠름, 노이즈 많음, 3일 : 신호는 늦엇지만 안정된 필터용
+    _MACD_hist_1d        = data['MACD_hist'].iloc[-1] - data['MACD_hist'].iloc[-2]
+    MACD_hist_3d         = data['MACD_hist'].iloc[-1] - data['MACD_hist'].iloc[-4]     # (AUC 0.545)
+    _ATR_pct              = last["ATR14"] / last["종가"] * 100  # 평균진폭 (변동성)
+
+    # -------------------------------
+    # 필터
+    # -------------------------------
+    BB_perc              = last['BB_perc']  # 중복
+    _dist_to_high_20d     = safe_rate(last['종가'], _high_20d)
+    _UltimateOsc          = last['UltimateOsc']
+    _CCI14                = last['CCI14']
+    _ADX14                = last['ADX14']
+    _gap_pct              = (data['시가'].iloc[-1] / data['종가'].iloc[-2] - 1) * 100
+    _vol_ratio_5_15      = round(vol5 / (vol15 + 1e-9), 3)   # 단기 변동성과 장기 변동성을 비교하는 비율
+    _RSI_rebound          = data['RSI14'].iloc[-1] - data['RSI14'].iloc[-3]
+    _close_pos_day        = (last["종가"] - last["저가"]) / (last["고가"] - last["저가"] + 1e-9)
+    _rebound_power        = today_pct * (0.5 + _close_pos_day)
+    _MACD_acc             = _MACD_hist_1d - (MACD_hist_3d / 3)  # MACD_hist_3d 보다 약함 (AUC 0.521)
+    # MACD_hist_3d_atr_norm = MACD_hist_3d / (last["ATR14"] + 1e-9)
+    _MACD_hist_3d_close_norm = MACD_hist_3d / (last["종가"] + 1e-9) * 100
+
+
+
+
+    m_data = data[-60:] # 뒤에서 x개 (3개월 정도)
+    m_current = m_data['종가'].iloc[-1]                               # 오늘 종가, 검증 데이터로 잘랐다면 검증 직전까지의 마지막 값 (수익률 분석 용도)
+
+    m_closes = m_data['종가']
+    # m_max = m_closes.max()
+    # m_min = m_closes.min()
+
+    # three_m_max_min_chg_rate = safe_rate(m_max, m_min)         # 최근 3개월 동안의 등락률
+    # three_m_cur_max_chg_rate = safe_rate(m_current, m_max)     # 최근 3개월 최고 대비 오늘 등락률 계산
+
+    result = low_weekly_check(m_data)
+
+    # -------------------------------
+    # 변별력이 없는 피쳐
+    # -------------------------------
+    # dist_to_high_60d      = safe_rate(last['종가'], _high_60d)  # 너무 장거리
+
+    lower_wick_ratio = (min(last["시가"], last["종가"]) - last["저가"]) / (last["고가"] - last["저가"] + 1e-9)
+
+    # 윗꼬리 비율 (값이 크면 고가에서 많이 내려옴, 매도압력)
+    upper_wick_ratio = (last["고가"] - max(last["시가"], last["종가"])) / (last["고가"] - last["저가"] + 1e-9)
+
+    # ROC12_pct = last['ROC12_pct']
+
+    # 캔들에서 몸통의 비율 (추세 강도)
+    body_ratio = abs(last["종가"] - last["시가"]) / (last["고가"] - last["저가"] + 1e-9)
+    # 당일 등락률(today_pct)과 거래대금(today_tr_val_eok)을 결합한 지표
+    price_power_value = today_pct * np.log1p(max(today_tr_val_eok, 0))
+    # 당일 캔들의 “몸통(body)” 크기와 방향성, 당일 수익률, 거래대금 규모를 결합해서 만든 일종의 매수세 강도 지표
+    body_value_power = (
+            max(body_ratio, 0)
+            * max(today_pct, 0)
+            * np.log1p(max(today_tr_val_eok, 0))
+    )
+
+    # 거래대금 변동률 (어제, 오늘)
+    # tr_value_chg_1d      = today_tr_val / (trading_value.iloc[-2] + 1e-9)
+
+    # MACD_rebound_power = (
+    #         np.tanh(_MACD_acc / 50) * 0.65 +
+    #         np.tanh(MACD_hist_3d / 100) * 0.35
+    # )
+
+    # 20일 최저점 발생일 대비 몇 일 지났는지 (19: 처음, 0: 오늘).. 아무짝에도 쓸모 없음
+    # window               = data.iloc[-20:]
+    # low_idx_pos          = window['저가'].values.argmin()   # 최솟값의 인덱스를 반환
+    # days_since_low       = len(window) - 1 - low_idx_pos
+
+    # 최근 5일 동안 상승일 거래대금이 하락일 거래대금보다 얼마나 강했는가, _ma5_ma20_gap_chg_1d 유사, 거래대금이 작으면 설명력 부족
+    _recent_5d            = data.iloc[-5:]
+    _ret5                 = _recent_5d["등락률"]
+    _recent_tr_value      = _recent_5d["종가"] * _recent_5d["거래량"]
+
+    # _up_tr_value_5d       = _recent_tr_value[_ret5 > 0].sum()
+    # _down_tr_value_5d     = _recent_tr_value[_ret5 < 0].sum()
+    # _up_down_tr_value_ratio_5d_log = np.log1p(
+    #     _up_tr_value_5d / (_down_tr_value_5d + 1e-9)
+    # )
+
+    # 이미 많이 오른 종목 제거.. 추격매수 위험 필터
+    _recent_runup        = data['등락률'].iloc[-5:-1].sum()
+
+    # 시가 대비 종가가 얼마나 회복되었는가 (AUC 0.514 - 거의 랜덤)
+    intraday_return = (last["종가"] / last["시가"] - 1) * 100
+    # 전일 대비 갭이 아니라 “장중 순수 매수세”.. 상광 0.929
+    intraday_body_power = intraday_return * body_ratio
+
+    # 데드캣 패널티
+    # _deadcat_penalty     = max(0, (-_drawdown_60d - 40) / 20) + max(0, -_dist_to_ma20 / 5)
+
+    # 갭 상승 후 실제 몸통 상승률
+    #   - gap_pct가 낮고 today_pct가 높음 = 장중 매수세로 끌어올림
+    #   - gap_pct가 높고 today_pct가 비슷함 = 시초 갭만 뜨고 힘 없음
+    # gap_body_power        = today_pct - _gap_pct
+    # 윗꼬리 패널티 피쳐: 윗꼬리가 길고 몸통이 작으면 매도압력/실패 반등 가능성 증가
+    # selling_pressure_score = upper_wick_ratio * (1 - body_ratio)
+    # 저점 대비 반등 위치(오늘 제외): 최근 급락 저점에서 오늘 종가가 얼마나 회복했는지
+    _low_7d_before_today = data['저가'].iloc[-8:-1].min()
+    # 현재 종가가 7일 최저가보다 얼마나 위에 있는지 비율로 표현
+    rebound_from_7d_low = (last['종가'] / _low_7d_before_today - 1) * 100
+    # 최근 하락폭 대비 오늘까지 얼마나 반등했는가
+    rebound_vs_prior_drop = rebound_from_7d_low / (abs(max_drop_7d) + 1e-9)
+    if not np.isfinite(rebound_vs_prior_drop):
+        rebound_vs_prior_drop = np.nan
+
+    # 하락 후 반등: 최근 최대 하락폭 대비 오늘 반등이 얼마나 강했는가
+    # drop_rebound_ratio = today_pct / (abs(max_drop_7d) + 1e-9)
+    # 거래대금 + 가격 반등 결합 피쳐
+    # volume_price_power = today_pct * np.log1p(tr_value_ratio_5d)
+
+    today_str = str(data.index[-1].date())
+
+    # market_item = get_market_features_for_row(
+    #     today=today_str,
+    #     stock_market=stock_market,
+    #     market_context=market_context,
+    # )
+    #
+    # market_today_pct = market_item["market_today_pct"]
+    # market_5d_pct = market_item["market_5d_pct"]
+    # market_breadth_up_ratio = market_item["market_breadth_up_ratio"]
+    # market_stock_count = market_item["market_stock_count"]
+
+    rule_features = {
+        "vol5": vol5,                                          # 성공군의 단기 변동성이 큼, 핵심 피쳐
+        "rebound_from_7d_low": rebound_from_7d_low,            # 현재 종가가 7일 최저가보다 얼마나 위에 있는지 비율로 표현
+        "today_pct": today_pct,                                # 성공군의 마지막 날 반등 강도가 큼
+        "price_power_value": price_power_value,                # 당일 등락률(today_pct)과 거래대금(today_tr_val_eok)을 결합한 지표
+
+        "dist_to_ma5": dist_to_ma5,                            # dist_from_low_20d, pct_vs_lastweek, dist_to_ma20와 중복이 큼, 대체 가능
+        "intraday_return": intraday_return,                    # 시가 대비 종가가 얼마나 회복되었는가
+        "tr_value_ratio_5d": tr_value_ratio_5d,                # 단일 AUC 0.528, IV 0.023으로 약함. vol5, vol_ratio_5_15가 있으면 우선순위 낮음
+
+        # "vol_ratio_5_15": _vol_ratio_5_15,                     # 성공군의 최근 단기 변동성 확장이 큼, 정밀도를 올려줌, 표본 부족
+        "max_drop_7d": max_drop_7d,                            # 성공군이 더 깊게 빠졌다가 반등
+
+        "body_value_power": body_value_power,                  # 당일 캔들의 “몸통(body)” 크기와 방향성, 당일 수익률, 거래대금 규모를 결합해서 만든 일종의 매수세 강도 지표
+        "rebound_vs_prior_drop": rebound_vs_prior_drop,        # 최근 하락폭 대비 오늘까지 얼마나 반등했는가
+
+        # "BB_perc": BB_perc,                                    # 볼린저밴드 위치, 20일선 거리와 상관 0.95
+        # "RSI_rebound": _RSI_rebound,                           # AUC가 너무 약함, 단독 방향성 불안정..
+
+        # "gap_pct": _gap_pct,                                   # 15% 예상에서 약함
+
+        "upper_wick_ratio": upper_wick_ratio,                  # 윗꼬리 비율
+
+        # "room_to_20d_high": room_to_20d_high,                  # 주가가 어느 정도 반등했는지 또는 앞으로 상승 여력이 얼마나 있는지를 보는 피쳐, 20일선 거리가 약간 우위
+        # "room_to_60d_high": room_to_60d_high,
+
+        # "lower_wick_ratio": lower_wick_ratio,                  # 아랫꼬리 비율
+        # "body_ratio": body_ratio,                              # 몸통 비율
+
+        # "market_today_pct": market_today_pct,                  # 해당 종목이 속한 시장의 당일 등락률
+        # "market_5d_pct": market_5d_pct,                        # 해당 종목이 속한 시장의 최근 5거래일 등락률
+
+        "vol15": vol15,
+        "ATR_pct": _ATR_pct,                                    # 성공군의 평균 변동폭이 큼, 대체 불가 핵심 피쳐
+        # "CCI14": _CCI14,                                       # 단기 모멘텀 변화를 잘 포착하지만, 노이즈가 많음
+        # "today_tr_val_eok": today_tr_val_eok,                  # 오늘 거래대금 (억)
+        # "ma5_chg_rate": ma5_chg_rate,                          # 5일선 기울기
+        # "pct_vs_lastweek": result['pct_vs_lastweek'],          # 단독 AUC는 약하지만 룰 조합에서 강함, 없으면 데드캣 상승, 주요 피쳐, 5일선 거리와 상관 0.825
+        # "recent_runup": _recent_runup,                         # ma5_chg_rate 상관 0.9이상
+        # "intraday_body_power": intraday_body_power,            # intraday_return 상관 0.9이상
+        # _ma5_ma20_gap_chg_1d                                   # 상관 0.930, 중복이므로 정리, 룰 조합에서 강함
+        "dist_to_ma20": dist_to_ma20,                          # 성공군이 20일선 대비 조금 더 아래, 비단조 주의, 룰 조합에서 강함, 핵심 피쳐
+        # "ma5_ma20_gap_chg_1d": _ma5_ma20_gap_chg_1d,           # best bin은 괜찮지만 전체 방향성이 거의 없음.. dist_to_ma5, dist_to_ma20, pct_vs_lastweek와 의미가 겹친다, 대체 가능
+        "tr_val_rank_20d": tr_val_rank_20d,                    # 분리력 약함, 성공률 상승폭 작음
+        # "market_breadth_up_ratio": market_breadth_up_ratio,    # 같은 날짜, 같은 시장에서 상승한 종목 비율
+        # "market_stock_count": market_stock_count,
+
+        # 이전 피쳐
+        # "three_m_cur_max_chg_rate": three_m_cur_max_chg_rate,  # 성공군이 3개월 고점 대비 더 눌림, 정밀도를 올려줌
+        # "dist_from_low_20d": dist_from_low_20d,                # 성공군이 저점에서 조금 더 반등한 상태, 대체 가능
+        # "MACD_hist_3d": MACD_hist_3d,                          # 기술적 모멘텀 신호로는 약함, AUC가 0.517, IV가 0.016으로 매우 약함
+        # "ma5_recovery_rate_3d": ma5_recovery_rate_3d,          # _ma5_ma20_gap_chg_1d, dist_to_ma20 겹침 (AUC 0.525)
+        # "pct_vs_last4week": result['pct_vs_last4week'],        # dist_to_ma20 상관 0.874.. 20일선 대비 위치가 더 직접적으로 해석
+        # "three_m_max_min_chg_rate": three_m_max_min_chg_rate,
+    }
+
+
+
+
+    ############################  deadcat_filter  ###########################
+
+    # 성공 최저 확인용
+    risk_rule_features  = {
+        # "UltimateOsc": _UltimateOsc,  # 거의 평균과 차이 작음
+        # "MACD_acc": _MACD_acc,  # 거의 랜덤에 가까움
+        # "dist_to_high_20d": _dist_to_high_20d,  # dist_to_ma20 우선
+
+        # 차이가 없음
+        # "close_pos_20d": _close_pos_20d,  # dist_from_low_20d, dist_to_ma5 에서도 반영됨, 별 차이가 없음
+        # "ADX14": _ADX14,  # 별 차이가 없음
+        # "rebound_power": _rebound_power,
+        # "MACD_hist_1d": _MACD_hist_1d,  # 차이가 작고 해석이 애매
+        # "MACD_hist_3d_close_norm": _MACD_hist_3d_close_norm,  # 차이 작고 _ma5_ma20_gap_chg_1d와 중복
+    }
+
+    rule_features.update(risk_rule_features)
+
+    ########################################################################
+
+    row = {
+        "stock_name": stock_name,
+        "stock_market": stock_market,
+        "sector_code": sector_code,
+        "today": str(data.index[-1].date()),
+        "idx": idx,
+    }
+
+
+    # 검증 데이터 (마지막 n일)
+    if remaining_data is not None:
+        r_closes = remaining_data['종가'].iloc[:VALIDATION_DAYS].reset_index(drop=True)  # Series 인덱스 새로
+        r_highs  = remaining_data["고가"].iloc[:VALIDATION_DAYS].reset_index(drop=True)
+        r_lows   = remaining_data["저가"].iloc[:VALIDATION_DAYS].reset_index(drop=True)
+        r_opens  = remaining_data["시가"].iloc[:VALIDATION_DAYS].reset_index(drop=True)
+
+        r_closes = r_closes.reindex(range(VALIDATION_DAYS))      # 0~6 없으면 NaN으로 채움
+        r_highs  = r_highs.reindex(range(VALIDATION_DAYS))
+        r_lows   = r_lows.reindex(range(VALIDATION_DAYS))
+        r_opens  = r_opens.reindex(range(VALIDATION_DAYS))
+
+        # 익절 가능 최대 수익률: 고가 기준
+        validation_high_rate_max     = safe_rate(r_highs.max(skipna=True), m_current)  # 결측치(NaN)를 무시하고 계산
+        # validation_close_rate_max    = safe_rate(r_closes.max(skipna=True), m_current) # 익절 기준: 종가
+
+        # 손절 위험 최소 수익률: 저가 기준
+        validation_low_rate_min      = safe_rate(r_lows.min(skipna=True), m_current)
+
+        # 일별 종가 수익률: 참고용
+        close_rates = [
+            safe_rate(r_closes.iloc[i], m_current)
+            for i in range(VALIDATION_DAYS)
+        ]
+
+        # 일별 고가 수익률: 익절 판정용
+        high_rates = [
+            safe_rate(r_highs.iloc[i], m_current)
+            for i in range(VALIDATION_DAYS)
+        ]
+
+        # 일별 저가 수익률: 손절 판정용
+        low_rates = [
+            safe_rate(r_lows.iloc[i], m_current)
+            for i in range(VALIDATION_DAYS)
+        ]
+
+        # 시가
+        open_rates = [
+            safe_rate(r_opens.iloc[i], m_current)
+            for i in range(VALIDATION_DAYS)
+        ]
+
+
+        max_high_7d = validation_high_rate_max
+
+        if max_high_7d < 5:     # 5% 미만
+            target_class = 0
+        elif max_high_7d < 10:  # 5~10
+            target_class = 1
+        elif max_high_7d < 15:  # 10~15
+            target_class = 2
+        else:                   # 15+
+            target_class = 3
+
+
+        trade_labels = make_trade_labels_v2(
+            high_rates=high_rates,
+            low_rates=low_rates,
+            close_rates=close_rates,
+            stop_loss=STOP_LOSS
+        )
+
+
+        """
+        class_0~3 구간 분류
+          1. class_0 제거 룰을 먼저 만든다. ++ 성공보다 이탈을 먼저하는 종목 룰
+          2. class_1은 부분익절 또는 짧은 매도 후보로 본다.
+          3. class_2는 기존 7% target 후보로 본다.
+          4. class_3은 트레일링 스탑으로 더 끌고 갈 후보로 본다.
+          
+        4일 안에 고가 target_pct 이상을 한 번도 못 찍고
+        저가가 stop_loss 이하로 밀리면
+        데드캣 가능성이 높다.
+        """
+
+        validation_row = {
+            "stop_loss": STOP_LOSS,
+            "target_pct": REQUIRED_HIGH_RETURN,
+            "target_class": target_class,              # class 0~3
+
+            "day_to_5": trade_labels["day_to_5"],      # 5% 도달 날짜.. 0이면 class0
+            "day_to_10": trade_labels["day_to_10"],    # 10% 도달 날짜
+            "day_to_15": trade_labels["day_to_15"],    # 15% 도달 날짜
+            "stop_day": trade_labels["stop_day"],      # 이탈 발생 날짜
+
+            "target_before_stop_10": trade_labels["target_before_stop_10"],        # 이탈 전에 성공
+            "stop_before_target_10": trade_labels["stop_before_target_10"],        # 성공 전에 이탈
+            "target_stop_same_day_10": trade_labels["target_stop_same_day_10"],    # 이탈 성공 같은 날
+            "no_target_no_stop_10": trade_labels["no_target_no_stop_10"],          # 횡보
+
+            "target_before_stop_15": trade_labels["target_before_stop_15"],      # 이탈 전에 성공
+            "stop_before_target_15": trade_labels["stop_before_target_15"],      # 성공 전에 이탈
+            "target_stop_same_day_15": trade_labels["target_stop_same_day_15"],  # 이탈 성공 같은 날
+            "no_target_no_stop_15": trade_labels["no_target_no_stop_15"],        # 횡보
+
+            "fast_success_10": trade_labels["fast_success_10"],    # ~4거래일만에 달성
+            "slow_success_10": trade_labels["slow_success_10"],    # 5~7거래일만에 달성
+            "fail_success_10": trade_labels["fail_success_10"],    # 도달 실패
+
+            "fast_success_15": trade_labels["fast_success_15"],  # ~4거래일만에 달성
+            "slow_success_15": trade_labels["slow_success_15"],  # 5~7거래일만에 달성
+            "fail_success_15": trade_labels["fail_success_15"],  # 도달 실패
+
+
+            # 고가 기준 최대 수익률
+            "validation_high_rate_max": validation_high_rate_max,
+            "validation_high_rate_max_adj": validation_high_rate_max * EXECUTION_RATIO,
+
+            # 저가 기준 최저 수익률
+            "validation_low_rate_min": validation_low_rate_min,
+        }
+
+        rate_groups = {
+            "close": close_rates,
+            "high": high_rates,
+            "low": low_rates,
+            "open": open_rates,
+        }
+
+        # OHLC 기준 일별 수익률
+        for prefix, rates in rate_groups.items():
+            for i, rate in enumerate(rates, start=1):
+                validation_row[f"validation_{prefix}_rate{i}"] = rate
+
+        row.update(validation_row)
+
+
+    ########################################################################
+
+    row.update(rule_features)
+    row = round_float_features(row)
+    row["ticker"] = ticker  # 종목코드 숫자 float 처리 되어서 밖으로 뺌
+
+    return {
+        "row": row,
+    }
+
+
+
+if __name__ == "__main__":
+    start = time.time()   # 시작 시간(초)
+    nowTime = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
+    print(f'{nowTime} - 🕒 running 7_find_low_point_v2.py...')
+    print('=== 7일 이상 5일선이 20일선 보다 아래에 있으면서 최근 -3.0% 이상 하락이 존재, 오늘 +3.x% 이상 상승 ===')
+
+    tickers_dict = get_kor_ticker_dict_list()
+    tickers = list(tickers_dict.keys())
+    # tickers = ['103140']  # 풍산
+    # tickers = extract_numbers_from_filenames(directory = r'D:\5below20_test\4퍼', isToday=False)
+
+    # print("[market_context] building...")
+    # market_context = build_market_context_from_pickles(
+    #     tickers=tickers,
+    #     tickers_dict=tickers_dict,
+    #     pickle_dir=pickle_dir,
+    # )
+    market_context = None
+
+
+    rows = []            # 결과 종목 데이터 저장
+
+    try:
+        with ProcessPoolExecutor(max_workers=os.cpu_count() - 2) as executor:
+            futures = [
+                executor.submit(process_ticker, ticker, tickers_dict, i, market_context)
+                for i, ticker in enumerate(tickers, start=1)
+            ]
+
+            for f in as_completed(futures):
+                try:
+                    results = f.result()
+                    if results is None:
+                        continue
+                except Exception as e:
+                    print("worker error:", e)
+                    raise
+
+                for res in results:
+                    row = res["row"]
+                    rows.append(row)
+
+
+        rows_sorted = sorted(rows, key=lambda row: row['today'])
+
+
+        if len(rows) > 0:
+            df = pd.DataFrame(rows)
+
+            if render_graph == 1:
+                mask = pd.Series(False, index=df.index)
+                matched_rule_map = {idx: [] for idx in df.index}
+
+                # for mod in modules:
+                #     conditions = mod.build_conditions(df)
+                #
+                #     for name in mod.RULE_NAMES:
+                #         if name not in conditions:
+                #             continue
+                #
+                #         cond = conditions[name].fillna(False)
+                #
+                #         # 하나라도 만족하면 통과
+                #         mask |= cond
+                #
+                #         # 어떤 룰에 걸렸는지 기록
+                #         for idx in df.index[cond]:
+                #             matched_rule_map[idx].append(name)
+                #
+                # df["matched_rules"] = df.index.map(
+                #     lambda idx: ",".join(matched_rule_map[idx])
+                # )
+                #
+                # selected = df[mask].copy()
+                #
+                # total_cnt = len(selected)
+                # up_cnt = int(selected["target_before_stop_10"].sum())
+                # shortfall_cnt = total_cnt - up_cnt
+                # total_up_rate = up_cnt / total_cnt * 100 if total_cnt else 0
+                #
+                # print(f"\n룰 통과 수: {total_cnt}")
+                # print(f"룰 통과 후 성공률: {total_up_rate:.2f}% ({up_cnt} / {total_cnt})")
+
+            else:
+                # # 데드캣 필터 패스한 것만 룰 마이닝
+                # avoid_conditions = lowscan_avoid_rules.build_conditions(df)
+                #
+                # avoid_mask = np.zeros(len(df), dtype=bool)
+                # for cond in avoid_conditions.values():
+                #     avoid_mask |= cond
+                #
+                # selected = df[~avoid_mask].copy()
+
+                # CSV 저장
+                df.to_csv(CSV_PATH, index=False)  # 인덱스 칼럼 'Unnamed: 0' 생성하지 않음
+
+                # 데드캣 필터 통과한 것만 저장
+                # selected.to_csv(CSV_PATH, index=False)
+
+                # 내림차순 정렬
+                saved = sort_csv_by_today_desc(
+                    in_path=CSV_PATH,
+                    out_path=SORTED_CSV_PATH,
+                )
+                print("saved:", saved)
+
+
+        if render_graph == 1:
+            plot_jobs = []
+
+            for _, row in selected.iterrows():
+                ticker = row["ticker"]
+                stock_name = row["stock_name"]
+
+                filepath = os.path.join(pickle_dir, f"{ticker}.pkl")
+                origin = safe_read_pickle(filepath)
+
+                if origin is None or origin.empty:
+                    continue
+
+                origin = add_technical_features(origin)
+                origin, _ = drop_sparse_columns(
+                    origin,
+                    threshold=0.10,
+                    check_inf=True,
+                    inplace=True
+                )
+                origin, _ = drop_trading_halt_rows(origin)
+                origin = add_technical_features(origin)
+
+                signal_day = pd.to_datetime(row["today"])
+
+                # 기본값: idx == 0이면 전체 origin 사용
+                chart_data = origin.copy()
+
+                if idx != 0:
+                    if signal_day not in origin.index:
+                        continue
+
+                    signal_pos = origin.index.get_loc(signal_day)
+
+                    # today 이후 START_OFFSET 거래일까지 포함
+                    chart_end_pos = signal_pos + START_OFFSET + 1
+                    chart_end_pos = min(chart_end_pos, len(origin))
+
+                    chart_data = origin.iloc[:chart_end_pos].copy()
+
+                if chart_data.empty or len(chart_data) < 70:
+                    continue
+
+                today = row["today"].replace("-", "")
+
+                title = (
+                    f"{today} {stock_name} [{ticker}] "
+                    f"일봉 차트 - 당일 상승_{row['today_pct']}%_7일 최고 수익률_{row['validation_high_rate_max_adj']}% "
+                    f"rules={row['matched_rules'][:80]}"
+                )
+
+                final_file_name = (
+                    f"{today} {stock_name} [{ticker}] "
+                    f"{row['today_pct']}%_{row['validation_high_rate_max_adj']}%.webp"
+                )
+
+                save_path = os.path.join(output_dir, final_file_name)
+
+                plot_jobs.append({
+                    "origin": chart_data,
+                    "today": today,
+                    "title": title,
+                    "save_path": save_path,
+                })
+
+
+            for job in plot_jobs:
+                fig = plt.figure(figsize=(14, 16), dpi=150)
+                gs = fig.add_gridspec(nrows=4, ncols=1, height_ratios=[3, 1, 3, 1])
+
+                ax_d_price = fig.add_subplot(gs[0, 0])
+                ax_d_vol   = fig.add_subplot(gs[1, 0], sharex=ax_d_price)
+                ax_w_price = fig.add_subplot(gs[2, 0])
+                ax_w_vol   = fig.add_subplot(gs[3, 0], sharex=ax_w_price)
+
+                plot_candles_daily(
+                    job["origin"],
+                    show_months=4,
+                    title=job["title"],
+                    ax_price=ax_d_price,
+                    ax_volume=ax_d_vol,
+                    date_tick=5,
+                    today=job["today"],
+                )
+
+                plot_candles_weekly(
+                    job["origin"],
+                    show_months=12,
+                    title="Weekly Chart",
+                    ax_price=ax_w_price,
+                    ax_volume=ax_w_vol,
+                    date_tick=5,
+                    today=job["today"],
+                )
+
+                plt.tight_layout()
+                plt.savefig(
+                    job["save_path"],
+                    format="webp",
+                    dpi=100,
+                    bbox_inches="tight",
+                    pad_inches=0.1
+                )
+                plt.close()
+
+
+            if len(selected) > 0 and render_graph == 1:
+                print("\n그래프 생성 완료")
+
+
+        end = time.time()     # 끝 시간(초)
+        elapsed = end - start
+
+        hours, remainder = divmod(int(elapsed), 3600)
+        minutes, seconds = divmod(remainder, 60)
+
+        print(f"7_find_low_point_processPool_v2.py 총 소요 시간: {hours}시간 {minutes}분 {seconds}초")
+        # log_file.close()
+
+    except KeyboardInterrupt:
+        print("\n사용자 중지 요청 감지. 작업을 종료합니다.")
+        executor.shutdown(wait=False, cancel_futures=True)
+        raise
