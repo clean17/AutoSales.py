@@ -404,6 +404,25 @@ def process_one_with_df(df, idx, ticker, tickers_dict, market_context):
     # market_breadth_up_ratio = market_item["market_breadth_up_ratio"]
     # market_stock_count = market_item["market_stock_count"]
 
+    DEFAULT_FEATURES = [
+        "vol5",
+        "rebound_from_7d_low",
+        "today_pct",
+        "price_power_value",
+        "dist_to_ma5",
+        "intraday_return",
+        "tr_value_ratio_5d",
+        "max_drop_7d",
+        "body_value_power",
+        "rebound_vs_prior_drop",
+        "upper_wick_ratio",
+        "vol15",
+        "ATR_pct",
+        "dist_to_ma20",
+        "tr_val_rank_20d",
+    ]
+
+
     rule_features = {
         "vol5": vol5,                                          # 성공군의 단기 변동성이 큼, 핵심 피쳐
         "rebound_from_7d_low": rebound_from_7d_low,            # 현재 종가가 7일 최저가보다 얼마나 위에 있는지 비율로 표현

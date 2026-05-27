@@ -17,7 +17,7 @@ v3는 전체 피쳐 유용성 1차 스캔용
 나쁜 점:
 비단조/조건부 필터 피쳐를 약하게 볼 수 있음
 """
-TARGET_COL = "target_before_stop_7"
+TARGET_COL = "target_before_stop_10"
 
 
 # ============================================================
@@ -26,48 +26,23 @@ TARGET_COL = "target_before_stop_7"
 # ============================================================
 DEFAULT_FEATURES = [
     # ============================================================
-    # 1) 변동성 / 반등 강도
+    # target_before_stop_10 / target_before_stop_15 공통 룰 마이닝용
     # ============================================================
     "vol5",
-    "vol_ratio_5_15",
-    "today_pct",
-    "max_drop_7d",
-
-    # ============================================================
-    # 2) 갭 / 위치 / 단기 회복
-    # ============================================================
-    "gap_pct",
-    "pct_vs_lastweek",
-    "dist_to_ma5",
-
-    # ============================================================
-    # 3) 거래대금
-    # ============================================================
-    "today_tr_val_eok",
-
-    # ============================================================
-    # 4) 밴드 / 캔들
-    # ============================================================
-    "BB_perc",
-    "lower_wick_ratio",
-    "upper_wick_ratio",
-    "body_ratio",
-    "recent_runup",
-    "intraday_return",
-
-    # ============================================================
-    # 5) 저점 반등 / 상승 여력
-    # ============================================================
     "rebound_from_7d_low",
+    "today_pct",
     "price_power_value",
-    "room_to_20d_high",
-    "room_to_60d_high",
-
-    # ============================================================
-    # 6) 시장 상태
-    # ============================================================
-    "market_today_pct",
-    "market_5d_pct",
+    "dist_to_ma5",
+    "intraday_return",
+    "tr_value_ratio_5d",
+    "max_drop_7d",
+    "body_value_power",
+    "rebound_vs_prior_drop",
+    "upper_wick_ratio",
+    "vol15",
+    "ATR_pct",
+    "dist_to_ma20",
+    "tr_val_rank_20d",
 ]
 
 
@@ -1683,28 +1658,20 @@ if __name__ == "__main__":
 # 실행 예시
 # ============================================================
 """
-빠른 테스트:
-python feature_selector_v3.py \
-  --csv csv/low_result_7_desc.csv \
-  --out feature_selector_v3_out_fast \
+python low/feature_selector_v3.py \
+  --csv csv/low_result_7_v2_desc.csv \
+  --out feature_selector_t15_out \
   --date-col today \
-  --max-depth 4 \
-  --beam-width 250 \
-  --top-k 120 \
-  --top-n-usage 50 \
-  --top-n-loo 20 \
-  --corr-threshold 0.90 \
-  --skip-loo
-
-최종 분석:
-python feature_selector_v3.py \
-  --csv csv/low_result_7_desc.csv \
-  --out feature_selector_v3_out_final \
-  --date-col today \
+  --target target_before_stop_15 \
   --max-depth 4 \
   --beam-width 300 \
   --top-k 150 \
-  --top-n-usage 50 \
-  --top-n-loo 20 \
   --corr-threshold 0.90
+
+
+python low/feature_selector_v3.py \
+  --csv csv/low_result_7_v2_desc.csv \
+  --out feature_selector_t10_out \
+  --date-col today \
+  --target target_before_stop_10
 """
