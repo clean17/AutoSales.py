@@ -419,7 +419,7 @@ def process_one_with_df(df, idx, ticker, tickers_dict, market_context):
         "vol15",
         "ATR_pct",
         "dist_to_ma20",
-        "tr_val_rank_20d",
+        # "tr_val_rank_20d",
     ]
 
 
@@ -466,7 +466,7 @@ def process_one_with_df(df, idx, ticker, tickers_dict, market_context):
         # _ma5_ma20_gap_chg_1d                                   # 상관 0.930, 중복이므로 정리, 룰 조합에서 강함
         "dist_to_ma20": dist_to_ma20,                          # 성공군이 20일선 대비 조금 더 아래, 비단조 주의, 룰 조합에서 강함, 핵심 피쳐
         # "ma5_ma20_gap_chg_1d": _ma5_ma20_gap_chg_1d,           # best bin은 괜찮지만 전체 방향성이 거의 없음.. dist_to_ma5, dist_to_ma20, pct_vs_lastweek와 의미가 겹친다, 대체 가능
-        "tr_val_rank_20d": tr_val_rank_20d,                    # 분리력 약함, 성공률 상승폭 작음
+        # "tr_val_rank_20d": tr_val_rank_20d,                    # 분리력 약함, 성공률 상승폭 작음
         # "market_breadth_up_ratio": market_breadth_up_ratio,    # 같은 날짜, 같은 시장에서 상승한 종목 비율
         # "market_stock_count": market_stock_count,
 
