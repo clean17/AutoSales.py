@@ -418,11 +418,12 @@ def process_one_with_df(df, idx, ticker, tickers_dict, market_context):
         "rebound_vs_prior_drop",
 
         "upper_wick_ratio",
+        "lower_wick_ratio",
         "vol15",
         "ATR_pct",
         "dist_to_ma20",
-        "BB_perc",
 
+        "BB_perc",
         "gap_pct",
         "room_to_60d_high",
         "ma5_chg_rate",
@@ -440,7 +441,6 @@ def process_one_with_df(df, idx, ticker, tickers_dict, market_context):
         "intraday_return": intraday_return,                    # 시가 대비 종가가 얼마나 회복되었는가
         "tr_value_ratio_5d": tr_value_ratio_5d,                # 단일 AUC 0.528, IV 0.023으로 약함. vol5, vol_ratio_5_15가 있으면 우선순위 낮음
 
-        # "vol_ratio_5_15": _vol_ratio_5_15,                     # 성공군의 최근 단기 변동성 확장이 큼, 정밀도를 올려줌, 표본 부족
         "max_drop_7d": max_drop_7d,                            # 성공군이 더 깊게 빠졌다가 반등
 
         "body_value_power": body_value_power,                  # 당일 캔들의 “몸통(body)” 크기와 방향성, 당일 수익률, 거래대금 규모를 결합해서 만든 일종의 매수세 강도 지표
@@ -452,26 +452,27 @@ def process_one_with_df(df, idx, ticker, tickers_dict, market_context):
         "gap_pct": _gap_pct,                                   # 15% 예상에서 약함
 
         "upper_wick_ratio": upper_wick_ratio,                  # 윗꼬리 비율
+        "lower_wick_ratio": lower_wick_ratio,                  # 아랫꼬리 비율
+        # "body_ratio": body_ratio,                              # 몸통 비율
 
         # "room_to_20d_high": room_to_20d_high,                  # 주가가 어느 정도 반등했는지 또는 앞으로 상승 여력이 얼마나 있는지를 보는 피쳐, 20일선 거리가 약간 우위
         "room_to_60d_high": room_to_60d_high,
 
-        # "lower_wick_ratio": lower_wick_ratio,                  # 아랫꼬리 비율
-        # "body_ratio": body_ratio,                              # 몸통 비율
+        # "vol_ratio_5_15": _vol_ratio_5_15,                     # 성공군의 최근 단기 변동성 확장이 큼, 정밀도를 올려줌, 표본 부족
 
         # "market_today_pct": market_today_pct,                  # 해당 종목이 속한 시장의 당일 등락률
         # "market_5d_pct": market_5d_pct,                        # 해당 종목이 속한 시장의 최근 5거래일 등락률
 
         "vol15": vol15,
         "ATR_pct": _ATR_pct,                                    # 성공군의 평균 변동폭이 큼, 대체 불가 핵심 피쳐
-        # "CCI14": _CCI14,                                       # 단기 모멘텀 변화를 잘 포착하지만, 노이즈가 많음
-        # "today_tr_val_eok": today_tr_val_eok,                  # 오늘 거래대금 (억)
         "ma5_chg_rate": ma5_chg_rate,                          # 5일선 기울기
         "pct_vs_lastweek": result['pct_vs_lastweek'],          # 단독 AUC는 약하지만 룰 조합에서 강함, 없으면 데드캣 상승, 주요 피쳐, 5일선 거리와 상관 0.825
+        "dist_to_ma20": dist_to_ma20,                          # 성공군이 20일선 대비 조금 더 아래, 비단조 주의, 룰 조합에서 강함, 핵심 피쳐
+        # "CCI14": _CCI14,                                       # 단기 모멘텀 변화를 잘 포착하지만, 노이즈가 많음
+        # "today_tr_val_eok": today_tr_val_eok,                  # 오늘 거래대금 (억)
         # "recent_runup": _recent_runup,                         # ma5_chg_rate 상관 0.9이상
         # "intraday_body_power": intraday_body_power,            # intraday_return 상관 0.9이상
         # _ma5_ma20_gap_chg_1d                                   # 상관 0.930, 중복이므로 정리, 룰 조합에서 강함
-        "dist_to_ma20": dist_to_ma20,                          # 성공군이 20일선 대비 조금 더 아래, 비단조 주의, 룰 조합에서 강함, 핵심 피쳐
         # "ma5_ma20_gap_chg_1d": _ma5_ma20_gap_chg_1d,           # best bin은 괜찮지만 전체 방향성이 거의 없음.. dist_to_ma5, dist_to_ma20, pct_vs_lastweek와 의미가 겹친다, 대체 가능
         # "tr_val_rank_20d": tr_val_rank_20d,                    # 분리력 약함, 성공률 상승폭 작음
         # "market_breadth_up_ratio": market_breadth_up_ratio,    # 같은 날짜, 같은 시장에서 상승한 종목 비율
@@ -652,7 +653,7 @@ def process_one_with_df(df, idx, ticker, tickers_dict, market_context):
     row = round_float_features(row)
 
     # 맨 앞에 ticker 추가, 종목코드 숫자 float 처리 되어서 밖으로 뺌
-    new_row = {"ticker": ticker}
+    new_row = {"ticker": str(ticker)}
     new_row.update(row)
 
     return {
