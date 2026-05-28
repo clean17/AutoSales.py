@@ -410,16 +410,19 @@ def process_one_with_df(df, idx, ticker, tickers_dict, market_context):
         "today_pct",
         "price_power_value",
         "dist_to_ma5",
+
         "intraday_return",
         "tr_value_ratio_5d",
         "max_drop_7d",
         "body_value_power",
         "rebound_vs_prior_drop",
+
         "upper_wick_ratio",
         "vol15",
         "ATR_pct",
         "dist_to_ma20",
         "BB_perc",
+
         "gap_pct",
         "room_to_60d_high",
         "ma5_chg_rate",
@@ -647,10 +650,13 @@ def process_one_with_df(df, idx, ticker, tickers_dict, market_context):
 
     row.update(rule_features)
     row = round_float_features(row)
-    row.insert(0, "ticker", ticker)  # 종목코드 숫자 float 처리 되어서 밖으로 뺌
+
+    # 맨 앞에 ticker 추가, 종목코드 숫자 float 처리 되어서 밖으로 뺌
+    new_row = {"ticker": ticker}
+    new_row.update(row)
 
     return {
-        "row": row,
+        "row": new_row,
     }
 
 
