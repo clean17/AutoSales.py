@@ -289,7 +289,7 @@ def process_one_with_df(df, idx, ticker, tickers_dict, market_context):
     _UltimateOsc          = last['UltimateOsc']
     _CCI14                = last['CCI14']
     _ADX14                = last['ADX14']
-    _gap_pct              = (data['시가'].iloc[-1] / data['종가'].iloc[-2] - 1) * 100
+    _gap_pct              = (data['시가'].iloc[-1] / data['종가'].iloc[-2] - 1) * 100  # 오늘 시가가 어제 종가 대비 얼마나 갭을 두고 시작했는지.
     _vol_ratio_5_15      = round(vol5 / (vol15 + 1e-9), 3)   # 단기 변동성과 장기 변동성을 비교하는 비율
     _RSI_rebound          = data['RSI14'].iloc[-1] - data['RSI14'].iloc[-3]
     _close_pos_day        = (last["종가"] - last["저가"]) / (last["고가"] - last["저가"] + 1e-9)
@@ -363,7 +363,7 @@ def process_one_with_df(df, idx, ticker, tickers_dict, market_context):
     # 이미 많이 오른 종목 제거.. 추격매수 위험 필터
     _recent_runup        = data['등락률'].iloc[-5:-1].sum()
 
-    # 시가 대비 종가가 얼마나 회복되었는가 (AUC 0.514 - 거의 랜덤)
+    # 오늘 하루 동안 시가 대비 종가가 얼마나 변했는지 (AUC 0.514 - 거의 랜덤)
     intraday_return = (last["종가"] / last["시가"] - 1) * 100
     # 전일 대비 갭이 아니라 “장중 순수 매수세”.. 상광 0.929
     intraday_body_power = intraday_return * body_ratio
@@ -419,7 +419,11 @@ def process_one_with_df(df, idx, ticker, tickers_dict, market_context):
         "vol15",
         "ATR_pct",
         "dist_to_ma20",
-        # "tr_val_rank_20d",
+        "BB_perc",
+        "gap_pct",
+        "room_to_60d_high",
+        "ma5_chg_rate",
+        "pct_vs_lastweek"
     ]
 
 
@@ -439,15 +443,15 @@ def process_one_with_df(df, idx, ticker, tickers_dict, market_context):
         "body_value_power": body_value_power,                  # 당일 캔들의 “몸통(body)” 크기와 방향성, 당일 수익률, 거래대금 규모를 결합해서 만든 일종의 매수세 강도 지표
         "rebound_vs_prior_drop": rebound_vs_prior_drop,        # 최근 하락폭 대비 오늘까지 얼마나 반등했는가
 
-        # "BB_perc": BB_perc,                                    # 볼린저밴드 위치, 20일선 거리와 상관 0.95
+        "BB_perc": BB_perc,                                    # 볼린저밴드 위치, 20일선 거리와 상관 0.95
         # "RSI_rebound": _RSI_rebound,                           # AUC가 너무 약함, 단독 방향성 불안정..
 
-        # "gap_pct": _gap_pct,                                   # 15% 예상에서 약함
+        "gap_pct": _gap_pct,                                   # 15% 예상에서 약함
 
         "upper_wick_ratio": upper_wick_ratio,                  # 윗꼬리 비율
 
         # "room_to_20d_high": room_to_20d_high,                  # 주가가 어느 정도 반등했는지 또는 앞으로 상승 여력이 얼마나 있는지를 보는 피쳐, 20일선 거리가 약간 우위
-        # "room_to_60d_high": room_to_60d_high,
+        "room_to_60d_high": room_to_60d_high,
 
         # "lower_wick_ratio": lower_wick_ratio,                  # 아랫꼬리 비율
         # "body_ratio": body_ratio,                              # 몸통 비율
@@ -459,8 +463,8 @@ def process_one_with_df(df, idx, ticker, tickers_dict, market_context):
         "ATR_pct": _ATR_pct,                                    # 성공군의 평균 변동폭이 큼, 대체 불가 핵심 피쳐
         # "CCI14": _CCI14,                                       # 단기 모멘텀 변화를 잘 포착하지만, 노이즈가 많음
         # "today_tr_val_eok": today_tr_val_eok,                  # 오늘 거래대금 (억)
-        # "ma5_chg_rate": ma5_chg_rate,                          # 5일선 기울기
-        # "pct_vs_lastweek": result['pct_vs_lastweek'],          # 단독 AUC는 약하지만 룰 조합에서 강함, 없으면 데드캣 상승, 주요 피쳐, 5일선 거리와 상관 0.825
+        "ma5_chg_rate": ma5_chg_rate,                          # 5일선 기울기
+        "pct_vs_lastweek": result['pct_vs_lastweek'],          # 단독 AUC는 약하지만 룰 조합에서 강함, 없으면 데드캣 상승, 주요 피쳐, 5일선 거리와 상관 0.825
         # "recent_runup": _recent_runup,                         # ma5_chg_rate 상관 0.9이상
         # "intraday_body_power": intraday_body_power,            # intraday_return 상관 0.9이상
         # _ma5_ma20_gap_chg_1d                                   # 상관 0.930, 중복이므로 정리, 룰 조합에서 강함
@@ -643,7 +647,7 @@ def process_one_with_df(df, idx, ticker, tickers_dict, market_context):
 
     row.update(rule_features)
     row = round_float_features(row)
-    row["ticker"] = ticker  # 종목코드 숫자 float 처리 되어서 밖으로 뺌
+    row.insert(0, "ticker", ticker)  # 종목코드 숫자 float 처리 되어서 밖으로 뺌
 
     return {
         "row": row,
