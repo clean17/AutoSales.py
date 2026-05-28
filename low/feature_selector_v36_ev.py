@@ -44,15 +44,19 @@ DEFAULT_FEATURES = [
     "today_pct",
     "price_power_value",
     "dist_to_ma5",
+
     "intraday_return",
     "tr_value_ratio_5d",
     "max_drop_7d",
     "body_value_power",
     "rebound_vs_prior_drop",
+
     "upper_wick_ratio",
+    "lower_wick_ratio",
     "vol15",
     "ATR_pct",
     "dist_to_ma20",
+
     "BB_perc",
     "gap_pct",
     "room_to_60d_high",
@@ -72,6 +76,7 @@ NON_MONOTONIC_FEATURES = [
     "BB_perc",
     "room_to_60d_high",
     "rebound_vs_prior_drop",
+    "lower_wick_ratio",
 ]
 
 
@@ -116,6 +121,7 @@ ALLOWED_OPS = {
     "intraday_return": [">="],
     "body_value_power": [">="],
     "upper_wick_ratio": ["<="],
+    "lower_wick_ratio": ["<=", ">="],
 }
 
 
@@ -774,6 +780,12 @@ def default_extra_thresholds() -> Dict[str, List[Tuple[str, float]]]:
             ("<=", 0.0), ("<=", 0.008), ("<=", 0.02),
             ("<=", 0.038), ("<=", 0.05), ("<=", 0.1),
             ("<=", 0.2), ("<=", 0.3),
+        ],
+        "lower_wick_ratio": [
+            ("<=", 0.05), ("<=", 0.10), ("<=", 0.20),
+            ("<=", 0.30), ("<=", 0.409),
+            (">=", 0.20), (">=", 0.30), (">=", 0.4113),
+            (">=", 0.50), (">=", 0.60),
         ],
     }
 
@@ -1858,7 +1870,7 @@ def main():
     print("[INFO] valid rows:", len(valid), "target_rate:", valid[args.target].mean())
     print("[INFO] date_col:", date_col)
     print("[INFO] features:", features)
-    print("[SCRIPT_VERSION] feature_selector_v35_custom_feature_pool")
+    print("[SCRIPT_VERSION] feature_selector_v36_ev_features20_lower_wick")
     print("[INFO] goal: feature usefulness + valid precision improvement")
     print("=" * 80)
 
