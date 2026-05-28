@@ -39,9 +39,6 @@ TARGET_COL = "target_before_stop_10"
 # ============================================================
 
 DEFAULT_FEATURES = [
-    # ============================================================
-    # target_before_stop_10 / target_before_stop_15 공통 룰 마이닝용
-    # ============================================================
     "vol5",
     "rebound_from_7d_low",
     "today_pct",
@@ -56,7 +53,11 @@ DEFAULT_FEATURES = [
     "vol15",
     "ATR_pct",
     "dist_to_ma20",
-    # "tr_val_rank_20d",
+    "BB_perc",
+    "gap_pct",
+    "room_to_60d_high",
+    "ma5_chg_rate",
+    "pct_vs_lastweek",
 ]
 
 
@@ -64,19 +65,21 @@ DEFAULT_FEATURES = [
 # AUC 방향성과 룰 방향이 충돌해도 바로 감점하지 않고,
 # conditional contribution을 더 중요하게 본다.
 NON_MONOTONIC_FEATURES = [
-    # 전체 방향성이 약해도 특정 구간에서 필터로 의미가 있는 피쳐
+    "gap_pct",
+    "pct_vs_lastweek",
     "dist_to_ma5",
     "dist_to_ma20",
+    "ma5_chg_rate",
+    "BB_perc",
+    "room_to_60d_high",
     "rebound_vs_prior_drop",
 ]
 
 
-
 # 시장/장세 필터
 REGIME_FEATURES = [
-    # 현재 15개 피쳐에는 market_* 장세 피쳐가 없음
+    # 현재 19개 피쳐에는 market_* 장세 피쳐가 없음
 ]
-
 
 
 # 반복적으로 약했던 피쳐.
@@ -92,17 +95,21 @@ ALLOWED_OPS = {
     "vol5": [">="],
     "vol15": [">="],
     "tr_value_ratio_5d": [">="],
-    "tr_val_rank_20d": [">="],
 
     # 변동성/낙폭
     "ATR_pct": [">="],
     "max_drop_7d": ["<="],
 
-    # 반등/위치
+    # 반등/위치/돌파
     "rebound_from_7d_low": [">="],
     "dist_to_ma5": ["<=", ">="],
     "dist_to_ma20": ["<=", ">="],
     "rebound_vs_prior_drop": ["<=", ">="],
+    "BB_perc": ["<=", ">="],
+    "room_to_60d_high": ["<=", ">="],
+    "pct_vs_lastweek": ["<=", ">="],
+    "ma5_chg_rate": ["<=", ">="],
+    "gap_pct": ["<=", ">="],
 
     # 당일 힘/캔들
     "today_pct": [">="],
@@ -111,7 +118,6 @@ ALLOWED_OPS = {
     "body_value_power": [">="],
     "upper_wick_ratio": ["<="],
 }
-
 
 
 @dataclass(frozen=True)
@@ -420,7 +426,7 @@ def default_extra_thresholds() -> Dict[str, List[Tuple[str, float]]]:
         "vol5": [
             (">=", 4.0), (">=", 5.0), (">=", 6.0), (">=", 6.507),
             (">=", 8.0), (">=", 8.467), (">=", 10.0), (">=", 10.5491),
-            (">=", 13.4364),
+            (">=", 10.6824), (">=", 13.4364),
         ],
         "vol15": [
             (">=", 4.0), (">=", 5.0), (">=", 6.0),
@@ -430,10 +436,6 @@ def default_extra_thresholds() -> Dict[str, List[Tuple[str, float]]]:
         "tr_value_ratio_5d": [
             (">=", 1.0), (">=", 1.2), (">=", 1.5),
             (">=", 2.0), (">=", 3.0), (">=", 5.0),
-        ],
-        "tr_val_rank_20d": [
-            (">=", 0.80), (">=", 0.85), (">=", 0.90),
-            (">=", 0.95),
         ],
 
         # 변동성/낙폭
@@ -449,13 +451,15 @@ def default_extra_thresholds() -> Dict[str, List[Tuple[str, float]]]:
         # 반등/위치
         "rebound_from_7d_low": [
             (">=", 20.0), (">=", 25.0), (">=", 30.0),
-            (">=", 32.9122), (">=", 35.0), (">=", 40.0),
-            (">=", 40.7563), (">=", 45.0), (">=", 50.0),
+            (">=", 32.9122), (">=", 33.1722), (">=", 35.0),
+            (">=", 40.0), (">=", 40.7563), (">=", 45.0),
+            (">=", 50.0),
         ],
         "dist_to_ma5": [
             ("<=", -2.0), ("<=", -1.0), ("<=", -0.5), ("<=", -0.3),
             ("<=", -0.0182), (">=", 8.0), (">=", 10.0),
-            (">=", 14.6684), (">=", 16.0), (">=", 20.8499),
+            (">=", 14.6684), (">=", 16.0), (">=", 20.2474),
+            (">=", 20.8499),
         ],
         "dist_to_ma20": [
             (">=", 8.0), (">=", 10.0), (">=", 13.4333),
@@ -467,6 +471,36 @@ def default_extra_thresholds() -> Dict[str, List[Tuple[str, float]]]:
             (">=", 4.859), (">=", 5.0),
             ("<=", 5.0), ("<=", 10.0),
         ],
+        "room_to_60d_high": [
+            (">=", -10.0), (">=", -5.0), (">=", 0.0),
+            (">=", 3.0), (">=", 5.0), (">=", 10.0),
+            (">=", 60.0), (">=", 65.0),
+            ("<=", 5.0), ("<=", 10.0), ("<=", 18.9896),
+            ("<=", 20.0), ("<=", 26.0304), ("<=", 30.0),
+            ("<=", 50.0), ("<=", 58.511),
+        ],
+
+        # 레거시/돌파/갭 필터
+        "BB_perc": [
+            ("<=", 0.05), ("<=", 0.10), ("<=", 0.1765),
+            ("<=", 0.25), ("<=", 0.30),
+            (">=", 1.0), (">=", 1.054), (">=", 1.07), (">=", 1.20),
+        ],
+        "gap_pct": [
+            ("<=", -2.0), ("<=", -1.0), ("<=", -0.5),
+            ("<=", 0.0), ("<=", 0.5),
+            (">=", -0.962), (">=", 2.0), (">=", 3.5), (">=", 4.7),
+        ],
+        "ma5_chg_rate": [
+            ("<=", -5.0), ("<=", -3.0), ("<=", -1.5),
+            ("<=", 0.0), ("<=", 10.0),
+            (">=", 3.0), (">=", 5.0), (">=", 8.0), (">=", 10.0),
+        ],
+        "pct_vs_lastweek": [
+            ("<=", -5.0), ("<=", -3.0), ("<=", -1.0),
+            ("<=", 0.0), ("<=", 0.21),
+            (">=", 5.0), (">=", 10.0), (">=", 11.1886),
+        ],
 
         # 당일 힘/캔들
         "today_pct": [
@@ -476,8 +510,9 @@ def default_extra_thresholds() -> Dict[str, List[Tuple[str, float]]]:
             (">=", 24.4445),
         ],
         "price_power_value": [
-            (">=", 20.0), (">=", 40.0), (">=", 60.0),
-            (">=", 80.0), (">=", 94.8492), (">=", 100.0),
+            (">=", 20.0), (">=", 40.0), (">=", 57.1494),
+            (">=", 60.0), (">=", 80.0), (">=", 94.8492),
+            (">=", 100.0),
         ],
         "intraday_return": [
             (">=", 4.0), (">=", 5.0), (">=", 6.0),
@@ -493,7 +528,6 @@ def default_extra_thresholds() -> Dict[str, List[Tuple[str, float]]]:
             ("<=", 0.2), ("<=", 0.3),
         ],
     }
-
 
 def make_atoms(
         train,
@@ -1576,7 +1610,7 @@ def main():
     print("[INFO] valid rows:", len(valid), "target_rate:", valid[args.target].mean())
     print("[INFO] date_col:", date_col)
     print("[INFO] features:", features)
-    print("[SCRIPT_VERSION] feature_selector_v35_min_features_aligned15")
+    print("[SCRIPT_VERSION] feature_selector_v35_custom_feature_pool")
     print("[INFO] goal: feature usefulness + valid precision improvement")
     print("=" * 80)
 
