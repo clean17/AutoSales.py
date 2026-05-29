@@ -415,7 +415,7 @@ def process_one_with_df(df, idx, ticker, tickers_dict, market_context):
         "tr_value_ratio_5d",
         "max_drop_7d",
         "body_value_power",
-        "rebound_vs_prior_drop",
+        # "rebound_vs_prior_drop",
 
         "upper_wick_ratio",
         "lower_wick_ratio",
@@ -444,7 +444,7 @@ def process_one_with_df(df, idx, ticker, tickers_dict, market_context):
         "max_drop_7d": max_drop_7d,                            # 성공군이 더 깊게 빠졌다가 반등
 
         "body_value_power": body_value_power,                  # 당일 캔들의 “몸통(body)” 크기와 방향성, 당일 수익률, 거래대금 규모를 결합해서 만든 일종의 매수세 강도 지표
-        "rebound_vs_prior_drop": rebound_vs_prior_drop,        # 최근 하락폭 대비 오늘까지 얼마나 반등했는가
+        # "rebound_vs_prior_drop": rebound_vs_prior_drop,        # 최근 하락폭 대비 오늘까지 얼마나 반등했는가
 
         "BB_perc": BB_perc,                                    # 볼린저밴드 위치, 20일선 거리와 상관 0.95
         # "RSI_rebound": _RSI_rebound,                           # AUC가 너무 약함, 단독 방향성 불안정..
@@ -464,10 +464,10 @@ def process_one_with_df(df, idx, ticker, tickers_dict, market_context):
         # "market_5d_pct": market_5d_pct,                        # 해당 종목이 속한 시장의 최근 5거래일 등락률
 
         "vol15": vol15,
-        "ATR_pct": _ATR_pct,                                    # 성공군의 평균 변동폭이 큼, 대체 불가 핵심 피쳐
         "ma5_chg_rate": ma5_chg_rate,                          # 5일선 기울기
         "pct_vs_lastweek": result['pct_vs_lastweek'],          # 단독 AUC는 약하지만 룰 조합에서 강함, 없으면 데드캣 상승, 주요 피쳐, 5일선 거리와 상관 0.825
         "dist_to_ma20": dist_to_ma20,                          # 성공군이 20일선 대비 조금 더 아래, 비단조 주의, 룰 조합에서 강함, 핵심 피쳐
+        "ATR_pct": _ATR_pct,                                    # 성공군의 평균 변동폭이 큼, 대체 불가 핵심 피쳐
         # "CCI14": _CCI14,                                       # 단기 모멘텀 변화를 잘 포착하지만, 노이즈가 많음
         # "today_tr_val_eok": today_tr_val_eok,                  # 오늘 거래대금 (억)
         # "recent_runup": _recent_runup,                         # ma5_chg_rate 상관 0.9이상

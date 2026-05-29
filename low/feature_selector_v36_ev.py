@@ -49,7 +49,6 @@ DEFAULT_FEATURES = [
     "tr_value_ratio_5d",
     "max_drop_7d",
     "body_value_power",
-    "rebound_vs_prior_drop",
 
     "upper_wick_ratio",
     "lower_wick_ratio",
@@ -75,7 +74,6 @@ NON_MONOTONIC_FEATURES = [
     "ma5_chg_rate",
     "BB_perc",
     "room_to_60d_high",
-    "rebound_vs_prior_drop",
     "lower_wick_ratio",
 ]
 
@@ -108,7 +106,6 @@ ALLOWED_OPS = {
     "rebound_from_7d_low": [">="],
     "dist_to_ma5": ["<=", ">="],
     "dist_to_ma20": ["<=", ">="],
-    "rebound_vs_prior_drop": ["<=", ">="],
     "BB_perc": ["<=", ">="],
     "room_to_60d_high": ["<=", ">="],
     "pct_vs_lastweek": ["<=", ">="],
@@ -719,11 +716,6 @@ def default_extra_thresholds() -> Dict[str, List[Tuple[str, float]]]:
             (">=", 8.0), (">=", 10.0), (">=", 13.4333),
             (">=", 16.0), (">=", 19.2487),
             ("<=", -5.0), ("<=", -10.0),
-        ],
-        "rebound_vs_prior_drop": [
-            (">=", 1.0), (">=", 2.0), (">=", 3.0),
-            (">=", 4.859), (">=", 5.0),
-            ("<=", 5.0), ("<=", 10.0),
         ],
         "room_to_60d_high": [
             (">=", -10.0), (">=", -5.0), (">=", 0.0),
