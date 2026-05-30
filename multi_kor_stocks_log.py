@@ -33,8 +33,8 @@ os.makedirs(output_dir, exist_ok=True)
 
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
 root_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(=루트)
-pickle_dir = os.path.join(root_dir, 'pickle')
-os.makedirs(pickle_dir, exist_ok=True) # 없으면 생성
+data_dir = os.path.join(root_dir, "data")
+pickle_dir = os.path.join(data_dir, "pickle")
 
 N_FUTURE = 3
 LOOK_BACK = 15

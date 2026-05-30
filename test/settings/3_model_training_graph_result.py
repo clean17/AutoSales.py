@@ -26,7 +26,8 @@ random.seed(42)
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
 sys.path.append(BASE_DIR)
-pickle_dir = os.path.join(BASE_DIR, 'pickle')
+data_dir = os.path.join(BASE_DIR, "data")
+pickle_dir = os.path.join(data_dir, "pickle")
 
 from utils import create_multistep_dataset, add_technical_features, create_lstm_model, get_kor_ticker_dict_list, \
     drop_trading_halt_rows, fetch_stock_data

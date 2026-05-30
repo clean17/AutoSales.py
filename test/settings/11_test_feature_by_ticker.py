@@ -313,9 +313,8 @@ tickers = ['006490', '042670', '023160', '006800', '323410', '009540', '058970',
 
 # 2단계 위 디렉토리를 루트 디렉토리로 설정
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-# print('ROOT_DIR', ROOT_DIR)
-# pickle_dir = os.path.join(ROOT_DIR, 'pickle_us')
-pickle_dir = os.path.join(ROOT_DIR, 'pickle')
+data_dir = os.path.join(ROOT_DIR, "data")
+pickle_dir = os.path.join(data_dir, "pickle")
 
 
 for count, ticker in enumerate(tickers):

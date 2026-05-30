@@ -39,7 +39,8 @@ LOOK_BACK = 15
 
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-pickle_dir = os.path.join(ROOT_DIR, 'pickle')
+data_dir = os.path.join(ROOT_DIR, "data")
+pickle_dir = os.path.join(data_dir, "pickle")
 
 # 데이터 수집
 # tickers = ['358570']
