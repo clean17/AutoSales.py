@@ -37,8 +37,10 @@ nowTime = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
 print(f'{nowTime} - 🕒 running 1_periodically_update_today_interest_stocks.py...')
 
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
-root_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(=루트)
-pickle_dir = os.path.join(root_dir, '../pickle')
+script_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(root/low)
+project_root = os.path.dirname(script_dir)               # root
+data_dir = os.path.join(project_root, "data")
+pickle_dir = os.path.join(data_dir, "pickle")
 
 # pickle 폴더가 없으면 자동 생성 (이미 있으면 무시)
 os.makedirs(pickle_dir, exist_ok=True)
@@ -93,7 +95,7 @@ for count, ticker in enumerate(tickers):
     data = cleaned
 
     data, removed_idx = drop_trading_halt_rows(data)
-
+    today = data.index[-1].strftime("%Y%m%d") # 마지막 인덱스
 
     ########################################################################
     # ======== 조건 체크 시작 ========
@@ -131,9 +133,9 @@ for count, ticker in enumerate(tickers):
     # plt.show()
 
     # 파일 저장 (옵션)
-    year = datetime.now().strftime("%Y")
-    month = datetime.now().strftime("%m")
-    day = datetime.now().strftime("%d")
+    year = today[:4]
+    month = today[4:6]
+    day = today[6:8]
 
     output_dir = f'F:\\interest_stocks\\{year}\\{month}\\{day}'
     os.makedirs(output_dir, exist_ok=True)
