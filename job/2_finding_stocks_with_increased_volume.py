@@ -27,7 +27,7 @@ else:
 
 from utils import fetch_stock_data, get_kor_ticker_list, get_kor_ticker_dict_list, add_technical_features, \
     plot_candles_weekly, plot_candles_daily, drop_trading_halt_rows, drop_sparse_columns, get_stock_name, \
-    is_korean_stock_business_day
+    is_korean_stock_business_day, safe_rate, get_ticker_info
 
 if not is_korean_stock_business_day(verbose=False):
     # print("한국증시 영업일이 아니므로 실행하지 않습니다.")
@@ -39,8 +39,10 @@ nowTime = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
 print(f'{nowTime} - 🕒 running 2_finding_stocks_with_increased_volume.py...')
 
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
-root_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(=루트)
-pickle_dir = os.path.join(root_dir, '../pickle')
+script_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(root/low)
+project_root = os.path.dirname(script_dir)               # root
+data_dir = os.path.join(project_root, "data")
+pickle_dir = os.path.join(data_dir, "pickle")
 
 # pickle 폴더가 없으면 자동 생성 (이미 있으면 무시)
 os.makedirs(pickle_dir, exist_ok=True)
@@ -61,12 +63,16 @@ results = []
 results2 = []
 
 for count, ticker in enumerate(tickers):
-    condition_passed = True
-    condition_passed2 = True
+    condition_passed = True   # 최근 10일간 변동폭이 6% 박스권 안쪽
+    condition_passed2 = True  # 최근 5거래일 대비 오늘 거래대금이 5배 초과하지 않음
     time.sleep(0.1)  # x00ms 대기
-    stock_name = get_stock_name(tickers_dict, ticker)
-    # if count % 100 == 0:
-    #     print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
+    # stock_name = get_stock_name(tickers_dict, ticker)
+    info = get_ticker_info(ticker, tickers_dict)
+
+    ticker = info["ticker"]
+    stock_name = info["stock_name"]
+    stock_market = info["stock_market"]
+    sector_code = info["sector_code"]
 
 
     # 데이터가 없으면 1년 데이터 요청, 있으면 5일 데이터 요청
@@ -80,10 +86,6 @@ for count, ticker in enumerate(tickers):
 
         data = data.sort_index(ascending=True)   # 오름차순
         date_str = data.index[-1].strftime("%Y%m%d")  # 인덱스를 왜 맨날 바꾸는거야..?
-        # if count % 100 == 0:
-        #     print(data)
-        #     print('date_str', date_str)
-        #     print('today', today)
 
         if date_str != today:
             continue
@@ -97,14 +99,10 @@ for count, ticker in enumerate(tickers):
     # 파일 저장
     df.to_pickle(filepath)
     data = df
-    # print(data)
-    # if count % 100 == 0:
-    #     print(f"len(data) {len(data)}")
 
     ########################################################################
 
     closes = data['종가'].values
-    # print(closes)
     last_close = closes[-1]
 
     trading_value = data['거래량'] * data['종가']
@@ -114,33 +112,32 @@ for count, ticker in enumerate(tickers):
 
     # 데이터가 부족하면 패스
     if data.empty or len(data) < 50:
-        # print(f"                                                        데이터 부족 → pass")
         continue
 
     # 700원 미만이면 패스
     last_row = data.iloc[-1]
     if last_row['종가'] < 700:
-        # print("                                                        종가가 0이거나 500원 미만 → pass")
         continue
+
+    # 이상치 제거
+    data, removed_idx = drop_trading_halt_rows(data)
 
     # 2차 생성 feature
     data = add_technical_features(data)
 
     # 결측 제거
-    cleaned, cols_to_drop = drop_sparse_columns(data, threshold=0.10, check_inf=True, inplace=True)
-    if len(cols_to_drop) > 0:
-        # print("    Drop candidates:", cols_to_drop)
-        pass
-    data = cleaned
+    data, cols_to_drop = drop_sparse_columns(data, threshold=0.10, check_inf=True, inplace=True)
 
-    data, removed_idx = drop_trading_halt_rows(data)
-    if len(removed_idx) > 0:
-        # print(f"                                                        거래정지/이상치로 제거된 날짜 수: {len(removed_idx)}")
-        pass
+    # drop 이후 다시 생성
+    data = add_technical_features(data)
 
-    if 'MA5' not in data.columns or 'MA20' not in data.columns:
-        # print(f"                                                        이동평균선이 존재하지 않음 → pass")
-        continue
+
+    # 5일, 20일 이동평균선 없으면 패스
+    REQUIRED_COLS = ["MA5", "MA20"]
+
+    for col in REQUIRED_COLS:
+        if col not in data.columns:
+            continue
 
     # 5일선이 너무 하락하면
     ma5_today = data['MA5'].iloc[-1]
@@ -152,47 +149,26 @@ for count, ticker in enumerate(tickers):
     # 현재 5일선이 20일선보다 낮으면서 하락중이면 패스
     min_slope = -3
     if ma5_today < data['MA20'].iloc[-1] and change_rate * 100 < min_slope:
-        # print(f"                                                        5일선이 20일선 보다 낮으면서 {min_slope}기울기보다 낮게 하락중[{change_rate * 100:.2f}] → pass")
         continue
-        # pass
 
     ########################################################################
     # ======== 조건 체크 시작 ========
 
     # ─────────────────────────────────────────────────────────────
-    # 1) 10일 동안 박스권 >>> 오늘 급등 찾기
+    # 1) 오늘 등락률 3% 안되면 pass
     # ─────────────────────────────────────────────────────────────
-    # "어제부터 10일 전"의 박스권 체크
-    box_closes = closes[-11:-1]  # 10일 전 ~ 오늘 이전 (10개)
-    # print('box', box_closes)
-    max_close = box_closes.max()
-    # print('max', max_close)
-    min_close = box_closes.min()
-    # print('min', min_close)
-    range_pct = (max_close - min_close) / min_close * 100
-
-    # 10일 동안 5% 이상 변화가 없다 -> 박스권으로 간주
-    if range_pct >= 6:
-        condition_passed = False
-        # continue  # 4% 이상 움직이면 박스권 X
-
     # 오늘 등락률(어제→오늘)
     today_close = closes[-1]
-    # print('today', today_close)
     yesterday_close = closes[-2]
-    # print('yesterday', yesterday_close)
-    today_price_change_pct = (today_close - yesterday_close) / yesterday_close * 100
-    today_price_change_pct = round(today_price_change_pct, 2)
+    today_price_change_pct = round(safe_rate(today_close, yesterday_close), 2)
 
     # 오늘 상승률이 X% 가 안되면 제외
     if today_price_change_pct < TODAY_RATE_OF_INCREASE:
-        condition_passed = False
-        condition_passed2 = False
-        # continue  # 오늘 10% 미만 상승이면 제외
+        continue
 
 
     # ─────────────────────────────────────────────────────────────
-    # 2) 시가 총액 500억 이하 패스
+    # 2) 시가 총액 700억 이하 패스
     # ─────────────────────────────────────────────────────────────
     try:
         res = requests.post(
@@ -228,33 +204,50 @@ for count, ticker in enumerate(tickers):
             print(f"overview marketValueKrw is None: {product_code}")
             continue
 
-        # 시가총액이 500억보다 작으면 패스
-        if (market_value < 50_000_000_000):
+        # 시가총액이 700억보다 작으면 패스
+        if (market_value < 70_000_000_000):
             continue
 
     except Exception as e:
         print(f"overview 요청 실패-2: {e} {product_code}")
         pass  # 오류
 
+    # ─────────────────────────────────────────────────────────────
+    # 3) 10일 동안 박스권아니면 제외
+    # ─────────────────────────────────────────────────────────────
+    # "어제부터 10일 전"의 박스권 체크
+    box_closes = closes[-11:-1]  # 10일 전 ~ 오늘 이전 (10개)
+    max_close = box_closes.max()
+    min_close = box_closes.min()
+    range_pct = safe_rate(max_close, min_close)
+
+    # 최근 10일간 변동폭이 6% 이상이면 박스권 탈출 → 관심종목 제외
+    if range_pct >= 6:
+        condition_passed = False
+
 
     # ─────────────────────────────────────────────────────────────
-    # 3) 5일 평균 거래대금 * X < 오늘 거래대금 찾기
+    # 4) 한국거래소(KRX)에서 공매도 과열 종목을 지정하는 조건
+    #    최근 5거래일 평균 거래대금(오늘 제외)을 기준
+    #    오늘 거래대금이 그 평균 대비 코스피는 6배 이상, 코스닥은 5배 이상이면 과열로 판단
     # ─────────────────────────────────────────────────────────────
     # 지난 5거래일 평균 거래대금(오늘 제외: -6:-1), 오늘값: -1
     avg5 = trading_value.iloc[-6:-1].mean()
     # 최근 5일 거래대금이 없으면 한달 평균
     if avg5 == 0.0:
         avg5 = trading_value.iloc[-21:-1].mean()
-    # print('avg', avg5)
+    # 오늘 거래대금
     today_val = trading_value.iloc[-1]
-    # print('today', today_val)
 
-    # 거래대금 x배 보다 크면 과열 > 제외
-    TARGET_VALUE = 7
     # 0 나눗셈 방지 및 조건 체크
-    if avg5 > 0 and np.isfinite(avg5) and today_val >= TARGET_VALUE * avg5:
-        condition_passed2 = False
+    if avg5 > 0 and np.isfinite(avg5):
+        if stock_market == 'kospi' and today_val >= 6 * avg5:
+           condition_passed2 = False
+        if stock_market == 'kosdaq' and today_val >= 5 * avg5:
+            condition_passed2 = False
 
+    if condition_passed is False and condition_passed2 is False:
+        continue
 
     # ─────────────────────────────────────────────────────────────
     # 그래프 생성
@@ -277,9 +270,9 @@ for count, ticker in enumerate(tickers):
     # plt.show()
 
     # 파일 저장 (옵션)
-    year = datetime.now().strftime("%Y")
-    month = datetime.now().strftime("%m")
-    day = datetime.now().strftime("%d")
+    year = today[:4]
+    month = today[4:6]
+    day = today[6:8]
 
     output_dir = f'F:\\interest_stocks\\{year}\\{month}\\{day}'
     os.makedirs(output_dir, exist_ok=True)
