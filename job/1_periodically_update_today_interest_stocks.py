@@ -25,7 +25,7 @@ else:
 
 from utils import fetch_stock_data, get_kor_interest_ticker_dick_list, add_technical_features, \
     plot_candles_weekly, plot_candles_daily, drop_sparse_columns, drop_trading_halt_rows, get_kor_low_ticker_dick_list, \
-    get_stock_name, is_korean_stock_business_day, safe_rate
+    get_stock_name, is_korean_stock_business_day, update_today_ohlcv_from_amount, get_ticker_info
 
 if not is_korean_stock_business_day(verbose=False):
     # print("한국증시 영업일이 아니므로 실행하지 않습니다.")
@@ -53,9 +53,15 @@ tickers = list(tickers_dict.keys())
 
 
 for count, ticker in enumerate(tickers):
-    time.sleep(1)  # 1초 대기
-    stock_name = get_stock_name(tickers_dict, ticker)
-    # print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
+    time.sleep(0.02)
+    # stock_name = get_stock_name(tickers_dict, ticker)
+    info = get_ticker_info(ticker, tickers_dict)
+
+    ticker = info["ticker"]
+    stock_name = info["stock_name"]
+    stock_market = info["stock_market"]
+    sector_code = info["sector_code"]
+    product_code = info["product_code"]
 
 
     # 데이터가 없으면 1년 데이터 요청, 있으면 1일 데이터 요청
@@ -66,103 +72,42 @@ for count, ticker in enumerate(tickers):
             raise FileNotFoundError(filepath)
 
         if os.path.getsize(filepath) == 0:
-            raise EOFError("pickle 파일이 비어 있습니다.")
+            raise EOFError("⚠️ pickle 파일이 비어 있습니다.")
 
         df = pd.read_pickle(filepath)
 
     except (EOFError, FileNotFoundError) as e:
-        print(f"pickle 파일을 읽을 수 없습니다: {filepath}")
+        print(f"⚠️ pickle 파일을 읽을 수 없습니다: {filepath}")
         print(e)
-        df = pd.DataFrame()
-
-    try:
-        data = fetch_stock_data(ticker, start_yesterday, run_today)
-    except Exception as e:
-        print(f"fetch_stock_data 실패: {ticker} {stock_name} {e}")
         continue
 
-    if data is None or data.empty:
-        print(f"신규 데이터 없음: {ticker} {stock_name}")
-        if df.empty:
-            continue
-        data = pd.DataFrame()
 
-    # 중복 제거 & 새로운 날짜만 추가
+    # pykrx 에서 증권사 api 호출로 변경
+    # try:
+    #     data = fetch_stock_data(ticker, start_yesterday, run_today)
+    # except Exception as e:
+    #     print(f"⚠️ fetch_stock_data 실패-1: {ticker} {stock_name} {e}")
+    #     continue
+    #
+    #
+    # if data is None or data.empty:
+    #     print(f"⚠️ 신규 데이터 없음-1: {ticker} {stock_name}")
+    #     if df.empty:
+    #         continue
+    #     data = pd.DataFrame()
+    #
+    #
+    # # 중복 제거 & 새로운 날짜만 추가 >> 덮어쓰는 방식으로 수정
     # if not df.empty:
-    #     # 기존 날짜 인덱스와 비교하여 새로운 행만 선택
-    #     new_rows = data.loc[~data.index.isin(df.index)] # ~ (not) : 기존에 없는 날짜만 남김
-    #     df = pd.concat([df, new_rows])
+    #     # df와 data를 concat 후, data 값으로 덮어쓰기
+    #     df = pd.concat([df, data])
+    #     df = df[~df.index.duplicated(keep='last')]  # 같은 인덱스일 때 data가 남음
     # else:
-    #     df = data
+    #     df = data.copy()
 
-    # 중복 제거 & 새로운 날짜만 추가 >> 덮어쓰는 방식으로 수정
-    if not df.empty:
-        # df와 data를 concat 후, data 값으로 덮어쓰기
-        df = pd.concat([df, data])
-        df = df[~df.index.duplicated(keep='last')]  # 같은 인덱스일 때 data가 남음
-    else:
-        df = data.copy()
-
-    ########################################################################
-
-    product_code = None
-    candle = None
-    today_amount = None
 
     # 증권사에 현재 ohlcv 데이터 요청
-    try:
-        res = requests.post(
-            'https://chickchick.kr/stocks/info',
-            json={"stock_name": str(ticker)},
-            timeout=10
-        )
-        json_data = res.json()
-        product_code = json_data["result"][0]["data"]["items"][0]["productCode"]
-
-    except Exception as e:
-        print(f"info 요청 실패-1: {str(ticker)} {stock_name} {e}")
-        pass  # 오류
-
-    if product_code is not None:
-        try:
-            res = requests.post(
-                'https://chickchick.kr/stocks/amount',
-                json={
-                    "product_code": str(product_code)
-                },
-                timeout=10
-            )
-            res.raise_for_status()
-
-            json_data = res.json()
-            candles = json_data.get("result", {}).get("candles", [])
-
-            if candles:
-                candle = candles[0]
-
-        except Exception as e:
-            print(f"progress-update 요청 실패-1-1: {e}")
-
-    if candle is not None:
-        dt = pd.to_datetime(candle["dt"]).tz_localize(None).normalize()
-
-        df.loc[dt, ["시가", "고가", "저가", "종가", "거래량"]] = [
-            candle["open"],
-            candle["high"],
-            candle["low"],
-            candle["close"],
-            candle["volume"],
-        ]
-
-        prev_close = df.loc[df.index < dt, "종가"].dropna()  # 전일 종가가 없는 경우 (거래정지 등)
-
-        if not prev_close.empty:
-            prev_close = prev_close.iloc[-1]
-            df.loc[dt, "등락률"] = safe_rate(candle["close"], prev_close)
-
-        today_amount = candle.get("amount")  # 오늘 거래대금
-
-    data = df
+    df, today_amount = update_today_ohlcv_from_amount(product_code, df, ticker, product_code)
 
     # 파일 저장 (임시 파일 생성 후 교체)
     tmp_filepath = filepath + ".tmp"
@@ -172,18 +117,28 @@ for count, ticker in enumerate(tickers):
 
     ########################################################################
 
+    # 데이터가 부족하면 패스
+    if df is None or df.empty or len(df) < 50:
+        continue
+
+    # 거래정지/이상치 행 제거
+    df, _ = drop_trading_halt_rows(df)
+
     # 2차 생성 feature
-    data = add_technical_features(data)
+    df = add_technical_features(df)
 
     # 결측 제거
-    cleaned, cols_to_drop = drop_sparse_columns(data, threshold=0.10, check_inf=True, inplace=True)
-    data = cleaned
+    df, _ = drop_sparse_columns(df, threshold=0.10, check_inf=True, inplace=True)
 
-    data, removed_idx = drop_trading_halt_rows(data)
+    # drop 이후 다시 생성
+    df = add_technical_features(df)
 
-    if len(data) < 2:
-        print(f"데이터 부족으로 스킵: {ticker} {stock_name}")
+    # 데이터가 부족하면 패스
+    if df.empty or len(df) < 50:
         continue
+
+
+    data = df
 
     closes = data['종가'].values
     trading_value = data['거래량'] * data['종가']
@@ -272,9 +227,9 @@ for count, ticker in enumerate(tickers):
         )
     except Exception as e:
         # logging.warning(f"progress-update 요청 실패: {e}")
-        print(f"progress-update 요청 실패-1-2: {e}")
+        print(f"⚠️ progress-update 요청 실패-1-2: {e}")
 
-    print('last_date', last_date, ticker, stock_name)
+    # print('last_date', last_date, ticker, stock_name)
 
 end = time.time()     # 끝 시간(초)
 elapsed = end - start
