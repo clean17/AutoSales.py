@@ -25,7 +25,7 @@ else:
 
 from utils import fetch_stock_data, get_kor_interest_ticker_dick_list, add_technical_features, \
     plot_candles_weekly, plot_candles_daily, drop_sparse_columns, drop_trading_halt_rows, get_kor_low_ticker_dick_list, \
-    get_stock_name, is_korean_stock_business_day
+    get_stock_name, is_korean_stock_business_day, safe_rate
 
 if not is_korean_stock_business_day(verbose=False):
     # print("한국증시 영업일이 아니므로 실행하지 않습니다.")
@@ -36,16 +36,14 @@ start = time.time()   # 시작 시간(초)
 nowTime = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
 print(f'{nowTime} - 🕒 running 1_periodically_update_today_interest_stocks.py...')
 
+
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
 script_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(root/low)
 project_root = os.path.dirname(script_dir)               # root
 data_dir = os.path.join(project_root, "data")
 pickle_dir = os.path.join(data_dir, "pickle")
 
-# pickle 폴더가 없으면 자동 생성 (이미 있으면 무시)
-os.makedirs(pickle_dir, exist_ok=True)
-
-today = datetime.today().strftime('%Y%m%d')
+run_today = datetime.today().strftime('%Y%m%d')
 start_yesterday = (datetime.today() - timedelta(days=1)).strftime('%Y%m%d')
 
 tickers_dict = get_kor_interest_ticker_dick_list()
@@ -60,11 +58,34 @@ for count, ticker in enumerate(tickers):
     # print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
 
 
-    # 데이터가 없으면 1년 데이터 요청, 있으면 5일 데이터 요청
+    # 데이터가 없으면 1년 데이터 요청, 있으면 1일 데이터 요청
     filepath = os.path.join(pickle_dir, f'{ticker}.pkl')
-    if os.path.exists(filepath):
+
+    try:
+        if not os.path.exists(filepath):
+            raise FileNotFoundError(filepath)
+
+        if os.path.getsize(filepath) == 0:
+            raise EOFError("pickle 파일이 비어 있습니다.")
+
         df = pd.read_pickle(filepath)
-        data = fetch_stock_data(ticker, start_yesterday, today)
+
+    except (EOFError, FileNotFoundError) as e:
+        print(f"pickle 파일을 읽을 수 없습니다: {filepath}")
+        print(e)
+        df = pd.DataFrame()
+
+    try:
+        data = fetch_stock_data(ticker, start_yesterday, run_today)
+    except Exception as e:
+        print(f"fetch_stock_data 실패: {ticker} {stock_name} {e}")
+        continue
+
+    if data is None or data.empty:
+        print(f"신규 데이터 없음: {ticker} {stock_name}")
+        if df.empty:
+            continue
+        data = pd.DataFrame()
 
     # 중복 제거 & 새로운 날짜만 추가
     # if not df.empty:
@@ -79,13 +100,77 @@ for count, ticker in enumerate(tickers):
         # df와 data를 concat 후, data 값으로 덮어쓰기
         df = pd.concat([df, data])
         df = df[~df.index.duplicated(keep='last')]  # 같은 인덱스일 때 data가 남음
-
-    data = df
+    else:
+        df = data.copy()
 
     ########################################################################
 
-    closes = data['종가'].values
-    trading_value = data['거래량'] * data['종가']
+    product_code = None
+    candle = None
+    today_amount = None
+
+    # 증권사에 현재 ohlcv 데이터 요청
+    try:
+        res = requests.post(
+            'https://chickchick.kr/stocks/info',
+            json={"stock_name": str(ticker)},
+            timeout=10
+        )
+        json_data = res.json()
+        product_code = json_data["result"][0]["data"]["items"][0]["productCode"]
+
+    except Exception as e:
+        print(f"info 요청 실패-1: {str(ticker)} {stock_name} {e}")
+        pass  # 오류
+
+    if product_code is not None:
+        try:
+            res = requests.post(
+                'https://chickchick.kr/stocks/amount',
+                json={
+                    "product_code": str(product_code)
+                },
+                timeout=10
+            )
+            res.raise_for_status()
+
+            json_data = res.json()
+            candles = json_data.get("result", {}).get("candles", [])
+
+            if candles:
+                candle = candles[0]
+
+        except Exception as e:
+            print(f"progress-update 요청 실패-1-1: {e}")
+
+    if candle is not None:
+        dt = pd.to_datetime(candle["dt"]).tz_localize(None).normalize()
+
+        df.loc[dt, ["시가", "고가", "저가", "종가", "거래량"]] = [
+            candle["open"],
+            candle["high"],
+            candle["low"],
+            candle["close"],
+            candle["volume"],
+        ]
+
+        prev_close = df.loc[df.index < dt, "종가"].dropna()  # 전일 종가가 없는 경우 (거래정지 등)
+
+        if not prev_close.empty:
+            prev_close = prev_close.iloc[-1]
+            df.loc[dt, "등락률"] = safe_rate(candle["close"], prev_close)
+
+        today_amount = candle.get("amount")  # 오늘 거래대금
+
+    data = df
+
+    # 파일 저장 (임시 파일 생성 후 교체)
+    tmp_filepath = filepath + ".tmp"
+
+    df.to_pickle(tmp_filepath)
+    os.replace(tmp_filepath, filepath)
+
+    ########################################################################
 
     # 2차 생성 feature
     data = add_technical_features(data)
@@ -95,7 +180,15 @@ for count, ticker in enumerate(tickers):
     data = cleaned
 
     data, removed_idx = drop_trading_halt_rows(data)
-    today = data.index[-1].strftime("%Y%m%d") # 마지막 인덱스
+
+    if len(data) < 2:
+        print(f"데이터 부족으로 스킵: {ticker} {stock_name}")
+        continue
+
+    closes = data['종가'].values
+    trading_value = data['거래량'] * data['종가']
+
+    last_date = data.index[-1].strftime("%Y%m%d")  # 마지막 인덱스
 
     ########################################################################
     # ======== 조건 체크 시작 ========
@@ -108,8 +201,7 @@ for count, ticker in enumerate(tickers):
     # print('today', today_close)
     yesterday_close = closes[-2]
     # print('yesterday', yesterday_close)
-    today_price_change_pct = (today_close - yesterday_close) / yesterday_close * 100
-    today_price_change_pct = round(today_price_change_pct, 2)
+    today_price_change_pct = round(float(data["등락률"].iloc[-1]), 2)
 
 
     # ─────────────────────────────────────────────────────────────
@@ -123,7 +215,7 @@ for count, ticker in enumerate(tickers):
     ax_w_price = fig.add_subplot(gs[2, 0])
     ax_w_vol   = fig.add_subplot(gs[3, 0], sharex=ax_w_price)
 
-    plot_candles_daily(data, show_months=4, title=f'{today} {stock_name} [{ticker}] Daily Chart',
+    plot_candles_daily(data, show_months=4, title=f'{last_date} {stock_name} [{ticker}] Daily Chart',
                        ax_price=ax_d_price, ax_volume=ax_d_vol, date_tick=5)
 
     plot_candles_weekly(data, show_months=12, title="Weekly Chart",
@@ -133,20 +225,20 @@ for count, ticker in enumerate(tickers):
     # plt.show()
 
     # 파일 저장 (옵션)
-    year = today[:4]
-    month = today[4:6]
-    day = today[6:8]
+    year = last_date[:4]
+    month = last_date[4:6]
+    day = last_date[6:8]
 
     output_dir = f'F:\\interest_stocks\\{year}\\{month}\\{day}'
     os.makedirs(output_dir, exist_ok=True)
 
-    final_file_name = f'{today} {stock_name} [{ticker}].webp'
+    final_file_name = f'{last_date} {stock_name} [{ticker}].webp'
     final_file_path = os.path.join(output_dir, final_file_name)
     plt.savefig(final_file_path, format="webp", dpi=100, bbox_inches="tight", pad_inches=0.1)
     plt.close()
 
 
-    today_val = trading_value.iloc[-1]
+    today_val = today_amount if today_amount is not None else trading_value.iloc[-1]
     avg5 = trading_value.iloc[-6:-1].mean()
     # 최근 5일 거래대금이 없으면 한달 평균
     if avg5 <= 0 or not np.isfinite(avg5):
@@ -157,62 +249,32 @@ for count, ticker in enumerate(tickers):
         trading_value_change_pct = today_val / avg5 * 100
         trading_value_change_pct = round(trading_value_change_pct, 2)
 
+    avg5_trv = int(avg5) if np.isfinite(avg5) else 0
 
     try:
-        res = requests.post(
-            'https://chickchick.kr/stocks/info',
-            json={"stock_name": str(ticker)},
+        requests.post(
+            'https://chickchick.kr/stocks/interest/insert',
+            json={
+                "nation": "kor",
+                "stock_code": str(ticker),
+                "stock_name": str(stock_name),
+                "pred_price_change_3d_pct": "",
+                "yesterday_close": str(yesterday_close),
+                "last_close": str(today_close),
+                "today_price_change_pct": str(today_price_change_pct),
+                "avg5d_trading_value": str(avg5_trv),
+                "current_trading_value": str(today_val),
+                "trading_value_change_pct": str(trading_value_change_pct),
+                "graph_file": str(final_file_name),
+                "market_value": "",
+            },
             timeout=10
         )
-        json_data = res.json()
-        # json_data["result"][0]
-        product_code = json_data["result"][0]["data"]["items"][0]["productCode"]
-
     except Exception as e:
-        print(f"info 요청 실패-1: {str(ticker)} {stock_name} {e}")
-        pass  # 오류
+        # logging.warning(f"progress-update 요청 실패: {e}")
+        print(f"progress-update 요청 실패-1-2: {e}")
 
-    if product_code is not None:
-        # 현재 종가 가져오기
-        try:
-            res = requests.post(
-                'https://chickchick.kr/stocks/amount',
-                json={
-                    "product_code": str(product_code)
-                },
-                timeout=10
-            )
-            json_data = res.json()
-            last_close = json_data["result"]["candles"][0]["close"]
-        except Exception as e:
-            print(f"progress-update 요청 실패-1-1: {e}")
-            pass  # 오류
-
-    if last_close is not None:
-        try:
-            requests.post(
-                'https://chickchick.kr/stocks/interest/insert',
-                json={
-                    "nation": "kor",
-                    "stock_code": str(ticker),
-                    "stock_name": str(stock_name),
-                    "pred_price_change_3d_pct": "",
-                    "yesterday_close": str(yesterday_close),
-                    "current_price": str(today_close),
-                    "today_price_change_pct": str(today_price_change_pct),
-                    "avg5d_trading_value": str(avg5),
-                    "current_trading_value": str(today_val),
-                    "trading_value_change_pct": str(trading_value_change_pct),
-                    "graph_file": str(final_file_name),
-                    "market_value": "",
-                    "last_close": str(last_close),
-                },
-                timeout=10
-            )
-        except Exception as e:
-            # logging.warning(f"progress-update 요청 실패: {e}")
-            print(f"progress-update 요청 실패-1-2: {e}")
-            pass  # 오류
+    print('last_date', last_date, ticker, stock_name)
 
 end = time.time()     # 끝 시간(초)
 elapsed = end - start
