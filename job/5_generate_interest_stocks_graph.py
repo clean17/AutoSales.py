@@ -27,77 +27,131 @@ else:
 
 from utils import add_technical_features, plot_candles_weekly, plot_candles_daily, \
     drop_sparse_columns, drop_trading_halt_rows, get_kor_summary_ticker_dict_list, get_favorite_ticker_dict_list, \
-    get_stock_name, is_korean_stock_business_day
+    get_stock_name, is_korean_stock_business_day, get_low_ticker_dict_list, get_stock_created_at
 
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
-root_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(=루트)
-pickle_dir = os.path.join(root_dir, '../pickle')
+script_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(root/low)
+project_root = os.path.dirname(script_dir)               # root
+data_dir = os.path.join(project_root, "data")
+pickle_dir = os.path.join(data_dir, "pickle")
 
 year = datetime.now().strftime("%Y")
 month = datetime.now().strftime("%m")
 day = datetime.now().strftime("%d")
 
-output_dir = f'F:\\interest_stocks\\{year}\\{month}\\{day}'
 
 
+def convert_to_yymmdd(date_str: str) -> str:
+    """
+    'Thu, 28 May 2026 09:08:46 GMT' 같은 문자열을 'YYYYMMDD' 형식으로 변환
+    """
+    # 문자열을 datetime 객체로 파싱
+    dt = datetime.strptime(date_str, "%a, %d %b %Y %H:%M:%S %Z")
+    # YYYYMMDD 형식으로 변환
+    return dt.strftime("%Y%m%d")
 
-def process_one(idx, count, ticker, tickers_dict):
+
+def process_one(idx, ticker, tickers_dict, low_tickers_cdate_dict):
     stock_name = get_stock_name(tickers_dict, ticker)
+    created_at_list = get_stock_created_at(low_tickers_cdate_dict, ticker)
+
 
     filepath = os.path.join(pickle_dir, f'{ticker}.pkl')
-    if not os.path.exists(filepath):
-        print(f"[idx={idx}] {ticker} 파일 없음")
+
+    try:
+        if not os.path.exists(filepath):
+            raise FileNotFoundError(filepath)
+
+        if os.path.getsize(filepath) == 0:
+            raise EOFError("⚠️ pickle 파일이 비어 있습니다.")
+
+        df = pd.read_pickle(filepath)
+
+    except (EOFError, FileNotFoundError) as e:
+        print(f"⚠️ pickle 파일을 읽을 수 없습니다: {filepath}")
+        print(e)
         return
 
-    data = pd.read_pickle(filepath)
 
-
-    today = data.index[-1].strftime("%Y%m%d") # 마지막 인덱스
-    created_at = data.index[-1].strftime("%Y-%m-%d") # 마지막 인덱스
-
-
-    # 2차 생성 feature
-    data = add_technical_features(data)
-
-    # 결측 제거
-    cleaned, cols_to_drop = drop_sparse_columns(data, threshold=0.10, check_inf=True, inplace=True)
-    data = cleaned
+    # 데이터가 부족하면 패스
+    if df is None or df.empty or len(df) < 50:
+        return
 
     # 거래정지/이상치 행 제거
-    data, removed_idx = drop_trading_halt_rows(data)
+    df, _ = drop_trading_halt_rows(df)
+
+    # 2차 생성 feature
+    df = add_technical_features(df)
+
+    # 결측 제거
+    df, _ = drop_sparse_columns(df, threshold=0.10, check_inf=True, inplace=True)
+
+    # drop 이후 다시 생성
+    df = add_technical_features(df)
+
+    # 데이터가 부족하면 패스
+    if df.empty or len(df) < 50:
+        return
 
 
+    data = df
+    today = data.index[-1].strftime("%Y%m%d") # 마지막 인덱스
 
     today_str = str(today)
     title = f"{today_str} {stock_name} [{ticker}] Daily Chart"
     final_file_name = f"{today} {stock_name} [{ticker}].webp"
+
+    year = today[:4]
+    month = today[4:6]
+    day = today[6:8]
+
+    output_dir = f'F:\\interest_stocks\\{year}\\{month}\\{day}'
     os.makedirs(output_dir, exist_ok=True)
     final_file_path = os.path.join(output_dir, final_file_name)
 
     # 그래프 그릴 때 필요한 것만 모아서 리턴
     plot_job = {
+        "ticker": ticker,
         "origin": data,
         "today": today_str,
+        "created_at_list": created_at_list,
         "title": title,
         "save_path": final_file_path,
     }
 
 
-    try:
-        requests.post(
-            'https://chickchick.kr/stocks/interest/graph',
-            json={
-                "nation": "kor",
-                "stock_code": str(ticker),
-                "stock_name": str(stock_name),
-                "graph_file": str(final_file_name),
-            },
-            timeout=10
-        )
-    except Exception as e:
-        # logging.warning(f"progress-update 요청 실패: {e}")
-        print(f"progress-update 요청 실패-4-1: {e}")
-        pass  # 오류
+    if not created_at_list:
+        try:
+            requests.post(
+                'https://chickchick.kr/stocks/interest/graph',
+                json={
+                    "nation": "kor",
+                    "stock_code": str(ticker),
+                    "graph_file": str(final_file_name),
+                },
+                timeout=10
+            )
+        except Exception as e:
+            # logging.warning(f"progress-update 요청 실패: {e}")
+            print(f"⚠️ progress-update 요청 실패-5-1: {e}")
+            pass  # 오류
+    else:
+        for created_at in created_at_list:
+            try:
+                requests.post(
+                    'https://chickchick.kr/stocks/low/graph',
+                    json={
+                        "nation": "kor",
+                        "stock_code": str(ticker),
+                        "created_at": str(created_at),
+                        "graph_file": str(final_file_name),
+                    },
+                    timeout=10
+                )
+            except Exception as e:
+                # logging.warning(f"progress-update 요청 실패: {e}")
+                print(f"⚠️ progress-update 요청 실패-5-2: {e}")
+                pass  # 오류
 
 
     return {
@@ -117,8 +171,17 @@ if __name__ == "__main__":
 
     tickers_dict = get_kor_summary_ticker_dict_list()
     fav_tickers_dict = get_favorite_ticker_dict_list()
-    tickers = list(set(tickers_dict.keys()) | set(fav_tickers_dict.keys()))  # | 는 합집합 연산자
+    low_tickers_dict = get_low_ticker_dict_list("stock_name")
+
     tickers_dict.update(fav_tickers_dict)
+    tickers_dict.update(low_tickers_dict)
+    tickers = list(set(tickers_dict.keys()))  # | 는 합집합 연산자
+
+    low_tickers_cdate_dict = get_low_ticker_dict_list("created_at")
+
+    # 테스트
+    # tickers_dict = get_low_ticker_dict_list("stock_name")
+    # low_tickers_cdate_dict = get_low_ticker_dict_list("created_at")
     # tickers = list(set(tickers_dict.keys()))
 
     plot_jobs = []
@@ -133,7 +196,7 @@ if __name__ == "__main__":
         while idx <= origin_idx:
             idx += 1
             for count, ticker in enumerate(tickers):
-                futures.append(executor.submit(process_one, idx, count, ticker, tickers_dict))
+                futures.append(executor.submit(process_one, idx, ticker, tickers_dict, low_tickers_cdate_dict))
 
         # 완료된 것부터 하나씩 받아서 집계
         for f in as_completed(futures):
@@ -161,11 +224,59 @@ if __name__ == "__main__":
         ax_w_price = fig.add_subplot(gs[2, 0])
         ax_w_vol   = fig.add_subplot(gs[3, 0], sharex=ax_w_price)
 
-        plot_candles_daily(job["origin"], show_months=4, title=f'{job["title"]}',
-                           ax_price=ax_d_price, ax_volume=ax_d_vol, date_tick=5)
+        created_at = None
 
-        plot_candles_weekly(job["origin"], show_months=12, title="Weekly Chart",
-                            ax_price=ax_w_price, ax_volume=ax_w_vol, date_tick=5)
+        # created_at_list가 리스트인지 확인
+        if isinstance(job["created_at_list"], list):
+            # 여러 날짜가 들어있으면 반복
+            for created_at in job["created_at_list"]:
+                created_at = convert_to_yymmdd(created_at)
+
+                plot_candles_daily(
+                    job["origin"],
+                    show_months=4,
+                    title=job["title"],
+                    ax_price=ax_d_price,
+                    ax_volume=ax_d_vol,
+                    date_tick=5,
+                    today=created_at,
+                )
+
+                plot_candles_weekly(
+                    job["origin"],
+                    show_months=12,
+                    title="Weekly Chart",
+                    ax_price=ax_w_price,
+                    ax_volume=ax_w_vol,
+                    date_tick=5,
+                    today=created_at,
+                )
+
+        else:
+            # 단일 값이면 한 번만 실행
+            if job["created_at_list"] is not None:
+                created_at = convert_to_yymmdd(job["created_at_list"])
+
+            plot_candles_daily(
+                job["origin"],
+                show_months=4,
+                title=job["title"],
+                ax_price=ax_d_price,
+                ax_volume=ax_d_vol,
+                date_tick=5,
+                today=created_at,
+            )
+
+            plot_candles_weekly(
+                job["origin"],
+                show_months=12,
+                title="Weekly Chart",
+                ax_price=ax_w_price,
+                ax_volume=ax_w_vol,
+                date_tick=5,
+                today=created_at,
+            )
+
 
         plt.tight_layout()
         # plt.show()

@@ -42,7 +42,6 @@ GREEN = '#2E7D32'
 GRAY1 = '#8E8E8E'
 GRAY2 = '#9AA0A6'
 today = datetime.today().strftime('%Y%m%d')
-today = "20260604"
 
 # ----- 공통 유틸 -----
 def fmt_k_m(x, pos):
@@ -463,6 +462,9 @@ def get_stock_created_at(tickers_dict, ticker):
     if isinstance(ticker_info, str):
         return ticker_info
 
+    if isinstance(ticker_info, list):
+        return ticker_info
+
     return None
 
 def get_kor_ticker_dict_list():
@@ -550,12 +552,15 @@ def get_low_ticker_dict_list(mode="stock_name"):
             for item in data
             if "stock_code" in item and "stock_name" in item
         }
+
+    from collections import defaultdict
+
     if mode == "created_at":
-        return {
-            item["stock_code"]: item["created_at"]
-            for item in data
-            if "stock_code" in item and "created_at" in item
-        }
+        result = defaultdict(list)
+        for item in data:
+            if "stock_code" in item and "created_at" in item:
+                result[item["stock_code"]].append(item["created_at"])
+        return dict(result)
 
 def get_kor_interest_ticker_dick_list():
     url = "https://chickchick.kr/stocks/interest/data/today"
@@ -575,7 +580,7 @@ def get_kor_interest_ticker_dick_list():
     }
 
 
-def get_kor_low_ticker_dick_list():
+def get_today_kor_low_ticker_dick_list():
     url = "https://chickchick.kr/stocks/interest/data/low"
     payload = {
         "date": today,
