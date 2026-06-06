@@ -39,20 +39,6 @@ for count, ticker in enumerate(tickers):
     # if count % 100 == 0:
     #     print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
 
-    # 데이터 다운로드
-    try:
-        data = fetch_stock_data(ticker, start_date, today)
-    except Exception as e:
-        print(f"fetch_stock_data 실패-10: {ticker} ({stock_name}) {e}")
-        continue
-
-    if data is None or len(data) == 0:
-        print(f"⚠️ 데이터 없음: {ticker} ({stock_name})")
-        continue
-
-    data = data.sort_index(ascending=True)   # 오름차순
-
-
     filepath = os.path.join(pickle_dir, f'{ticker}.pkl')
 
     try:
@@ -60,14 +46,29 @@ for count, ticker in enumerate(tickers):
             raise FileNotFoundError(filepath)
 
         if os.path.getsize(filepath) == 0:
-            raise EOFError("pickle 파일이 비어 있습니다.")
+            raise EOFError("⚠️ pickle 파일이 비어 있습니다.")
 
         df = pd.read_pickle(filepath)
 
     except (EOFError, FileNotFoundError) as e:
-        print(f"pickle 파일을 읽을 수 없습니다: {filepath}")
+        print(f"⚠️ pickle 파일을 읽을 수 없습니다: {filepath}")
         print(e)
         df = pd.DataFrame()
+
+
+    # 데이터 다운로드
+    try:
+        data = fetch_stock_data(ticker, start_date, today)
+    except Exception as e:
+        print(f"⚠️ fetch_stock_data 실패-10: {ticker} ({stock_name}) {e}")
+        continue
+
+    if data is None or data.empty == 0:
+        print(f"⚠️ 데이터 없음: {ticker} ({stock_name})")
+        continue
+
+    data = data.sort_index(ascending=True)   # 오름차순
+
 
     # 중복 제거 & 새로운 날짜만 추가 >> 덮어쓰는 방식으로 수정
     if not df.empty:

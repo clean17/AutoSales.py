@@ -50,25 +50,40 @@ for count, ticker in enumerate(tickers):
     # if count % 100 == 0:
     #     print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}]")
 
-
-    # 데이터가 없으면 1년 데이터 요청, 있으면 5일 데이터 요청
     filepath = os.path.join(pickle_dir, f'{ticker}.pkl')
-    if os.path.exists(filepath):
+
+    try:
+        if not os.path.exists(filepath):
+            raise FileNotFoundError(filepath)
+
+        if os.path.getsize(filepath) == 0:
+            raise EOFError("⚠️ pickle 파일이 비어 있습니다.")
+
         df = pd.read_pickle(filepath)
+
+    except (EOFError, FileNotFoundError) as e:
+        print(f"⚠️ pickle 파일을 읽을 수 없습니다: {filepath}")
+        print(e)
+        df = pd.DataFrame()
+
+
+    # 1일 데이터 받아서 병합
+    try:
         data = fetch_stock_data(ticker, start_yesterday, today)
+    except Exception as e:
+        print(f"⚠️ fetch_stock_data 실패-0: {ticker} ({stock_name}) {e}")
+        continue
 
-        if len(data) == 0:
-            continue
+    if data is None or data.empty == 0:
+        print(f"⚠️ 데이터 없음: {ticker} ({stock_name})")
+        continue
 
-        data = data.sort_index(ascending=True)   # 오름차순
-        date_str = data.index[-1].strftime("%Y%m%d")  # 인덱스를 왜 맨날 바꾸는거야..?
-        # if count == 1:
-        #     print(data)
-        #     print('date_str', date_str)
-        #     print('today', today)
+    data = data.sort_index(ascending=True)   # 오름차순
+    # if count == 1:
+    #     print(data)
+    #     print('date_str', date_str)
+    #     print('today', today)
 
-        if date_str != today:
-            continue
 
     # 중복 제거 & 새로운 날짜만 추가 >> 덮어쓰는 방식으로 수정
     if not df.empty:
@@ -76,8 +91,11 @@ for count, ticker in enumerate(tickers):
         df = pd.concat([df, data])
         df = df[~df.index.duplicated(keep='last')]  # 같은 인덱스일 때 data가 남음
 
-    # 파일 저장
-    df.to_pickle(filepath)
+        # 파일 저장 (임시 파일 생성 후 교체)
+        tmp_filepath = filepath + ".tmp"
+
+        df.to_pickle(tmp_filepath)
+        os.replace(tmp_filepath, filepath)
 
 end = time.time()     # 끝 시간(초)
 elapsed = end - start
