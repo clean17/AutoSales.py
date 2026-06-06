@@ -19,6 +19,7 @@ import re
 from typing import Optional
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
+from matplotlib.ticker import FuncFormatter
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score, roc_auc_score, precision_recall_curve, \
     f1_score
 import warnings
@@ -41,8 +42,24 @@ GREEN = '#2E7D32'
 GRAY1 = '#8E8E8E'
 GRAY2 = '#9AA0A6'
 today = datetime.today().strftime('%Y%m%d')
+today = "20260604"
 
 # ----- 공통 유틸 -----
+def fmt_k_m(x, pos):
+    if abs(x) >= 1_000_000:
+        v = x / 1_000_000
+        return f"{v:.2f}M"
+
+    if abs(x) >= 1_000:
+        v = x / 1_000
+        return f"{v:.2f}K"
+
+    return f"{x:.2f}"
+
+
+def fmt_price(x, pos):
+    return f"{x:,.0f}"
+
 
 def display_width(text):
     text = str(text)
@@ -436,6 +453,17 @@ def get_stock_name(tickers_dict, ticker):
 
     return "Unknown Stock"
 
+def get_stock_created_at(tickers_dict, ticker):
+    ticker = str(ticker).zfill(6)
+    ticker_info = tickers_dict.get(ticker)
+
+    if isinstance(ticker_info, dict):
+        return ticker_info.get("created_at", None)
+
+    if isinstance(ticker_info, str):
+        return ticker_info
+
+    return None
 
 def get_kor_ticker_dict_list():
     """
@@ -456,17 +484,20 @@ def get_kor_ticker_dict_list():
         item["stock_code"]: {
             "stock_name": item["stock_name"],
             "stock_market": item["stock_market"],
+            "product_code": item["product_code"],
         }
         for item in data
-        if "stock_code" in item and "stock_name" in item
+        if "stock_code" in item and "stock_name" in item and "product_code" in item
     }
 
 def get_kor_summary_ticker_dict_list():
     days_ago_14 = (datetime.today() - timedelta(days=14)).strftime('%Y%m%d')
+    today = datetime.today().strftime('%Y%m%d')
     res = requests.post(
         'https://chickchick.kr/stocks/interest/data/fire',
         json={
-            "date": str(days_ago_14)
+            "date": str(days_ago_14),
+            "endDate": str(today)
         },
         timeout=5
     )
@@ -481,11 +512,10 @@ def get_kor_summary_ticker_dict_list():
     }
 
 def get_favorite_ticker_dict_list():
-    days_ago_14 = (datetime.today() - timedelta(days=14)).strftime('%Y%m%d')
     res = requests.post(
         'https://chickchick.kr/stocks/interest/data/favorite/schedule',
         json={
-            "date": str(days_ago_14)
+            "date": None
         },
         timeout=5
     )
@@ -498,6 +528,34 @@ def get_favorite_ticker_dict_list():
         for item in data
         if "stock_code" in item and "stock_name" in item
     }
+
+def get_low_ticker_dict_list(mode="stock_name"):
+    days_ago_14 = (datetime.today() - timedelta(days=14)).strftime('%Y%m%d')
+    today = datetime.today().strftime('%Y%m%d')
+    res = requests.post(
+        'https://chickchick.kr/stocks/interest/data/low',
+        json={
+            "date": days_ago_14,
+            "endDate": str(today)
+        },
+        timeout=5
+    )
+    try:
+        data = res.json()
+    except ValueError:  # JSONDecodeError도 ValueError 하위
+        data = {}
+    if mode == "stock_name":
+        return {
+            item["stock_code"]: item["stock_name"]
+            for item in data
+            if "stock_code" in item and "stock_name" in item
+        }
+    if mode == "created_at":
+        return {
+            item["stock_code"]: item["created_at"]
+            for item in data
+            if "stock_code" in item and "created_at" in item
+        }
 
 def get_kor_interest_ticker_dick_list():
     url = "https://chickchick.kr/stocks/interest/data/today"
@@ -533,6 +591,100 @@ def get_kor_low_ticker_dick_list():
         for item in data
         if "stock_code" in item and "stock_name" in item
     }
+
+
+def get_product_code(ticker, stock_name):
+    try:
+        res = requests.post(
+            'https://chickchick.kr/stocks/info',
+            json={"stock_name": str(ticker)},
+            timeout=10
+        )
+        res.raise_for_status()
+
+        json_data = res.json()
+        results = json_data.get("result", [])
+
+        if not results:
+            print(f"⚠️ info 검색 결과 없음: {ticker} {stock_name}")
+            return None
+
+        items = results[0].get("data", {}).get("items", [])
+
+        if not items:
+            print(f"⚠️ info items 없음: {ticker} {stock_name}")
+            return None
+
+        return items[0].get("productCode")
+
+    except Exception as e:
+        print(f"⚠️ info 요청 실패: {ticker} {stock_name} {e}")
+        return None
+
+
+def update_today_ohlcv_from_amount(product_code, df, stock_code, stock_name):
+    """
+    df에 이미 dt 날짜가 있으면 그 날짜의 OHLCV를 덮어쓰기
+    df에 dt 날짜가 없으면 새 행을 추가
+
+    Returns:
+        df: OHLCV가 반영된 DataFrame
+        today_amount: 오늘 거래대금. 없으면 None
+    """
+    today_amount = None
+    candle = None
+
+    if product_code is None:
+        return df, today_amount
+
+    try:
+        res = requests.post(
+            "https://chickchick.kr/stocks/amount",
+            json={
+                "product_code": str(product_code)
+            },
+            timeout=10
+        )
+        res.raise_for_status()
+
+        json_data = res.json()
+        candles = json_data.get("result", {}).get("candles", [])
+
+        if candles:
+            candle = candles[0]
+
+    except Exception as e:
+        print(f"⚠️ /stocks/amount 요청 실패: {stock_code} {stock_name} {e}")
+        return df, today_amount
+
+    if candle is None:
+        return df, today_amount
+
+    try:
+        dt = pd.to_datetime(candle["dt"]).tz_localize(None).normalize()
+
+        df.loc[dt, ["시가", "고가", "저가", "종가", "거래량"]] = [
+            candle["open"],
+            candle["high"],
+            candle["low"],
+            candle["close"],
+            candle["volume"],
+        ]
+
+        prev_close = df.loc[df.index < dt, "종가"].dropna()
+
+        if not prev_close.empty:
+            prev_close = prev_close.iloc[-1]
+            df.loc[dt, "등락률"] = safe_rate(candle["close"], prev_close)
+
+        today_amount = candle.get("amount")
+
+    except Exception as e:
+        print(f"⚠️ /stocks/amount 데이터 반영 실패: {stock_code} {stock_name} {e}")
+        return df, None
+
+    return df, today_amount
+
 
 def get_nasdaq_symbols():
     url = "https://api.nasdaq.com/api/screener/stocks?tableonly=true&exchange=NASDAQ&limit=0"
@@ -1161,14 +1313,22 @@ def plot_candles_daily(
     # plt.setp(ax_price.get_xticklabels(), rotation=0, ha='center')    # 회전/정렬
     ax_price.set_title(title, fontsize=14)
     ax_price.grid(True, alpha=0.25)
+
+    ax_price.yaxis.set_major_formatter(FuncFormatter(fmt_price))
+    ax_price.get_yaxis().get_offset_text().set_visible(False)
+
     handles, labels = ax_price.get_legend_handles_labels()
     if labels:
         ax_price.legend(loc='upper left')
 
     # 아랫 패널: 거래량
     ax_volume.bar(x, df[col_v].to_numpy(), color=colors, alpha=1)
-    ax_volume.set_ylabel('Volume (D)')
+    ax_volume.set_ylabel('거래량 (주)')
     ax_volume.grid(True, alpha=0.25)
+
+    # 거래량 y축을 K, M 단위로 표시
+    ax_volume.yaxis.set_major_formatter(FuncFormatter(fmt_k_m))
+    ax_volume.get_yaxis().get_offset_text().set_visible(False)
 
     # x축 눈금(날짜 라벨)
     ds = df.index.strftime('%Y-%m-%d')
@@ -1182,7 +1342,7 @@ def plot_candles_daily(
     # 오늘 캔들 위에 날짜 텍스트 표시
     # ==============================
     if today is not None:
-        today_ts = pd.to_datetime(today)
+        today_ts = pd.to_datetime(today).normalize()
 
         # df는 이미 show_months 만큼 슬라이싱된 데이터
         if today_ts in df.index:
@@ -1197,7 +1357,7 @@ def plot_candles_daily(
                 x_pos,
                 y_pos,
                 # today_ts.strftime('%m-%d'),
-                '◀◀◀',
+                '◀◀◀ ' + today_ts.strftime('%m-%d'),
                 ha='center',
                 va='bottom',
                 fontsize=8,
@@ -1205,6 +1365,8 @@ def plot_candles_daily(
             )
 
     return fig, ax_price, ax_volume
+
+
 
 # 주봉 캔들 차트
 def plot_candles_weekly(
@@ -1332,10 +1494,17 @@ def plot_candles_weekly(
     ax_price.grid(True, alpha=0.25)
     ax_price.legend(loc='upper left')
 
+    ax_price.yaxis.set_major_formatter(FuncFormatter(fmt_price))
+    ax_price.get_yaxis().get_offset_text().set_visible(False)
+
     # 아랫 패널: 거래량
     ax_volume.bar(x, w[col_v].to_numpy(), color=colors, alpha=1)
-    ax_volume.set_ylabel('Volume (W)')
+    ax_volume.set_ylabel('거래량 (주)')
     ax_volume.grid(True, alpha=0.25)
+
+    # 거래량 y축을 K, M 단위로 표시
+    ax_volume.yaxis.set_major_formatter(FuncFormatter(fmt_k_m))
+    ax_volume.get_yaxis().get_offset_text().set_visible(False)
 
     # x축 눈금(날짜 라벨)
     dsw = w.index.strftime('%Y-%m-%d')
@@ -2575,16 +2744,19 @@ def get_ticker_info(ticker, tickers_dict):
         stock_name = info.get("stock_name", "Unknown Stock")
         stock_market = str(info.get("stock_market", "")).lower()
         sector_code = info.get("sector_code", None)
+        product_code = info.get("product_code", None)
     else:
         stock_name = info if info else "Unknown Stock"
         stock_market = ""
         sector_code = None
+        product_code = None
 
     return {
         "ticker": ticker,
         "stock_name": stock_name,
         "stock_market": stock_market,
         "sector_code": sector_code,
+        "product_code": product_code,
     }
 
 
