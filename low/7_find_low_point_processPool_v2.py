@@ -383,9 +383,9 @@ def process_one_with_df(df, idx, ticker, tickers_dict, market_context):
     # 현재 종가가 7일 최저가보다 얼마나 위에 있는지 비율로 표현
     rebound_from_7d_low = (last['종가'] / _low_7d_before_today - 1) * 100
     # 최근 하락폭 대비 오늘까지 얼마나 반등했는가
-    rebound_vs_prior_drop = rebound_from_7d_low / (abs(max_drop_7d) + 1e-9)
-    if not np.isfinite(rebound_vs_prior_drop):
-        rebound_vs_prior_drop = np.nan
+    # rebound_vs_prior_drop = rebound_from_7d_low / (abs(max_drop_7d) + 1e-9)
+    # if not np.isfinite(rebound_vs_prior_drop):
+    #     rebound_vs_prior_drop = np.nan
 
     # 하락 후 반등: 최근 최대 하락폭 대비 오늘 반등이 얼마나 강했는가
     # drop_rebound_ratio = today_pct / (abs(max_drop_7d) + 1e-9)
@@ -408,15 +408,14 @@ def process_one_with_df(df, idx, ticker, tickers_dict, market_context):
     DEFAULT_FEATURES = [
         "vol5",
         "rebound_from_7d_low",
-        "today_pct",
-        "price_power_value",
+        # "today_pct",
+        # "price_power_value",
         "dist_to_ma5",
 
-        "intraday_return",
+        # "intraday_return",
         "tr_value_ratio_5d",
         "max_drop_7d",
-        "body_value_power",
-        # "rebound_vs_prior_drop",
+        # "body_value_power",
 
         "upper_wick_ratio",
         "lower_wick_ratio",
@@ -435,17 +434,15 @@ def process_one_with_df(df, idx, ticker, tickers_dict, market_context):
     rule_features = {
         "vol5": vol5,                                          # 성공군의 단기 변동성이 큼, 핵심 피쳐
         "rebound_from_7d_low": rebound_from_7d_low,            # 현재 종가가 7일 최저가보다 얼마나 위에 있는지 비율로 표현
-        "today_pct": today_pct,                                # 성공군의 마지막 날 반등 강도가 큼
-        "price_power_value": price_power_value,                # 당일 등락률(today_pct)과 거래대금(today_tr_val_eok)을 결합한 지표
+        # "today_pct": today_pct,                                # 성공군의 마지막 날 반등 강도가 큼
+        # "price_power_value": price_power_value,                # 당일 등락률(today_pct)과 거래대금(today_tr_val_eok)을 결합한 지표
+        # "intraday_return": intraday_return,                    # 시가 대비 종가가 얼마나 회복되었는가
+        # "body_value_power": body_value_power,                  # 당일 캔들의 “몸통(body)” 크기와 방향성, 당일 수익률, 거래대금 규모를 결합해서 만든 일종의 매수세 강도 지표
 
         "dist_to_ma5": dist_to_ma5,                            # dist_from_low_20d, pct_vs_lastweek, dist_to_ma20와 중복이 큼, 대체 가능
-        "intraday_return": intraday_return,                    # 시가 대비 종가가 얼마나 회복되었는가
         "tr_value_ratio_5d": tr_value_ratio_5d,                # 단일 AUC 0.528, IV 0.023으로 약함. vol5, vol_ratio_5_15가 있으면 우선순위 낮음
 
         "max_drop_7d": max_drop_7d,                            # 성공군이 더 깊게 빠졌다가 반등
-
-        "body_value_power": body_value_power,                  # 당일 캔들의 “몸통(body)” 크기와 방향성, 당일 수익률, 거래대금 규모를 결합해서 만든 일종의 매수세 강도 지표
-        # "rebound_vs_prior_drop": rebound_vs_prior_drop,        # 최근 하락폭 대비 오늘까지 얼마나 반등했는가
 
         "BB_perc": BB_perc,                                    # 볼린저밴드 위치, 20일선 거리와 상관 0.95
         # "RSI_rebound": _RSI_rebound,                           # AUC가 너무 약함, 단독 방향성 불안정..
