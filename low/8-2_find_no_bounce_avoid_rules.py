@@ -65,8 +65,8 @@ project_root = os.path.dirname(script_dir)
 csv_dir = os.path.join(project_root, "csv")
 os.makedirs(csv_dir, exist_ok=True)
 
-CSV_PATH = os.path.join(csv_dir, "low_result_7.csv")
-OUT_PATH = Path("lowscan_target0_highprob_rules.py")
+CSV_PATH = os.path.join(csv_dir, "low_result_7_v2_desc.csv")
+OUT_PATH = Path("job/lowscan_target0_highprob_rules_formatted.py")
 
 
 # =============================================================================
@@ -89,28 +89,33 @@ PRACTICAL_COVERAGE_4 = 0.040
 # =============================================================================
 
 FEATURE_COLUMNS = [
+    # 기존 지정 피쳐
     "vol5",
-    "vol_ratio_5_15",
-    "today_pct",
-    "max_drop_7d",
-    "gap_pct",
-
-    "pct_vs_lastweek",
-    "dist_to_ma5",
-    "ma5_chg_rate",
-    "today_tr_val_eok",
-    "BB_perc",
-
-    "lower_wick_ratio",
-    "upper_wick_ratio",
-    "body_ratio",
-    "intraday_return",
     "rebound_from_7d_low",
+    "dist_to_ma5",
+    "tr_value_ratio_5d",
+    "max_drop_7d",
 
-    "price_power_value",
-    "body_value_power",
-    "room_to_20d_high",
+    "upper_wick_ratio",
+    "lower_wick_ratio",
+    "vol15",
+    "ATR_pct",
+    "dist_to_ma20",
+
+    "BB_perc",
+    "gap_pct",
     "room_to_60d_high",
+    "ma5_chg_rate",
+    "pct_vs_lastweek",
+
+    # coverage 개선용 no-bounce 전용 복원 피쳐
+    # 직접 today_pct/price_power/body_value_power는 제외하고,
+    # 당일 캔들 구조, 거래대금, 고점 여유, 하락 대비 반등 정도만 복원한다.
+    "vol_ratio_5_15",
+    "intraday_return",
+    "body_ratio",
+    "today_tr_val_eok",
+    "room_to_20d_high",
     "rebound_vs_prior_drop",
 ]
 
@@ -119,14 +124,14 @@ FEATURE_COLUMNS = [
 # Mining settings
 # =============================================================================
 
-N_QUANTILES = 22
+N_QUANTILES = 18
 MIN_UNIQUE_VALUES = 8
 
-BEAM = 22000
-TOP_N = 22000
+BEAM = 28000
+TOP_N = 28000
 MIN_CNT = 25
-MAX_DEPTH = 5
-MAX_RULES = 280
+MAX_DEPTH = 4
+MAX_RULES = 240
 
 MIN_CLASS0_RATE = 0.32
 MIN_LIFT = 0.66
@@ -215,55 +220,58 @@ VALID_FILTER_TIERS = [
 # =============================================================================
 
 def get_feature_groups() -> tuple[dict[str, str], dict[str, int]]:
+    """coverage 개선을 위해 no-bounce 전용 복원 피쳐까지 그룹 제한에 반영한다."""
     feature_groups = {
         "vol5": "VOLATILITY",
+        "vol15": "VOLATILITY",
+        "ATR_pct": "VOLATILITY",
         "vol_ratio_5_15": "VOLATILITY",
-
-        "today_pct": "PRICE",
-        "max_drop_7d": "DROP",
-        "gap_pct": "GAP",
-
-        "pct_vs_lastweek": "WEEK_POSITION",
-        "dist_to_ma5": "POSITION",
-        "ma5_chg_rate": "TREND",
-
-        "today_tr_val_eok": "VOLUME",
-
-        "BB_perc": "BAND",
-
-        "lower_wick_ratio": "CANDLE",
-        "upper_wick_ratio": "CANDLE",
-        "body_ratio": "CANDLE",
-        "intraday_return": "INTRADAY",
 
         "rebound_from_7d_low": "REBOUND",
         "rebound_vs_prior_drop": "REBOUND",
 
-        "price_power_value": "POWER",
-        "body_value_power": "POWER",
+        "dist_to_ma5": "POSITION",
+        "dist_to_ma20": "POSITION",
+
+        "tr_value_ratio_5d": "VOLUME",
+        "today_tr_val_eok": "VOLUME",
+
+        "max_drop_7d": "DROP",
+
+        "upper_wick_ratio": "CANDLE",
+        "lower_wick_ratio": "CANDLE",
+        "body_ratio": "CANDLE",
+        "intraday_return": "INTRADAY",
+
+        "BB_perc": "BAND",
+        "gap_pct": "GAP",
 
         "room_to_20d_high": "HIGH_ROOM",
         "room_to_60d_high": "HIGH_ROOM",
+
+        "ma5_chg_rate": "TREND",
+        "pct_vs_lastweek": "WEEK_POSITION",
     }
 
     group_limits = {
+        # 변동성은 중요하지만 과의존 방지를 위해 2개까지
         "VOLATILITY": 2,
-        "PRICE": 1,
-        "DROP": 1,
-        "GAP": 1,
-        "WEEK_POSITION": 1,
-        "POSITION": 1,
-        "TREND": 1,
-        "VOLUME": 1,
-        "BAND": 1,
+
+        "POSITION": 2,
         "CANDLE": 2,
-        "INTRADAY": 1,
         "REBOUND": 2,
-        "POWER": 1,
+        "VOLUME": 1,
+        "DROP": 1,
+        "INTRADAY": 1,
+        "BAND": 1,
+        "GAP": 1,
         "HIGH_ROOM": 1,
+        "TREND": 1,
+        "WEEK_POSITION": 1,
     }
 
     return feature_groups, group_limits
+
 
 
 # =============================================================================
@@ -289,12 +297,19 @@ def _thresholds_for_series(s: pd.Series, n_quantiles: int) -> list[float]:
 
 
 def default_extra_thresholds() -> dict[str, list[tuple[str, float]]]:
+    """FEATURE_COLUMNS에 포함된 피쳐에 대해서만 수동 threshold를 추가한다."""
     return {
         "vol5": [
             ("<=", 1.5), ("<=", 2.0), ("<=", 2.5), ("<=", 3.0),
             ("<=", 3.5), ("<=", 4.0), ("<=", 5.0),
             (">=", 4.0), (">=", 5.0), (">=", 6.0), (">=", 8.0),
             (">=", 10.0), (">=", 13.0),
+        ],
+        "vol15": [
+            ("<=", 2.0), ("<=", 3.0), ("<=", 4.0), ("<=", 5.0),
+            ("<=", 6.0), ("<=", 8.0),
+            (">=", 3.0), (">=", 4.0), (">=", 5.0), (">=", 6.0),
+            (">=", 8.0), (">=", 10.0),
         ],
         "vol_ratio_5_15": [
             ("<=", 0.35), ("<=", 0.45), ("<=", 0.5), ("<=", 0.545),
@@ -303,54 +318,58 @@ def default_extra_thresholds() -> dict[str, list[tuple[str, float]]]:
             (">=", 1.1), (">=", 1.2), (">=", 1.3), (">=", 1.5),
             (">=", 1.64), (">=", 1.8), (">=", 2.0),
         ],
-        "today_pct": [
-            ("<=", 2.5), ("<=", 3.0), ("<=", 4.0), ("<=", 5.0),
-            (">=", 5.0), (">=", 8.0), (">=", 10.0), (">=", 12.0),
-            (">=", 15.0), (">=", 18.0), (">=", 20.0),
+        "ATR_pct": [
+            ("<=", 3.0), ("<=", 4.0), ("<=", 5.0), ("<=", 6.0),
+            ("<=", 7.0), ("<=", 8.0),
+            (">=", 5.0), (">=", 6.0), (">=", 7.0), (">=", 8.0),
+            (">=", 9.0), (">=", 10.0), (">=", 12.0),
         ],
-        "max_drop_7d": [
-            ("<=", -3.0), ("<=", -5.0), ("<=", -7.0),
-            ("<=", -10.0), ("<=", -12.0), ("<=", -15.0),
-            (">=", -7.0), (">=", -5.0), (">=", -3.0),
+        "rebound_from_7d_low": [
+            ("<=", 5.0), ("<=", 8.661), ("<=", 10.0), ("<=", 12.0),
+            ("<=", 15.0),
+            (">=", 20.0), (">=", 25.0), (">=", 30.0),
+            (">=", 35.0), (">=", 40.0), (">=", 45.0), (">=", 50.0),
         ],
-        "gap_pct": [
-            ("<=", -2.0), ("<=", -1.0), ("<=", -0.5), ("<=", 0.0),
-            ("<=", 0.5), (">=", 1.0), (">=", 2.0), (">=", 3.5),
-            (">=", 4.7),
-        ],
-        "pct_vs_lastweek": [
-            ("<=", -10.0), ("<=", -5.0), ("<=", -3.0),
-            ("<=", -1.0), ("<=", 0.0), (">=", 3.0), (">=", 5.0),
-            (">=", 10.0),
+        "rebound_vs_prior_drop": [
+            ("<=", 1.0), ("<=", 2.0), ("<=", 5.0), ("<=", 10.0),
+            (">=", 1.0), (">=", 2.0), (">=", 3.0), (">=", 5.0),
         ],
         "dist_to_ma5": [
             ("<=", -2.0), ("<=", -1.0), ("<=", -0.5),
             ("<=", 0.0), (">=", 3.0), (">=", 5.0), (">=", 8.0),
             (">=", 10.0), (">=", 14.6684), (">=", 16.0),
         ],
-        "ma5_chg_rate": [
-            ("<=", -5.0), ("<=", -3.0), ("<=", -1.0),
-            ("<=", 0.0), (">=", 1.0), (">=", 3.0), (">=", 5.0),
+        "dist_to_ma20": [
+            ("<=", -15.0), ("<=", -10.0), ("<=", -5.0), ("<=", 0.0),
+            ("<=", 5.0),
+            (">=", -5.0), (">=", 0.0), (">=", 5.0), (">=", 10.0),
+            (">=", 15.0), (">=", 20.0),
+        ],
+        "tr_value_ratio_5d": [
+            ("<=", 0.5), ("<=", 0.8), ("<=", 1.0), ("<=", 1.2),
+            ("<=", 1.5), ("<=", 2.0),
+            (">=", 1.2), (">=", 1.5), (">=", 2.0), (">=", 3.0),
+            (">=", 5.0),
         ],
         "today_tr_val_eok": [
             ("<=", 5.0), ("<=", 10.0), ("<=", 20.0), ("<=", 50.0),
             ("<=", 100.0), ("<=", 300.0), ("<=", 500.0), ("<=", 1000.0),
             (">=", 3.0), (">=", 5.0), (">=", 10.0), (">=", 20.0),
         ],
-        "BB_perc": [
-            ("<=", 0.05), ("<=", 0.1), ("<=", 0.1765),
-            ("<=", 0.25), ("<=", 0.3), ("<=", 0.5),
-            (">=", 1.0), (">=", 1.07), (">=", 1.2),
-        ],
-        "lower_wick_ratio": [
-            ("<=", 0.0), ("<=", 0.01), ("<=", 0.02), ("<=", 0.05),
-            (">=", 0.1), (">=", 0.2),
+        "max_drop_7d": [
+            ("<=", -3.0), ("<=", -5.0), ("<=", -7.0),
+            ("<=", -10.0), ("<=", -12.0), ("<=", -15.0),
+            (">=", -7.0), (">=", -5.0), (">=", -3.0),
         ],
         "upper_wick_ratio": [
             ("<=", 0.0), ("<=", 0.02), ("<=", 0.05),
             ("<=", 0.064), ("<=", 0.1), ("<=", 0.114),
             ("<=", 0.2), ("<=", 0.3),
             (">=", 0.05), (">=", 0.1), (">=", 0.2),
+        ],
+        "lower_wick_ratio": [
+            ("<=", 0.0), ("<=", 0.01), ("<=", 0.02), ("<=", 0.05),
+            (">=", 0.1), (">=", 0.2), (">=", 0.3),
         ],
         "body_ratio": [
             ("<=", 0.3), ("<=", 0.5),
@@ -363,21 +382,16 @@ def default_extra_thresholds() -> dict[str, list[tuple[str, float]]]:
             (">=", 3.0), (">=", 4.0), (">=", 5.0), (">=", 6.0),
             (">=", 8.0), (">=", 10.0),
         ],
-        "rebound_from_7d_low": [
-            ("<=", 5.0), ("<=", 8.661), ("<=", 10.0), ("<=", 12.0),
-            ("<=", 15.0),
-            (">=", 20.0), (">=", 25.0), (">=", 30.0),
-            (">=", 35.0), (">=", 40.0), (">=", 45.0), (">=", 50.0),
+        "BB_perc": [
+            ("<=", 0.05), ("<=", 0.1), ("<=", 0.1765),
+            ("<=", 0.25), ("<=", 0.3), ("<=", 0.5),
+            (">=", 0.5), (">=", 0.8), (">=", 1.0), (">=", 1.07),
+            (">=", 1.2),
         ],
-        "price_power_value": [
-            ("<=", 3.0), ("<=", 5.0), ("<=", 10.0), ("<=", 20.0),
-            (">=", 20.0), (">=", 40.0), (">=", 60.0),
-            (">=", 80.0), (">=", 100.0),
-        ],
-        "body_value_power": [
-            ("<=", 1.0), ("<=", 3.0), ("<=", 5.0), ("<=", 10.0),
-            (">=", 5.0), (">=", 10.0), (">=", 15.0),
-            (">=", 20.0), (">=", 30.0),
+        "gap_pct": [
+            ("<=", -2.0), ("<=", -1.0), ("<=", -0.5), ("<=", 0.0),
+            ("<=", 0.5), (">=", 1.0), (">=", 2.0), (">=", 3.5),
+            (">=", 4.7),
         ],
         "room_to_20d_high": [
             ("<=", 5.0), ("<=", 10.0), ("<=", 20.0), ("<=", 30.0),
@@ -392,22 +406,47 @@ def default_extra_thresholds() -> dict[str, list[tuple[str, float]]]:
             (">=", 3.0), (">=", 5.0), (">=", 10.0),
             (">=", 60.0), (">=", 65.0),
         ],
-        "rebound_vs_prior_drop": [
-            ("<=", 1.0), ("<=", 2.0), ("<=", 5.0), ("<=", 10.0),
-            (">=", 1.0), (">=", 2.0), (">=", 3.0), (">=", 5.0),
+        "ma5_chg_rate": [
+            ("<=", -5.0), ("<=", -3.0), ("<=", -1.0),
+            ("<=", 0.0), (">=", 1.0), (">=", 3.0), (">=", 5.0),
         ],
-        "market_today_pct": [
-            ("<=", -2.0), ("<=", -1.0), ("<=", 0.0),
-            (">=", -2.0), (">=", -1.0), (">=", 0.0),
-            (">=", 0.5), (">=", 1.0), (">=", 2.0), (">=", 3.0),
-        ],
-        "market_5d_pct": [
+        "pct_vs_lastweek": [
             ("<=", -10.0), ("<=", -5.0), ("<=", -3.0),
-            ("<=", -2.0), ("<=", -1.799),
-            (">=", 0.0), (">=", 3.0), (">=", 5.0),
+            ("<=", -1.0), ("<=", 0.0), (">=", 3.0), (">=", 5.0),
+            (">=", 10.0), (">=", 15.0),
         ],
     }
 
+
+
+def select_feature_columns(df: pd.DataFrame, feature_columns: Iterable[str] = FEATURE_COLUMNS) -> list[str]:
+    """FEATURE_COLUMNS 중 실제 데이터에 존재하고 숫자형으로 쓸 수 있는 피쳐만 선택한다."""
+    selected: list[str] = []
+    missing: list[str] = []
+    unusable: list[str] = []
+
+    for feat in feature_columns:
+        if feat not in df.columns:
+            missing.append(feat)
+            continue
+
+        s = pd.to_numeric(df[feat], errors="coerce").replace([np.inf, -np.inf], np.nan)
+        if s.notna().sum() == 0 or s.dropna().nunique() < 2:
+            unusable.append(feat)
+            continue
+
+        selected.append(feat)
+
+    if missing:
+        print(f"[WARN] FEATURE_COLUMNS missing skipped: {missing}")
+    if unusable:
+        print(f"[WARN] FEATURE_COLUMNS unusable skipped: {unusable}")
+
+    return selected
+
+
+# backward-compatible alias
+select_default_features = select_feature_columns
 
 def build_literals(
         df: pd.DataFrame,
@@ -821,94 +860,114 @@ def mine_class0_rules(
 # =============================================================================
 
 def get_scenarios() -> list[dict]:
+    """실전용 핵심 시나리오만 유지한다.
+
+    제거한 시나리오:
+    - cov4_c3_05_safe / cov4_c3_06_balanced:
+      V2+ 목표보다 느슨하거나 중복 성격.
+    - cov5_c23_10_strict:
+      너무 좁게 잡히는 경향. V2+ strict가 대체.
+    - cov5_c23_15_reach / cov5_c23_18_last_resort:
+      coverage는 늘 수 있지만 class23/class3 오염이 커져 기대수익률 관점에서 불리.
+    - cov5_c23_22_diagnostic / cov5_c23_25_diagnostic:
+      진단용. 실전 룰 export에는 불필요.
+    """
     return [
         {
-            "name": "cov4_c3_05_safe",
-            "alias": "cov4_c3_05",
+            # V2 개선 목표 1순위:
+            # coverage 4% 이상, class23 10% 이하, class3 3.5% 이하를 노린다.
+            "name": "v2plus_cov4_c23_10_guard",
+            "alias": "v2plus_c23_10",
             "target_coverage": 0.040,
-            "min_acceptable_coverage": 0.035,
-            "soft_coverage": 0.030,
-
-            "max_class23": 0.150,
-            "max_class3": 0.050,
-            "max_class2": 0.120,
-
-            "min_rate_pre": 0.62,
-            "min_rate_post": 0.52,
-
-            "min_added_rate": 0.28,
-            "min_added_rate_fill": 0.00,
-
-            "max_added_c23": 0.35,
-            "max_added_c23_fill": 1.00,
-            "max_added_c3": 0.14,
-
-            "coverage_w": 2500.0,
-            "class0_w": 8.0,
-            "c23_penalty": 380.0,
-            "c3_penalty": 520.0,
-            "added_c23_penalty": 22.0,
-            "diagnostic": False,
-        },
-        {
-            "name": "cov4_c3_06_balanced",
-            "alias": "cov4_c3_06",
-            "target_coverage": 0.040,
-            "min_acceptable_coverage": 0.038,
-            "soft_coverage": 0.032,
-
-            "max_class23": 0.160,
-            "max_class3": 0.060,
-            "max_class2": 0.130,
-
-            "min_rate_pre": 0.58,
-            "min_rate_post": 0.48,
-
-            "min_added_rate": 0.22,
-            "min_added_rate_fill": 0.00,
-
-            "max_added_c23": 0.42,
-            "max_added_c23_fill": 1.00,
-            "max_added_c3": 0.18,
-
-            "coverage_w": 3200.0,
-            "class0_w": 6.5,
-            "c23_penalty": 330.0,
-            "c3_penalty": 440.0,
-            "added_c23_penalty": 18.0,
-            "diagnostic": False,
-        },
-        {
-            "name": "cov5_c23_10_strict",
-            "alias": "c23_10",
-            "target_coverage": 0.050,
-            "min_acceptable_coverage": 0.050,
-            "soft_coverage": 0.040,
+            "min_acceptable_coverage": 0.040,
+            "soft_coverage": 0.034,
 
             "max_class23": 0.100,
-            "max_class3": 0.050,
-            "max_class2": 0.090,
+            "max_class3": 0.035,
+            "max_class2": 0.085,
 
             "min_rate_pre": 0.66,
-            "min_rate_post": 0.56,
+            "min_rate_post": 0.60,
 
-            "min_added_rate": 0.36,
-            "min_added_rate_fill": 0.00,
+            "min_added_rate": 0.30,
+            "min_added_rate_fill": 0.10,
 
-            "max_added_c23": 0.18,
-            "max_added_c23_fill": 1.00,
-            "max_added_c3": 0.10,
+            "max_added_c23": 0.20,
+            "max_added_c23_fill": 0.35,
+            "max_added_c3": 0.08,
 
-            "coverage_w": 2200.0,
-            "class0_w": 8.0,
-            "c23_penalty": 520.0,
-            "c3_penalty": 620.0,
-            "added_c23_penalty": 34.0,
+            "coverage_w": 4200.0,
+            "class0_w": 9.0,
+            "c23_penalty": 620.0,
+            "c3_penalty": 760.0,
+            "added_c23_penalty": 38.0,
             "diagnostic": False,
         },
         {
-            "name": "cov5_c23_12_balanced",
-            "alias": "c23_12",
+            # V2 개선 목표 2순위:
+            # c23를 12%까지 허용하되 coverage를 4.2% 이상 노린다.
+            "name": "v2plus_cov42_c23_12_balance",
+            "alias": "v2plus_c23_12",
+            "target_coverage": 0.042,
+            "min_acceptable_coverage": 0.040,
+            "soft_coverage": 0.035,
+
+            "max_class23": 0.120,
+            "max_class3": 0.040,
+            "max_class2": 0.105,
+
+            "min_rate_pre": 0.63,
+            "min_rate_post": 0.58,
+
+            "min_added_rate": 0.24,
+            "min_added_rate_fill": 0.06,
+
+            "max_added_c23": 0.26,
+            "max_added_c23_fill": 0.42,
+            "max_added_c3": 0.10,
+
+            "coverage_w": 5000.0,
+            "class0_w": 8.0,
+            "c23_penalty": 520.0,
+            "c3_penalty": 680.0,
+            "added_c23_penalty": 30.0,
+            "diagnostic": False,
+        },
+        {
+            # coverage 5% 재도전.
+            # 단, class23/class3가 올라가면 select_best_result에서 밀린다.
+            "name": "v2plus_cov5_c23_12_reach",
+            "alias": "v2plus_cov5",
+            "target_coverage": 0.050,
+            "min_acceptable_coverage": 0.045,
+            "soft_coverage": 0.038,
+
+            "max_class23": 0.120,
+            "max_class3": 0.045,
+            "max_class2": 0.110,
+
+            "min_rate_pre": 0.60,
+            "min_rate_post": 0.54,
+
+            "min_added_rate": 0.18,
+            "min_added_rate_fill": 0.03,
+
+            "max_added_c23": 0.30,
+            "max_added_c23_fill": 0.50,
+            "max_added_c3": 0.12,
+
+            "coverage_w": 6200.0,
+            "class0_w": 7.0,
+            "c23_penalty": 470.0,
+            "c3_penalty": 620.0,
+            "added_c23_penalty": 24.0,
+            "diagnostic": False,
+        },
+        {
+            # 기존 8-2 계열과 비교하기 위한 fallback baseline.
+            # V2+ 시나리오가 모두 실패할 때만 의미가 있다.
+            "name": "baseline_cov5_c23_12_balanced",
+            "alias": "baseline_c23_12",
             "target_coverage": 0.050,
             "min_acceptable_coverage": 0.050,
             "soft_coverage": 0.040,
@@ -934,119 +993,8 @@ def get_scenarios() -> list[dict]:
             "added_c23_penalty": 28.0,
             "diagnostic": False,
         },
-        {
-            "name": "cov5_c23_15_reach",
-            "alias": "c23_15",
-            "target_coverage": 0.050,
-            "min_acceptable_coverage": 0.050,
-            "soft_coverage": 0.040,
-
-            "max_class23": 0.150,
-            "max_class3": 0.080,
-            "max_class2": 0.140,
-
-            "min_rate_pre": 0.54,
-            "min_rate_post": 0.44,
-
-            "min_added_rate": 0.18,
-            "min_added_rate_fill": 0.00,
-
-            "max_added_c23": 0.40,
-            "max_added_c23_fill": 1.00,
-            "max_added_c3": 0.20,
-
-            "coverage_w": 3800.0,
-            "class0_w": 5.5,
-            "c23_penalty": 300.0,
-            "c3_penalty": 390.0,
-            "added_c23_penalty": 18.0,
-            "diagnostic": False,
-        },
-        {
-            "name": "cov5_c23_18_last_resort",
-            "alias": "c23_18",
-            "target_coverage": 0.050,
-            "min_acceptable_coverage": 0.050,
-            "soft_coverage": 0.038,
-
-            "max_class23": 0.180,
-            "max_class3": 0.110,
-            "max_class2": 0.170,
-
-            "min_rate_pre": 0.48,
-            "min_rate_post": 0.38,
-
-            "min_added_rate": 0.08,
-            "min_added_rate_fill": 0.00,
-
-            "max_added_c23": 1.00,
-            "max_added_c23_fill": 1.00,
-            "max_added_c3": 1.00,
-
-            "coverage_w": 5200.0,
-            "class0_w": 4.0,
-            "c23_penalty": 210.0,
-            "c3_penalty": 280.0,
-            "added_c23_penalty": 10.0,
-            "diagnostic": False,
-        },
-        {
-            "name": "cov5_c23_22_diagnostic",
-            "alias": "c23_22",
-            "target_coverage": 0.050,
-            "min_acceptable_coverage": 0.050,
-            "soft_coverage": 0.038,
-
-            "max_class23": 0.220,
-            "max_class3": 0.150,
-            "max_class2": 0.210,
-
-            "min_rate_pre": 0.42,
-            "min_rate_post": 0.34,
-
-            "min_added_rate": 0.00,
-            "min_added_rate_fill": 0.00,
-
-            "max_added_c23": 1.00,
-            "max_added_c23_fill": 1.00,
-            "max_added_c3": 1.00,
-
-            "coverage_w": 7000.0,
-            "class0_w": 3.0,
-            "c23_penalty": 150.0,
-            "c3_penalty": 210.0,
-            "added_c23_penalty": 5.0,
-            "diagnostic": True,
-        },
-        {
-            "name": "cov5_c23_25_diagnostic",
-            "alias": "c23_25",
-            "target_coverage": 0.050,
-            "min_acceptable_coverage": 0.050,
-            "soft_coverage": 0.036,
-
-            "max_class23": 0.250,
-            "max_class3": 0.180,
-            "max_class2": 0.240,
-
-            "min_rate_pre": 0.38,
-            "min_rate_post": 0.30,
-
-            "min_added_rate": 0.00,
-            "min_added_rate_fill": 0.00,
-
-            "max_added_c23": 1.00,
-            "max_added_c23_fill": 1.00,
-            "max_added_c3": 1.00,
-
-            "coverage_w": 9000.0,
-            "class0_w": 2.5,
-            "c23_penalty": 90.0,
-            "c3_penalty": 140.0,
-            "added_c23_penalty": 2.0,
-            "diagnostic": True,
-        },
     ]
+
 
 
 # =============================================================================
@@ -1833,7 +1781,87 @@ def select_best_result(results: list[dict]) -> dict:
     if not results:
         raise ValueError("No scenario results.")
 
-    # 1. 진짜 5% 목표 달성 결과가 있으면 그중 class23/class3 낮은 것 선택
+    # V2 기준:
+    # valid_class0_rate 63.50%, class0_coverage 4.03%, class23 8.76%, class3 2.92%
+    #
+    # 개선 목표:
+    # 1) coverage >= 4.0%
+    # 2) class23 <= 10~12%
+    # 3) class3 <= 3.5~4%
+    # 4) class0_rate >= 63%
+    #
+    # 기대수익률 관점에서는 class23/class3를 과도하게 올리면서 coverage만 늘린 룰은 제외한다.
+
+    v2plus_strict = [
+        r for r in results
+        if (
+                not r["scenario"].get("diagnostic", False)
+                and r["valid_eval"]["class0_coverage"] >= 0.040
+                and r["valid_eval"]["class0_rate"] >= 0.63
+                and r["valid_eval"]["class23_rate"] <= 0.10
+                and r["valid_eval"]["class3_rate"] <= 0.035
+        )
+    ]
+
+    if v2plus_strict:
+        return sorted(
+            v2plus_strict,
+            key=lambda r: (
+                -r["valid_eval"]["class0_coverage"],
+                -r["valid_eval"]["class0_rate"],
+                r["valid_eval"]["class23_rate"],
+                r["valid_eval"]["class3_rate"],
+                -r["score"],
+            ),
+        )[0]
+
+    v2plus_balanced = [
+        r for r in results
+        if (
+                not r["scenario"].get("diagnostic", False)
+                and r["valid_eval"]["class0_coverage"] >= 0.040
+                and r["valid_eval"]["class0_rate"] >= 0.63
+                and r["valid_eval"]["class23_rate"] <= 0.12
+                and r["valid_eval"]["class3_rate"] <= 0.040
+        )
+    ]
+
+    if v2plus_balanced:
+        return sorted(
+            v2plus_balanced,
+            key=lambda r: (
+                -r["valid_eval"]["class0_coverage"],
+                r["valid_eval"]["class23_rate"],
+                r["valid_eval"]["class3_rate"],
+                -r["valid_eval"]["class0_rate"],
+                -r["score"],
+            ),
+        )[0]
+
+    # 4% coverage가 안 되면 class23/class3 방어가 되는 후보 중 coverage 최대
+    safe_under4 = [
+        r for r in results
+        if (
+                not r["scenario"].get("diagnostic", False)
+                and r["valid_eval"]["class0_rate"] >= 0.63
+                and r["valid_eval"]["class23_rate"] <= 0.12
+                and r["valid_eval"]["class3_rate"] <= 0.040
+        )
+    ]
+
+    if safe_under4:
+        return sorted(
+            safe_under4,
+            key=lambda r: (
+                -r["valid_eval"]["class0_coverage"],
+                -r["valid_eval"]["class0_rate"],
+                r["valid_eval"]["class23_rate"],
+                r["valid_eval"]["class3_rate"],
+                -r["score"],
+            ),
+        )[0]
+
+    # 기존 target_met
     met = [r for r in results if is_target_met(r)]
 
     if met:
@@ -1849,7 +1877,7 @@ def select_best_result(results: list[dict]) -> dict:
             ),
         )[0]
 
-    # 2. 5% 미달이면 실전형 우선: class3 낮고 coverage 3.5% 이상인 것
+    # 기존 practical 후보
     practical = [r for r in results if is_practical_met(r)]
 
     if practical:
@@ -1864,7 +1892,6 @@ def select_best_result(results: list[dict]) -> dict:
             ),
         )[0]
 
-    # 3. 그래도 없으면 diagnostic 제외하고 class3 손실 대비 coverage가 좋은 것
     non_diag = [r for r in results if not r["scenario"].get("diagnostic", False)]
 
     if non_diag:
@@ -1879,7 +1906,6 @@ def select_best_result(results: list[dict]) -> dict:
             ),
         )[0]
 
-    # 4. 마지막으로 전체 중 coverage 최대
     return sorted(
         results,
         key=lambda r: (
@@ -2009,13 +2035,19 @@ def select_rules_with_validation(
 # Output
 # =============================================================================
 
-def cond_to_python_expr(conds: list[tuple[str, str, float]], df_name: str = "df") -> str:
+def _fmt_float_for_rule(v: float) -> str:
+    s = f"{float(v):.10g}"
+    return "0" if s == "-0" else s
+
+
+def cond_to_python_expr_lines(
+        conds: list[tuple[str, str, float]],
+        df_name: str = "df",
+) -> list[str]:
     parts = []
-
     for feat, op, th in conds:
-        parts.append(f"({df_name}[{feat!r}] {op} {float(th)!r})")
-
-    return " & ".join(parts) if parts else "np.ones(len(df), dtype=bool)"
+        parts.append(f'({df_name}["{feat}"] {op} {_fmt_float_for_rule(th)})')
+    return parts
 
 
 def write_rule_file(
@@ -2023,34 +2055,72 @@ def write_rule_file(
         selected: list[tuple[str, list[tuple[str, str, float]]]],
         header_comment: str,
 ):
+    """사용자가 첨부한 formatted py 구조로 룰 파일을 저장한다.
+
+    형태:
+        RULE_NAMES = [...]
+        def build_conditions(df): ...
+        def build_mask(df): ...
+        def build_rule_name_series(df): ...
+    """
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    rule_names = [f"rule_{i:03d}" for i in range(1, len(selected) + 1)]
+
     lines = [
         header_comment.rstrip(),
         "",
         "import numpy as np",
         "",
-        "",
-        "TARGET_CLASS = 0",
-        "",
-        "def build_conditions(df):",
-        "    conditions = {}",
+        "RULE_NAMES = [",
     ]
 
-    for name, conds in selected:
-        expr = cond_to_python_expr(conds, df_name="df")
-        lines.append(f"    conditions[{name!r}] = ({expr}).to_numpy(dtype=bool)")
+    for rn in rule_names:
+        lines.append(f'    "{rn}",')
 
-    lines.extend(
-        [
-            "    return conditions",
-            "",
-            "def build_mask(df):",
-            "    mask = np.zeros(len(df), dtype=bool)",
-            "    for cond in build_conditions(df).values():",
-            "        mask |= cond",
-            "    return mask",
-            "",
-        ]
-    )
+    lines.extend([
+        "]",
+        "",
+        "def build_conditions(df):",
+        "    conditions = {",
+    ])
+
+    for rn, (_, conds) in zip(rule_names, selected):
+        expr_lines = cond_to_python_expr_lines(conds, df_name="df")
+        lines.append(f'        "{rn}":')
+
+        if not expr_lines:
+            lines.append("            np.ones(len(df), dtype=bool),")
+            continue
+
+        for j, expr in enumerate(expr_lines):
+            suffix = " &" if j < len(expr_lines) - 1 else ","
+            lines.append(f"            {expr}{suffix}")
+
+    lines.extend([
+        "    }",
+        "    return conditions",
+        "",
+        "def build_mask(df):",
+        "    mask = np.zeros(len(df), dtype=bool)",
+        "    for cond in build_conditions(df).values():",
+        "        mask |= cond",
+        "    return mask",
+        "",
+        "def build_rule_name_series(df, sep=\",\"):",
+        "    conditions = build_conditions(df)",
+        "    names = []",
+        "    for i in range(len(df)):",
+        "        matched = [",
+        "            name",
+        "            for name, cond in conditions.items()",
+        "            if bool(cond.iloc[i] if hasattr(cond, \"iloc\") else cond[i])",
+        "        ]",
+        "        names.append(sep.join(matched))",
+        "    return names",
+        "",
+    ])
 
     out_path.write_text("\n".join(lines), encoding="utf-8")
 
@@ -2063,7 +2133,7 @@ def save_selected_rule_report(
 ):
     rows = []
 
-    for name, conds in selected:
+    for rule_no, (name, conds) in enumerate(selected, start=1):
         train_mask = make_mask_from_conds(train, conds)
         valid_mask = make_mask_from_conds(valid, conds)
 
@@ -2072,8 +2142,11 @@ def save_selected_rule_report(
 
         rows.append(
             {
-                "name": name,
-                "conds": " AND ".join(f"{f} {op} {th:.8g}" for f, op, th in conds),
+                "rule_no": rule_no,
+                "export_rule_name": f"rule_{rule_no:03d}",
+                "source_rule_name": name,
+                "conds": repr(conds),
+                "conds_text": " AND ".join(f"{f} {op} {th:.8g}" for f, op, th in conds),
 
                 "train_selected": tr["selected_count"],
                 "train_class0_rate": tr["class0_rate"],
@@ -2100,9 +2173,15 @@ def save_selected_rule_report(
     pd.DataFrame(rows).to_csv(out_path, index=False, encoding="utf-8-sig")
 
 
-def save_monthly_report(out_path: Path, df: pd.DataFrame, mask: np.ndarray):
+def monthly_report_df(
+        df: pd.DataFrame,
+        mask: np.ndarray,
+        scenario_name: str = "",
+        alias: str = "",
+        is_main: bool = False,
+) -> pd.DataFrame:
     if DATE_COL not in df.columns:
-        return
+        return pd.DataFrame()
 
     work = df.copy()
     work[DATE_COL] = pd.to_datetime(work[DATE_COL], errors="coerce")
@@ -2120,11 +2199,16 @@ def save_monthly_report(out_path: Path, df: pd.DataFrame, mask: np.ndarray):
 
         rows.append(
             {
+                "scenario": scenario_name,
+                "alias": alias,
+                "is_main": is_main,
                 "month": month,
                 "total_count": ev["total_count"],
                 "selected_count": ev["selected_count"],
                 "selected_rate": ev["selected_rate"],
                 "base_class0_rate": ev["base_class0_rate"],
+                "class0_count": ev["class0_count"],
+                "class0_total": ev["class0_total"],
                 "class0_rate": ev["class0_rate"],
                 "class0_lift": ev["class0_lift"],
                 "class0_wilson_low": ev["class0_wilson_low"],
@@ -2133,13 +2217,33 @@ def save_monthly_report(out_path: Path, df: pd.DataFrame, mask: np.ndarray):
                 "class2_rate": ev["class2_rate"],
                 "class3_rate": ev["class3_rate"],
                 "class23_rate": ev["class23_rate"],
+                "class1_loss_rate": ev["class1_loss_rate"],
+                "class2_loss_rate": ev["class2_loss_rate"],
+                "class3_loss_rate": ev["class3_loss_rate"],
             }
         )
 
-    pd.DataFrame(rows).to_csv(out_path, index=False, encoding="utf-8-sig")
+    return pd.DataFrame(rows)
 
 
-def save_scenario_summary(out_path: Path, results: list[dict]):
+def save_monthly_report(
+        out_path: Path,
+        df: pd.DataFrame,
+        mask: np.ndarray,
+        scenario_name: str = "",
+        alias: str = "",
+        is_main: bool = False,
+):
+    monthly_report_df(
+        df=df,
+        mask=mask,
+        scenario_name=scenario_name,
+        alias=alias,
+        is_main=is_main,
+    ).to_csv(out_path, index=False, encoding="utf-8-sig")
+
+
+def scenario_summary_df(results: list[dict], main_scenario_name: str | None = None) -> pd.DataFrame:
     rows = []
 
     for r in results:
@@ -2149,11 +2253,13 @@ def save_scenario_summary(out_path: Path, results: list[dict]):
 
         target_met = is_target_met(r)
         practical_met = is_practical_met(r)
+        scenario_name = sc["name"]
 
         rows.append(
             {
-                "scenario": sc["name"],
+                "scenario": scenario_name,
                 "alias": sc["alias"],
+                "is_main": scenario_name == main_scenario_name,
                 "diagnostic": sc.get("diagnostic", False),
                 "target_coverage": sc["target_coverage"],
                 "min_acceptable_coverage": sc["min_acceptable_coverage"],
@@ -2165,9 +2271,15 @@ def save_scenario_summary(out_path: Path, results: list[dict]):
                 "score": r["score"],
 
                 "train_selected": tr["selected_count"],
+                "train_selected_rate": tr["selected_rate"],
+                "train_class0_count": tr["class0_count"],
                 "train_class0_rate": tr["class0_rate"],
                 "train_class0_lift": tr["class0_lift"],
+                "train_class0_wilson_low": tr["class0_wilson_low"],
                 "train_class0_coverage": tr["class0_coverage"],
+                "train_class1_rate": tr["class1_rate"],
+                "train_class2_rate": tr["class2_rate"],
+                "train_class3_rate": tr["class3_rate"],
                 "train_class23_rate": tr["class23_rate"],
 
                 "valid_selected": va["selected_count"],
@@ -2187,10 +2299,44 @@ def save_scenario_summary(out_path: Path, results: list[dict]):
             }
         )
 
-    pd.DataFrame(rows).sort_values(
-        ["target_met", "practical_met", "diagnostic", "valid_class0_coverage", "valid_class3_rate"],
-        ascending=[False, False, True, False, True],
-    ).to_csv(out_path, index=False, encoding="utf-8-sig")
+    return pd.DataFrame(rows).sort_values(
+        ["is_main", "target_met", "practical_met", "diagnostic", "valid_class0_coverage", "valid_class3_rate"],
+        ascending=[False, False, False, True, False, True],
+    )
+
+
+def save_scenario_summary(out_path: Path, results: list[dict], main_scenario_name: str | None = None):
+    scenario_summary_df(results, main_scenario_name=main_scenario_name).to_csv(
+        out_path,
+        index=False,
+        encoding="utf-8-sig",
+    )
+
+
+def save_all_scenario_monthly_report(
+        out_path: Path,
+        results: list[dict],
+        valid: pd.DataFrame,
+        main_scenario_name: str | None = None,
+):
+    frames = []
+
+    for r in results:
+        sc = r["scenario"]
+        frames.append(
+            monthly_report_df(
+                df=valid,
+                mask=r["valid_mask"],
+                scenario_name=sc["name"],
+                alias=sc["alias"],
+                is_main=sc["name"] == main_scenario_name,
+            )
+        )
+
+    if frames:
+        pd.concat(frames, ignore_index=True).to_csv(out_path, index=False, encoding="utf-8-sig")
+    else:
+        pd.DataFrame().to_csv(out_path, index=False, encoding="utf-8-sig")
 
 
 def scenario_out_path(base_out_path: Path, scenario_name: str) -> Path:
@@ -2207,6 +2353,7 @@ def write_outputs_for_result(
         valid: pd.DataFrame,
         split_date: pd.Timestamp | None,
         is_main: bool = False,
+        save_detail_reports: bool = False,
 ):
     scenario = result["scenario"]
     selected = result["selected"]
@@ -2218,31 +2365,46 @@ def write_outputs_for_result(
     )
 
     header = (
-            "# auto-generated: lowscan high-probability avoid rules for target_class == 0\n"
+            "# auto-generated: lowscan bad avoid rules\n"
+            "# source: 8-2_find_no_bounce_avoid_rules.py\n"
+            "# target: target_class == 0\n"
             + split_comment
             + f"# scenario: {scenario['name']}\n"
             + f"# alias: {scenario['alias']}\n"
             + f"# target_coverage: {scenario['target_coverage']}\n"
             + f"# max_class23: {scenario['max_class23']}\n"
             + f"# max_class3: {scenario['max_class3']}\n"
-            + "# objective: remove target_class 0 while controlling class2/class3 contamination\n"
-            + "# use build_mask(df) to get selected target0/no-bounce candidates\n"
+            + "# purpose: exclude no-bounce / target_class 0 candidates while controlling class2/class3 contamination\n"
+            + "# usage:\n"
+            + "#    import numpy as np\n"
+            + "#    import lowscan_target0_highprob_rules_formatted as lowscan_rules\n"
+            + "#    avoid_conditions = lowscan_rules.build_conditions(df)\n"
+            + "#\n"
+            + "#    avoid_mask = np.zeros(len(df), dtype=bool)\n"
+            + "#    for cond in avoid_conditions.values():\n"
+            + "#        avoid_mask |= cond\n"
+            + "#\n"
+            + "#    df = df[~avoid_mask].copy()\n"
     )
 
     write_rule_file(out_path, selected, header_comment=header)
 
-    save_selected_rule_report(
-        out_path.with_suffix(".report.csv"),
-        selected,
-        train,
-        valid,
-    )
+    if save_detail_reports:
+        save_selected_rule_report(
+            out_path.with_suffix(".report.csv"),
+            selected,
+            train,
+            valid,
+        )
 
-    save_monthly_report(
-        out_path.with_suffix(".monthly_report.csv"),
-        valid,
-        result["valid_mask"],
-    )
+        save_monthly_report(
+            out_path.with_suffix(".monthly_report.csv"),
+            valid,
+            result["valid_mask"],
+            scenario_name=scenario["name"],
+            alias=scenario["alias"],
+            is_main=is_main,
+        )
 
     if is_main:
         print("\n[MAIN OUTPUT]")
@@ -2250,8 +2412,9 @@ def write_outputs_for_result(
         print(f"\n[SCENARIO OUTPUT: {scenario['name']}]")
 
     print("rule_file:", out_path)
-    print("report:", out_path.with_suffix(".report.csv"))
-    print("monthly_report:", out_path.with_suffix(".monthly_report.csv"))
+    if save_detail_reports:
+        print("report:", out_path.with_suffix(".report.csv"))
+        print("monthly_report:", out_path.with_suffix(".monthly_report.csv"))
 
 
 def interpret_final_result(valid_eval: dict):
@@ -2294,6 +2457,8 @@ def find_target0_highprob_rules(
         out_path: str | Path = OUT_PATH,
         mode: str = "all",
         save_all_scenarios: bool = False,
+        save_each_scenario_files: bool = False,
+        save_detail_reports: bool = False,
         workers: int = 1,
 ):
     csv_path = Path(csv_path)
@@ -2328,8 +2493,8 @@ def find_target0_highprob_rules(
     print("valid")
     print(valid["target_class"].value_counts(normalize=True).sort_index().round(4))
 
-    features = get_features(train)
-    print("\n[FEATURES]", len(features), features)
+    features = select_feature_columns(train)
+    print("\\n[FEATURES]", len(features), features)
 
     literals, literal_masks = build_literals(train, features)
     print("[LITERALS]", len(literals))
@@ -2363,12 +2528,23 @@ def find_target0_highprob_rules(
 
     print(f"\n[CLASS0] 최종 통과 룰 개수: {len(selected)} / {len(rules)}")
 
+    main_scenario_name = best["scenario"]["name"] if best is not None else None
+
     if results:
         save_scenario_summary(
             out_path.with_suffix(".scenario_summary.csv"),
             results,
+            main_scenario_name=main_scenario_name,
         )
         print("scenario_summary:", out_path.with_suffix(".scenario_summary.csv"))
+
+        save_all_scenario_monthly_report(
+            out_path.with_suffix(".all_scenarios_monthly_report.csv"),
+            results,
+            valid,
+            main_scenario_name=main_scenario_name,
+        )
+        print("all_scenarios_monthly_report:", out_path.with_suffix(".all_scenarios_monthly_report.csv"))
 
     if best is not None:
         write_outputs_for_result(
@@ -2378,9 +2554,18 @@ def find_target0_highprob_rules(
             valid=valid,
             split_date=split_date,
             is_main=True,
+            save_detail_reports=save_detail_reports,
         )
 
-    if save_all_scenarios or mode == "all":
+    # 기본값: 시나리오별 py/report/monthly_report 파일은 만들지 않는다.
+    # 이유: 모든 시나리오는 아래 두 CSV에 이미 합쳐 저장된다.
+    #
+    # 1) <out>.scenario_summary.csv
+    # 2) <out>.all_scenarios_monthly_report.csv
+    #
+    # 예전처럼 시나리오별 파일까지 모두 저장하고 싶을 때만
+    # --save-each-scenario-files 옵션을 사용한다.
+    if save_each_scenario_files:
         for r in results:
             scenario_path = scenario_out_path(out_path, r["scenario"]["alias"])
             write_outputs_for_result(
@@ -2390,6 +2575,7 @@ def find_target0_highprob_rules(
                 valid=valid,
                 split_date=split_date,
                 is_main=False,
+                save_detail_reports=save_detail_reports,
             )
 
     print_eval(eval_mask(train, train_mask, label="TRAIN COMBINED"))
@@ -2421,22 +2607,16 @@ def parse_args():
         choices=[
             "auto",
             "all",
-            "cov4_c3_05",
-            "cov4_c3_06",
-            "c23_10",
-            "c23_12",
-            "c23_15",
-            "c23_18",
-            "c23_22",
-            "c23_25",
-            "cov4_c3_05_safe",
-            "cov4_c3_06_balanced",
-            "cov5_c23_10_strict",
-            "cov5_c23_12_balanced",
-            "cov5_c23_15_reach",
-            "cov5_c23_18_last_resort",
-            "cov5_c23_22_diagnostic",
-            "cov5_c23_25_diagnostic",
+
+            "v2plus_c23_10",
+            "v2plus_c23_12",
+            "v2plus_cov5",
+            "baseline_c23_12",
+
+            "v2plus_cov4_c23_10_guard",
+            "v2plus_cov42_c23_12_balance",
+            "v2plus_cov5_c23_12_reach",
+            "baseline_cov5_c23_12_balanced",
         ],
         help="scenario mode",
     )
@@ -2500,6 +2680,8 @@ if __name__ == "__main__":
         out_path=args.out,
         mode=args.mode,
         save_all_scenarios=args.save_all_scenarios,
+        save_each_scenario_files=args.save_each_scenario_files,
+        save_detail_reports=args.save_detail_reports,
         workers=args.workers,
     )
 
