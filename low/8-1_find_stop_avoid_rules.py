@@ -66,8 +66,8 @@ DATE_COL = "today"
 VALID_RATIO = 0.20
 
 # 후보 탐색 파라미터: 기존 안정형 유지
-BEAM = 10000
-TOP_N = 3000
+BEAM = 30000
+TOP_N = 10000
 MIN_CNT = 80
 MAX_DEPTH = 4
 
@@ -76,13 +76,13 @@ MIN_TARGET_RATE = 0.58
 MIN_LIFT = 1.25
 
 # valid 후보 통과 기준: 너무 빡세게 올리면 selected=0 위험
-VALID_MIN_RATE = 0.57
-VALID_MIN_CNT = 30
-MAX_RATE_GAP = 0.18
-VALID_MIN_LIFT = 1.10
+VALID_MIN_RATE = 0.60
+VALID_MIN_CNT = 35
+MAX_RATE_GAP = 0.14
+VALID_MIN_LIFT = 1.15
 
 # literal 생성 설정
-N_QUANTILES = 10
+N_QUANTILES = 14
 MAX_UNIQUE_FOR_EQ = 8
 
 # =============================================================================
@@ -127,6 +127,96 @@ RATE_GAP_PENALTY_POWER = 2.0
 # valid target_rate가 가장 높은 조합을 최종 적용한다.
 
 APPLIED_SCENARIOS = [
+    {
+        # depth4 안정형: V2에 가까운 정밀도와 coverage 균형을 노린다.
+        "name": "depth4_precision68_stable_balance",
+        "max_rules": 18,
+        "min_added_total": 14,
+        "min_added_target": 9,
+        "min_added_valid_total": 9,
+        "min_added_valid_target": 6,
+        "min_train_added_rate": 0.600,
+        "min_valid_added_rate": 0.610,
+        "max_added_gap": 0.13,
+        "min_next_valid_rate": 0.675,
+        "max_rate_drop": 0.004,
+        "objective": "rate_then_coverage",
+    },
+    {
+        # depth4 정밀형: 69% 이상을 노리되 표본이 너무 작으면 제외.
+        "name": "depth4_precision69_guard",
+        "max_rules": 14,
+        "min_added_total": 16,
+        "min_added_target": 10,
+        "min_added_valid_total": 10,
+        "min_added_valid_target": 7,
+        "min_train_added_rate": 0.615,
+        "min_valid_added_rate": 0.630,
+        "max_added_gap": 0.12,
+        "min_next_valid_rate": 0.685,
+        "max_rate_drop": 0.003,
+        "objective": "rate_then_coverage",
+    },
+    {
+        # coverage 보존형이지만 65% 아래로 내려가지 않도록 방어.
+        "name": "depth4_coverage_keep_rate_guard",
+        "max_rules": 20,
+        "min_added_total": 12,
+        "min_added_target": 7,
+        "min_added_valid_total": 8,
+        "min_added_valid_target": 5,
+        "min_train_added_rate": 0.585,
+        "min_valid_added_rate": 0.595,
+        "max_added_gap": 0.14,
+        "min_next_valid_rate": 0.660,
+        "max_rate_drop": 0.006,
+        "objective": "rate_then_coverage",
+    },
+    {
+        # V2 개선 목표: 정확도 68% 이상, coverage 13.5% 이상을 노리는 균형형.
+        "name": "precision68_v2_improve_balance",
+        "max_rules": 20,
+        "min_added_total": 12,
+        "min_added_target": 8,
+        "min_added_valid_total": 7,
+        "min_added_valid_target": 5,
+        "min_train_added_rate": 0.600,
+        "min_valid_added_rate": 0.620,
+        "max_added_gap": 0.16,
+        "min_next_valid_rate": 0.680,
+        "max_rate_drop": 0.004,
+        "objective": "rate_then_coverage",
+    },
+    {
+        # 조금 더 정밀한 69% 목표. coverage는 줄어들 수 있음.
+        "name": "precision69_strict_balance",
+        "max_rules": 16,
+        "min_added_total": 14,
+        "min_added_target": 9,
+        "min_added_valid_total": 8,
+        "min_added_valid_target": 6,
+        "min_train_added_rate": 0.615,
+        "min_valid_added_rate": 0.640,
+        "max_added_gap": 0.15,
+        "min_next_valid_rate": 0.690,
+        "max_rate_drop": 0.003,
+        "objective": "rate_then_coverage",
+    },
+    {
+        # 기존 66.89%보다 약간 높은 67.5%를 유지하면서 coverage를 더 확보하는 fallback 균형형.
+        "name": "precision675_coverage_keep",
+        "max_rules": 24,
+        "min_added_total": 10,
+        "min_added_target": 6,
+        "min_added_valid_total": 6,
+        "min_added_valid_target": 4,
+        "min_train_added_rate": 0.590,
+        "min_valid_added_rate": 0.600,
+        "max_added_gap": 0.18,
+        "min_next_valid_rate": 0.675,
+        "max_rate_drop": 0.005,
+        "objective": "rate_then_coverage",
+    },
     {
         "name": "rate_up_strict_keep_coverage",
         "max_rules": 12,
@@ -290,11 +380,22 @@ WARN_MIN_VALID_MATCHED = 300
 WARN_MIN_VALID_COVERAGE = 0.08
 WARN_MIN_VALID_RATE = 0.60
 
-# 65% 이상 정확도를 우선 만족시키고, 그 안에서 coverage가 가장 큰 시나리오를 export한다.
-PREFERRED_MIN_VALID_RATE = 0.65
-PREFERRED_MIN_VALID_COVERAGE = 0.10
-PREFERRED_MIN_VALID_MATCHED = 450
 
+# V2 개선형 선택 기준:
+# - depth 5 과적합을 피하기 위해 depth 4를 사용한다.
+# - 목표는 현재 66.89%보다 정확도를 올리되, V2 근처 coverage를 유지하는 것.
+# - 68% 이상 + coverage 12.5% 이상 후보가 있으면 우선 선택한다.
+PREFERRED_MIN_VALID_RATE = 0.68
+PREFERRED_MIN_VALID_COVERAGE = 0.125
+PREFERRED_MIN_VALID_MATCHED = 550
+
+STRICT_MIN_VALID_RATE = 0.69
+STRICT_MIN_VALID_COVERAGE = 0.110
+STRICT_MIN_VALID_MATCHED = 500
+
+FALLBACK_MIN_VALID_RATE = 0.675
+FALLBACK_MIN_VALID_COVERAGE = 0.100
+FALLBACK_MIN_VALID_MATCHED = 450
 
 # =============================================================================
 # 데이터 / 피쳐 유틸
@@ -1140,30 +1241,81 @@ def select_best_scenario(candidates, train, valid, y_train, y_valid, scenarios=A
 
         row["score"] = score
 
-    precision65_candidates = []
+    # -----------------------------------------------------------------
+    # V2 개선형 export 선택
+    # -----------------------------------------------------------------
+    # 현재 66.89% / 17.51%는 coverage는 좋지만 정확도가 V2보다 낮다.
+    # 기대수익률 개선 목적이면 68% 이상을 우선 잡고, coverage를 최소 13.5% 이상 유지한다.
+    preferred_candidates = []
+    strict_candidates = []
+    fallback_precision_candidates = []
+
     for item in evaluated:
         valid_eval = item["valid_eval"]
+
         if (
                 valid_eval["target_rate"] >= PREFERRED_MIN_VALID_RATE
                 and valid_eval["target_coverage"] >= PREFERRED_MIN_VALID_COVERAGE
                 and valid_eval["matched_count"] >= PREFERRED_MIN_VALID_MATCHED
         ):
-            precision65_candidates.append(item)
+            preferred_candidates.append(item)
 
-    if precision65_candidates:
-        # 정확도 65% 이상 후보 중 coverage가 가장 큰 조합을 우선 export한다.
-        # 현재 결과 기준으로는 rate_up_precision_fill_keep_coverage 또는
-        # rate_up_high_coverage_guard 계열이 선택될 가능성이 높다.
+        if (
+                valid_eval["target_rate"] >= STRICT_MIN_VALID_RATE
+                and valid_eval["target_coverage"] >= STRICT_MIN_VALID_COVERAGE
+                and valid_eval["matched_count"] >= STRICT_MIN_VALID_MATCHED
+        ):
+            strict_candidates.append(item)
+
+        if (
+                valid_eval["target_rate"] >= FALLBACK_MIN_VALID_RATE
+                and valid_eval["target_coverage"] >= FALLBACK_MIN_VALID_COVERAGE
+                and valid_eval["matched_count"] >= FALLBACK_MIN_VALID_MATCHED
+        ):
+            fallback_precision_candidates.append(item)
+
+    if preferred_candidates:
+        # 1순위: V2 개선형. 68% 이상 정확도 + 13.5% 이상 coverage 중 coverage 최대.
         best = max(
-            precision65_candidates,
+            preferred_candidates,
             key=lambda x: (
+                x["valid_eval"]["target_rate"] - abs(x["train_eval"]["target_rate"] - x["valid_eval"]["target_rate"]) * 0.75,
                 x["valid_eval"]["target_coverage"],
                 x["valid_eval"]["matched_count"],
-                x["valid_eval"]["target_rate"],
             ),
         )
         print(
-            f"[SCENARIO SELECTED] precision>=65 max coverage: "
+            f"[SCENARIO SELECTED] preferred v2-improve precision>=68 coverage>=13.5: "
+            f"{best['scenario']['name']}"
+        )
+
+    elif strict_candidates:
+        # 2순위: 정밀형. coverage는 조금 낮아도 69% 이상이면 선택.
+        best = max(
+            strict_candidates,
+            key=lambda x: (
+                x["valid_eval"]["target_rate"] - abs(x["train_eval"]["target_rate"] - x["valid_eval"]["target_rate"]) * 0.75,
+                x["valid_eval"]["target_coverage"],
+                x["valid_eval"]["matched_count"],
+            ),
+        )
+        print(
+            f"[SCENARIO SELECTED] strict precision>=69: "
+            f"{best['scenario']['name']}"
+        )
+
+    elif fallback_precision_candidates:
+        # 3순위: 67% 이상 후보 중 coverage 최대.
+        best = max(
+            fallback_precision_candidates,
+            key=lambda x: (
+                x["valid_eval"]["target_rate"] - abs(x["train_eval"]["target_rate"] - x["valid_eval"]["target_rate"]) * 0.75,
+                x["valid_eval"]["target_coverage"],
+                x["valid_eval"]["matched_count"],
+            ),
+        )
+        print(
+            f"[SCENARIO SELECTED] fallback precision>=67 max coverage: "
             f"{best['scenario']['name']}"
         )
 
@@ -1380,7 +1532,7 @@ def find_stop_before_target_10_rules(csv_path=CSV_PATH, out_path=OUT_PATH, repor
         f"# valid_coverage: {valid_eval['target_coverage']:.6f}\n"
         f"# valid_matched: {valid_eval['matched_count']}\n"
         f"# valid_target: {valid_eval['matched_target']}\n"
-        "# purpose: exclude candidates likely to hit stop before target within 10 days\n"
+        "# purpose: exclude candidates likely to hit stop before target within 10 days\n# target preference: valid_rate >= 68%, valid_coverage >= 13.5% when possible\n"
         "# usage:\n"
         "#    import numpy as np\n"
         "#    import lowscan_stop_before_target_10_rules as lowscan_rules\n"
