@@ -1,5 +1,5 @@
 """
-stop_before_target_7 == 1 룰 생성 스크립트 - 적용 버전
+stop_before_target_10 == 1 룰 생성 스크립트 - 적용 버전
 “이 종목은 반등할 수도 있지만, 목표가 전에 손절이 먼저 나올 가능성이 높다.”
 
 여러 시나리오와 precision fill을 비교해 coverage를 유지하면서 target_rate를 더 끌어올린다.
@@ -16,12 +16,12 @@ stop_before_target_7 == 1 룰 생성 스크립트 - 적용 버전
     - 너무 얇은 70%대 소표본 룰로 과최적화하지 않음
 
 사용:
-    python find_stop_before_target_7_rules_applied.py
-    python find_stop_before_target_7_rules_applied.py --csv csv/low_result_7_desc.csv
+    python find_stop_before_target_10_rules_applied.py
+    python find_stop_before_target_10_rules_applied.py --csv csv/low_result_7_v2_desc_v2_desc.csv
 
 생성:
-    lowscan_stop_before_target_7_rules.py
-    lowscan_stop_before_target_7_rule_report.csv
+    lowscan_stop_before_target_10_rules.py
+    lowscan_stop_before_target_10_rule_report.csv
 """
 
 import os, sys
@@ -54,12 +54,12 @@ project_root = os.path.dirname(script_dir)               # root
 csv_dir = os.path.join(project_root, "csv")
 os.makedirs(csv_dir, exist_ok=True)
 
-CSV_PATH = os.path.join(csv_dir, "low_result_7.csv")
-OUT_PATH = Path("lowscan_stop_before_target_7_rules.py")
-REPORT_PATH = os.path.join(csv_dir, "lowscan_stop_before_target_7_rule_report.csv")
-SCENARIO_REPORT_PATH = Path("csv/stop_avoid_scenario_report.csv")
+CSV_PATH = os.path.join(csv_dir, "low_result_7_v2_desc.csv")
+OUT_PATH = Path("job/lowscan_stop_before_target_10_rules_formatted.py")
+REPORT_PATH = os.path.join(csv_dir, "lowscan_stop_before_target_10_rule_report.csv")
+SCENARIO_REPORT_PATH = Path("csv/stop_avoid_10_scenario_report.csv")
 
-TARGET_COL = "stop_before_target_7"
+TARGET_COL = "stop_before_target_10"
 TARGET_VALUE = 1
 DATE_COL = "today"
 
@@ -84,6 +84,36 @@ VALID_MIN_LIFT = 1.10
 # literal 생성 설정
 N_QUANTILES = 10
 MAX_UNIQUE_FOR_EQ = 8
+
+# =============================================================================
+# 최소수정 적용 피쳐 목록
+# =============================================================================
+# utils.get_features(train) 자동 전체 피쳐 선택 대신 아래 피쳐만 사용한다.
+DEFAULT_FEATURES = [
+    "vol5",
+    "rebound_from_7d_low",
+    # "today_pct",
+    # "price_power_value",
+    "dist_to_ma5",
+
+    # "intraday_return",
+    "tr_value_ratio_5d",
+    "max_drop_7d",
+    # "body_value_power",
+
+    "upper_wick_ratio",
+    "lower_wick_ratio",
+    "vol15",
+    "ATR_pct",
+    "dist_to_ma20",
+
+    "BB_perc",
+    "gap_pct",
+    "room_to_60d_high",
+    "ma5_chg_rate",
+    "pct_vs_lastweek",
+]
+
 
 # stability 점수 가중치
 VALID_WEIGHT = 1.25
@@ -260,6 +290,11 @@ WARN_MIN_VALID_MATCHED = 300
 WARN_MIN_VALID_COVERAGE = 0.08
 WARN_MIN_VALID_RATE = 0.60
 
+# 65% 이상 정확도를 우선 만족시키고, 그 안에서 coverage가 가장 큰 시나리오를 export한다.
+PREFERRED_MIN_VALID_RATE = 0.65
+PREFERRED_MIN_VALID_COVERAGE = 0.10
+PREFERRED_MIN_VALID_MATCHED = 450
+
 
 # =============================================================================
 # 데이터 / 피쳐 유틸
@@ -296,55 +331,47 @@ def get_exclude_columns(df=None):
 
 
 def get_feature_groups():
+    """DEFAULT_FEATURES에 포함된 피쳐만 그룹 제한에 반영한다."""
     feature_groups = {
         "vol5": "VOLATILITY",
-        "vol_ratio_5_15": "VOLATILITY",
-
-        "today_pct": "PRICE",
-        "max_drop_7d": "DROP",
-        "gap_pct": "GAP",
-
-        "pct_vs_lastweek": "WEEK_POSITION",
-        "dist_to_ma5": "POSITION",
-        "ma5_chg_rate": "TREND",
-
-        "today_tr_val_eok": "VOLUME",
-
-        "BB_perc": "BAND",
-
-        "lower_wick_ratio": "CANDLE",
-        "upper_wick_ratio": "CANDLE",
-        "body_ratio": "CANDLE",
-        "intraday_return": "INTRADAY",
+        "vol15": "VOLATILITY",
+        "ATR_pct": "VOLATILITY",
 
         "rebound_from_7d_low": "REBOUND",
-        "rebound_vs_prior_drop": "REBOUND",
 
-        "price_power_value": "POWER",
-        "body_value_power": "POWER",
+        "dist_to_ma5": "POSITION",
+        "dist_to_ma20": "POSITION",
 
-        "room_to_20d_high": "HIGH_ROOM",
+        "tr_value_ratio_5d": "VOLUME",
+
+        "max_drop_7d": "DROP",
+
+        "upper_wick_ratio": "CANDLE",
+        "lower_wick_ratio": "CANDLE",
+
+        "BB_perc": "BAND",
+        "gap_pct": "GAP",
         "room_to_60d_high": "HIGH_ROOM",
+        "ma5_chg_rate": "TREND",
+        "pct_vs_lastweek": "WEEK_POSITION",
     }
 
     group_limits = {
-        "VOLATILITY": 2,
-        "PRICE": 1,
-        "DROP": 1,
-        "GAP": 1,
-        "WEEK_POSITION": 1,
-        "POSITION": 1,
-        "TREND": 1,
-        "VOLUME": 1,
-        "BAND": 1,
+        "VOLATILITY": 3,
+        "POSITION": 2,
         "CANDLE": 2,
-        "INTRADAY": 1,
-        "REBOUND": 2,
-        "POWER": 1,
+        "REBOUND": 1,
+        "VOLUME": 1,
+        "DROP": 1,
+        "BAND": 1,
+        "GAP": 1,
         "HIGH_ROOM": 1,
+        "TREND": 1,
+        "WEEK_POSITION": 1,
     }
 
     return feature_groups, group_limits
+
 
 
 def split_train_valid_by_date_ratio(df, valid_ratio=VALID_RATIO, date_col=DATE_COL):
@@ -367,6 +394,35 @@ def split_train_valid_by_date_ratio(df, valid_ratio=VALID_RATIO, date_col=DATE_C
     valid = out[out[date_col] >= split_date].reset_index(drop=True)
 
     return train, valid, split_date
+
+
+def select_default_features(df, default_features=DEFAULT_FEATURES):
+    """DEFAULT_FEATURES 중 실제 데이터에 있고 숫자로 변환 가능한 피쳐만 사용한다."""
+    selected = []
+    missing = []
+    non_numeric_or_empty = []
+
+    for feat in default_features:
+        if feat not in df.columns:
+            missing.append(feat)
+            continue
+
+        s = pd.to_numeric(df[feat], errors="coerce")
+        finite_count = int(np.isfinite(s.to_numpy(dtype=float, na_value=np.nan)).sum())
+        unique_count = int(s.replace([np.inf, -np.inf], np.nan).dropna().nunique())
+
+        if finite_count == 0 or unique_count < 2:
+            non_numeric_or_empty.append(feat)
+            continue
+
+        selected.append(feat)
+
+    if missing:
+        print(f"[WARN] DEFAULT_FEATURES missing skipped: {missing}")
+    if non_numeric_or_empty:
+        print(f"[WARN] DEFAULT_FEATURES non-numeric/empty skipped: {non_numeric_or_empty}")
+
+    return selected
 
 
 def build_literals(df, features, min_count=MIN_CNT, n_quantiles=N_QUANTILES):
@@ -445,36 +501,59 @@ def make_mask_from_conds(df, conds):
 def _cond_to_code(cond):
     feat, op, val = cond
 
-    if op == "<=":
-        return f'(pd.to_numeric(df[{feat!r}], errors="coerce") <= {val:.10g})'
-    if op == ">=":
-        return f'(pd.to_numeric(df[{feat!r}], errors="coerce") >= {val:.10g})'
-    if op == "==":
-        return f'(pd.to_numeric(df[{feat!r}], errors="coerce") == {val:.10g})'
+    if op in ("<=", ">=", "=="):
+        return f'(df["{feat}"] {op} {val:.10g})'
 
     raise ValueError(f"지원하지 않는 op: {op}")
 
 
 def write_rule_file(path, selected, header_comment=""):
+    """RULE_NAMES + build_conditions(df) + build_mask(df) 형식의 룰 파일을 생성한다."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    rule_names = [f"rule_{i:03d}" for i in range(1, len(selected) + 1)]
+
     lines = []
     lines.append(header_comment.rstrip())
     lines.append("")
-    lines.append("import pandas as pd")
+    lines.append("import numpy as np")
     lines.append("")
+    lines.append("RULE_NAMES = [")
+    for name in rule_names:
+        lines.append(f'    "{name}",')
+    lines.append("]")
     lines.append("")
     lines.append("def build_conditions(df):")
-    lines.append("    conditions = {}")
+    lines.append("    conditions = {")
 
-    if not selected:
-        lines.append("    return conditions")
-    else:
-        for rule in selected:
-            name = rule["name"]
-            conds = rule["conds"]
-            expr = " & ".join(_cond_to_code(c) for c in conds)
-            lines.append(f"    conditions[{name!r}] = {expr}")
+    for rule_name, rule in zip(rule_names, selected):
+        conds = rule["conds"]
+        lines.append(f'        "{rule_name}":')
+        for j, cond in enumerate(conds):
+            suffix = " &" if j < len(conds) - 1 else ","
+            lines.append(f"            {_cond_to_code(cond)}{suffix}")
 
-        lines.append("    return conditions")
+    lines.append("    }")
+    lines.append("    return conditions")
+    lines.append("")
+    lines.append("def build_mask(df):")
+    lines.append("    mask = np.zeros(len(df), dtype=bool)")
+    lines.append("    for cond in build_conditions(df).values():")
+    lines.append("        mask |= cond")
+    lines.append("    return mask")
+    lines.append("")
+    lines.append("def build_rule_name_series(df, sep=\",\"):")
+    lines.append("    conditions = build_conditions(df)")
+    lines.append("    names = []")
+    lines.append("    for i in range(len(df)):")
+    lines.append("        matched = [")
+    lines.append("            name")
+    lines.append("            for name, cond in conditions.items()")
+    lines.append("            if bool(cond.iloc[i] if hasattr(cond, \"iloc\") else cond[i])")
+    lines.append("        ]")
+    lines.append("        names.append(sep.join(matched))")
+    lines.append("    return names")
 
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -1061,7 +1140,34 @@ def select_best_scenario(candidates, train, valid, y_train, y_valid, scenarios=A
 
         row["score"] = score
 
-    if accepted:
+    precision65_candidates = []
+    for item in evaluated:
+        valid_eval = item["valid_eval"]
+        if (
+                valid_eval["target_rate"] >= PREFERRED_MIN_VALID_RATE
+                and valid_eval["target_coverage"] >= PREFERRED_MIN_VALID_COVERAGE
+                and valid_eval["matched_count"] >= PREFERRED_MIN_VALID_MATCHED
+        ):
+            precision65_candidates.append(item)
+
+    if precision65_candidates:
+        # 정확도 65% 이상 후보 중 coverage가 가장 큰 조합을 우선 export한다.
+        # 현재 결과 기준으로는 rate_up_precision_fill_keep_coverage 또는
+        # rate_up_high_coverage_guard 계열이 선택될 가능성이 높다.
+        best = max(
+            precision65_candidates,
+            key=lambda x: (
+                x["valid_eval"]["target_coverage"],
+                x["valid_eval"]["matched_count"],
+                x["valid_eval"]["target_rate"],
+            ),
+        )
+        print(
+            f"[SCENARIO SELECTED] precision>=65 max coverage: "
+            f"{best['scenario']['name']}"
+        )
+
+    elif accepted:
         # v4 선택: coverage를 유지하면서 rate를 더 올리기 위해 coverage bucket을 둔다.
         # 1) 92% 이상 유지 후보가 있으면 그 안에서 rate 최우선
         # 2) 없으면 90% 이상 유지 후보
@@ -1173,7 +1279,7 @@ def warn_if_needed(valid_eval):
 # 메인
 # =============================================================================
 
-def find_stop_before_target_7_rules(csv_path=CSV_PATH, out_path=OUT_PATH, report_path=REPORT_PATH):
+def find_stop_before_target_10_rules(csv_path=CSV_PATH, out_path=OUT_PATH, report_path=REPORT_PATH):
     df = pd.read_csv(csv_path, low_memory=False)
 
     if TARGET_COL not in df.columns:
@@ -1193,8 +1299,8 @@ def find_stop_before_target_7_rules(csv_path=CSV_PATH, out_path=OUT_PATH, report
     print(f"[DATA] valid target rate={y_valid.mean() * 100:.2f}%")
     print("[APPLIED_SCENARIOS]", ", ".join(s["name"] for s in APPLIED_SCENARIOS))
 
-    features = get_features(train)
-    print(f"[FEATURES] {len(features)} features")
+    features = select_default_features(train)
+    print(f"[FEATURES] {len(features)} selected DEFAULT_FEATURES")
     print(features)
 
     literals, literal_masks = build_literals(train, features, min_count=MIN_CNT)
@@ -1265,18 +1371,26 @@ def find_stop_before_target_7_rules(csv_path=CSV_PATH, out_path=OUT_PATH, report
     print(f"[SCENARIO REPORT SAVED] {scenario_report_path.resolve()}")
 
     header_comment = (
-        "# auto-generated: rate-up keep-coverage rules for stop_before_target_7 == 1\n"
+        "# auto-generated: lowscan bad avoid rules\n"
+        "# source: 8-1_find_stop_avoid_rules.py\n"
         f"# target: {TARGET_COL} == {TARGET_VALUE}\n"
         f"# split_date: {pd.to_datetime(split_date).date()}\n"
         f"# applied_scenario: {selected_scenario['name'] if selected_scenario else 'NONE'}\n"
-        "# selected by scenario sweep: maximize valid target_rate while preserving coverage floor when possible\n"
+        f"# valid_rate: {valid_eval['target_rate']:.6f}\n"
+        f"# valid_coverage: {valid_eval['target_coverage']:.6f}\n"
+        f"# valid_matched: {valid_eval['matched_count']}\n"
+        f"# valid_target: {valid_eval['matched_target']}\n"
+        "# purpose: exclude candidates likely to hit stop before target within 10 days\n"
         "# usage:\n"
-        "#   import numpy as np\n"
-        "#   import lowscan_stop_before_target_7_rules\n"
-        "#   conditions = lowscan_stop_before_target_7_rules.build_conditions(df)\n"
-        "#   rule_mask = np.zeros(len(df), dtype=bool)\n"
-        "#   for cond in conditions.values():\n"
-        "#       rule_mask |= cond\n"
+        "#    import numpy as np\n"
+        "#    import lowscan_stop_before_target_10_rules as lowscan_rules\n"
+        "#    avoid_conditions = lowscan_rules.build_conditions(df)\n"
+        "#\n"
+        "#    avoid_mask = np.zeros(len(df), dtype=bool)\n"
+        "#    for cond in avoid_conditions.values():\n"
+        "#        avoid_mask |= cond\n"
+        "#\n"
+        "#    df = df[~avoid_mask].copy()\n"
     )
 
     write_rule_file(Path(out_path), selected, header_comment=header_comment)
@@ -1296,7 +1410,7 @@ def parse_args():
 if __name__ == "__main__":
     args = parse_args()
 
-    find_stop_before_target_7_rules(
+    find_stop_before_target_10_rules(
         csv_path=args.csv,
         out_path=Path(args.out),
         report_path=Path(args.report),
