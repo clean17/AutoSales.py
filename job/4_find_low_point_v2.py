@@ -18,7 +18,8 @@ import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import lowscan_good_buy_rules_v4_9 as good_rules
 import lowscan_stop_before_target_10_rules_formatted_balance as stop_avoid_rules
-import lowscan_target0_highprob_rules_formatted_v2plus_cov5_c23_12_reach as no_bounce_avoid_rules
+# import lowscan_target0_highprob_rules_formatted_v2plus_cov5_c23_12_reach as no_bounce_avoid_rules
+import lowscan_target0_highprob_rules_formatted as no_bounce_avoid_rules
 
 GOOD_RULE_LABEL_MAP = {
     "rule_001_precision_high": "고확률",
@@ -103,6 +104,8 @@ def get_stock_info(ticker):
         if market_value is None:
             print(f"overview marketValueKrw is None: {product_code}")
             return
+        else:
+            market_value = int(market_value)
 
         result = {
             "product_code": product_code,
@@ -124,8 +127,18 @@ def insert_low_point_stock(row, data, market_value, save_path):
     _closes = data['종가'].values
     _trading_value = data['종가'] * data['거래량']
     today_tr_val = _trading_value.iloc[-1]
-    today_tr_val_avg_5d = _trading_value.iloc[-6:-1].mean()
-    tr_val_ratio = today_tr_val / today_tr_val_avg_5d * 100
+
+    avg5 = _trading_value.iloc[-6:-1].mean()
+    # 최근 5일 거래대금이 없으면 한달 평균
+    if avg5 <= 0 or not np.isfinite(avg5):
+        avg5 = _trading_value.iloc[-21:-1].mean()
+    if avg5 <= 0 or not np.isfinite(avg5):
+        trading_value_change_pct = 100
+    else:
+        trading_value_change_pct = today_tr_val / avg5 * 100
+        trading_value_change_pct = round(trading_value_change_pct, 2)
+
+    avg5_trv = int(avg5) if np.isfinite(avg5) else 0
 
     today_close = _closes[-1]
     yesterday_close = _closes[-2]
@@ -142,15 +155,15 @@ def insert_low_point_stock(row, data, market_value, save_path):
                 "stock_code": str(ticker),
                 "stock_name": str(row["stock_name"]),
                 "pred_price_change_3d_pct": "",
-                "yesterday_close": str(yesterday_close),
-                "current_price": str(today_close),
+                "yesterday_close": str(int(yesterday_close)),
+                "last_close": str(int(today_close)),
                 "today_price_change_pct": str(today_price_change_pct),
-                "avg5d_trading_value": str(today_tr_val_avg_5d),
-                "current_trading_value": str(today_tr_val),
-                "trading_value_change_pct": str(tr_val_ratio),
+                "avg5d_trading_value": str(avg5_trv),
+                "current_trading_value": str(int(today_tr_val)),
+                "trading_value_change_pct": str(trading_value_change_pct),
                 "graph_file": str(final_file_name),
                 "market_value": str(market_value),
-                "target": "low",
+                "target": "low_v2",
             },
             timeout=10
         )
@@ -166,7 +179,7 @@ def process_ticker(ticker, tickers_dict, i, market_context):
     stock_name = get_stock_name(tickers_dict, ticker)
     filepath = os.path.join(pickle_dir, f'{ticker}.pkl')
     if not os.path.exists(filepath):
-        print(f"[process_ticker] {stock_name} ({ticker}) 파일 없음")
+        # print(f"[process_ticker] {stock_name} ({ticker}) 파일 없음-4v2")
         return results
 
     df = safe_read_pickle(filepath)
@@ -215,6 +228,7 @@ def process_one_with_df(data, idx, ticker, tickers_dict, market_context):
     stock_name = info["stock_name"]
     stock_market = info["stock_market"]
     sector_code = info["sector_code"]
+    # product_code = info["product_code"]
     # stock_name = get_stock_name(tickers_dict, ticker)
 
     # 데이터가 부족하면 패스
@@ -497,7 +511,7 @@ def process_one_with_df(data, idx, ticker, tickers_dict, market_context):
     rule_features = {
         "vol5": vol5,                                          # 성공군의 단기 변동성이 큼, 핵심 피쳐
         "rebound_from_7d_low": rebound_from_7d_low,            # 현재 종가가 7일 최저가보다 얼마나 위에 있는지 비율로 표현
-        # "today_pct": today_pct,                                # 성공군의 마지막 날 반등 강도가 큼
+        "today_pct": today_pct,                                # 성공군의 마지막 날 반등 강도가 큼
         # "price_power_value": price_power_value,                # 당일 등락률(today_pct)과 거래대금(today_tr_val_eok)을 결합한 지표
         # "body_value_power": body_value_power,                  # 당일 캔들의 “몸통(body)” 크기와 방향성, 당일 수익률, 거래대금 규모를 결합해서 만든 일종의 매수세 강도 지표
 
@@ -570,11 +584,12 @@ if __name__ == "__main__":
     tickers = list(tickers_dict.keys())
 
     # print("[market_context] building...")
-    market_context = build_market_context_from_pickles(
-        tickers=tickers,
-        tickers_dict=tickers_dict,
-        pickle_dir=pickle_dir,
-    )
+    # market_context = build_market_context_from_pickles(
+    #     tickers=tickers,
+    #     tickers_dict=tickers_dict,
+    #     pickle_dir=pickle_dir,
+    # )
+    market_context = None
 
 
     rows = []            # 결과 종목 데이터 저장
@@ -705,12 +720,12 @@ if __name__ == "__main__":
             rule_label = row.get("good_rule_label", "")
 
             title = (
-                f"{today} ({now_hm}) {stock_name} [{ticker}] "
-                f"일봉 차트 - 오늘 등락률_{row['today_pct']}% "
-                f"룰: {rule_label} "
+                f"{today}_({now_hm})_{stock_name}_{ticker}_"
+                f"등락률_{row['today_pct']}%_"
+                f"룰_v2_{rule_label}"
             )
 
-            final_file_name = f"{today} {stock_name} [{ticker}].webp"
+            final_file_name = f"{title}.webp"
             save_path = os.path.join(output_dir, final_file_name)
 
             ticker_data = get_stock_info(ticker)
@@ -724,10 +739,10 @@ if __name__ == "__main__":
             market_value = ticker_data['market_value']
 
             # ─────────────────────────────────────────────────────────────
-            # 2) 시가 총액 500억 이하 패스
+            # 2) 시가 총액 700억 이하 패스
             # ─────────────────────────────────────────────────────────────
-            # 시가총액이 500억보다 작으면 패스
-            if (market_value < 50_000_000_000):
+            # 시가 총액이 700억보다 작으면 패스
+            if (market_value < 70_000_000_000):
                 continue
 
             insert_low_point_stock(row, origin, market_value, save_path)
@@ -756,7 +771,7 @@ if __name__ == "__main__":
                 ax_price=ax_d_price,
                 ax_volume=ax_d_vol,
                 date_tick=5,
-                # today=job["today"],
+                today=job["today"],
             )
 
             plot_candles_weekly(
@@ -766,6 +781,7 @@ if __name__ == "__main__":
                 ax_price=ax_w_price,
                 ax_volume=ax_w_vol,
                 date_tick=5,
+                today=job["today"],
             )
 
             plt.tight_layout()
@@ -779,7 +795,7 @@ if __name__ == "__main__":
             plt.close()
 
 
-        if len(selected) > 0:
+        if len(plot_jobs) > 0:
             nowTime = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
             print(f'{nowTime} - ✅ 4_find_low_poind_v2.py 그래프 생성 완료')
 

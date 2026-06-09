@@ -74,7 +74,7 @@ for count, ticker in enumerate(tickers):
     product_code = info["product_code"]
 
 
-    # 데이터가 없으면 1년 데이터 요청, 있으면 5일 데이터 요청
+    # 데이터가 없으면 1년 데이터 요청, 있으면 1일 데이터 요청
     filepath = os.path.join(pickle_dir, f'{ticker}.pkl')
 
     try:

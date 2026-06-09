@@ -158,6 +158,40 @@ for count, ticker in enumerate(tickers):
 
 
     # ─────────────────────────────────────────────────────────────
+    # 2) 시가 총액 700억 이하 패스
+    # ─────────────────────────────────────────────────────────────
+    if product_code is None:
+        print(f"product_code 없음으로 overview 스킵: {ticker} {stock_name}")
+        continue
+
+    market_value = 0
+
+    try:
+        res2 = requests.post(
+            'https://chickchick.kr/stocks/overview',
+            json={"product_code": str(product_code)},
+            timeout=10
+        )
+        data2 = res2.json()
+        # if data2 is not None:
+        market_value = data2["result"]["marketValueKrw"]
+        company_code = data2["result"]["company"]["code"]
+
+        if market_value is None:
+            print(f"overview marketValueKrw is None: {product_code}")
+            continue
+        else:
+            market_value = int(market_value)
+
+        # 시가총액이 700억보다 작으면 패스
+        if (market_value < 70_000_000_000):
+            continue
+
+    except Exception as e:
+        print(f"⚠️ overview 요청 실패-2: {e} {product_code}")
+
+
+    # ─────────────────────────────────────────────────────────────
     # 그래프 생성
     # ─────────────────────────────────────────────────────────────
     fig = plt.figure(figsize=(14, 16), dpi=150)
@@ -219,7 +253,7 @@ for count, ticker in enumerate(tickers):
                 "current_trading_value": str(today_val),
                 "trading_value_change_pct": str(trading_value_change_pct),
                 "graph_file": str(final_file_name),
-                "market_value": "",
+                "market_value": str(market_value),
             },
             timeout=10
         )
