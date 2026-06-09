@@ -15,6 +15,7 @@ from tensorflow.keras.optimizers import Adam
 import requests
 import yfinance as yf
 import os
+import time
 import re
 from typing import Optional
 import matplotlib.pyplot as plt
@@ -501,7 +502,7 @@ def get_kor_summary_ticker_dict_list():
             "date": str(days_ago_14),
             "endDate": str(today)
         },
-        timeout=5
+        timeout=(3, 10)
     )
     try:
         data = res.json()
@@ -519,7 +520,7 @@ def get_favorite_ticker_dict_list():
         json={
             "date": None
         },
-        timeout=5
+        timeout=10
     )
     try:
         data = res.json()
@@ -531,36 +532,47 @@ def get_favorite_ticker_dict_list():
         if "stock_code" in item and "stock_name" in item
     }
 
-def get_low_ticker_dict_list(mode="stock_name"):
+
+def get_low_ticker_dict(mode="all"):
     days_ago_14 = (datetime.today() - timedelta(days=14)).strftime('%Y%m%d')
     today = datetime.today().strftime('%Y%m%d')
     res = requests.post(
         'https://chickchick.kr/stocks/interest/data/low',
-        json={
-            "date": days_ago_14,
-            "endDate": str(today)
-        },
-        timeout=5
+        json={"date": days_ago_14, "endDate": today},
+        timeout=(3, 10)
     )
     try:
         data = res.json()
-    except ValueError:  # JSONDecodeError도 ValueError 하위
-        data = {}
-    if mode == "stock_name":
-        return {
-            item["stock_code"]: item["stock_name"]
-            for item in data
-            if "stock_code" in item and "stock_name" in item
-        }
+    except ValueError:
+        data = []
 
-    from collections import defaultdict
+    return {
+        item["stock_code"]: item
+        for item in data
+        if "stock_code" in item
+    }
 
-    if mode == "created_at":
-        result = defaultdict(list)
-        for item in data:
-            if "stock_code" in item and "created_at" in item:
-                result[item["stock_code"]].append(item["created_at"])
-        return dict(result)
+
+def extract_column(data_dict, column_name):
+    """
+    stock_code를 키로, 특정 column_name을 값으로 하는 dict 반환
+    """
+    return {
+        code: row.get(column_name)
+        for code, row in data_dict.items()
+        if isinstance(row, dict) and row.get(column_name) is not None
+    }
+
+
+def convert_to_yymmdd(date_str: str) -> str:
+    """
+    'Thu, 28 May 2026 09:08:46 GMT' 같은 문자열을 'YYYYMMDD' 형식으로 변환
+    """
+    # 문자열을 datetime 객체로 파싱
+    dt = datetime.strptime(date_str, "%a, %d %b %Y %H:%M:%S %Z")
+    # YYYYMMDD 형식으로 변환
+    return dt.strftime("%Y%m%d")
+
 
 def get_kor_interest_ticker_dick_list():
     url = "https://chickchick.kr/stocks/interest/data/today"
@@ -2881,3 +2893,32 @@ def build_market_context_from_pickles(tickers, tickers_dict, pickle_dir):
     print(f"[market_context] built: {len(market_context)} date-market rows")
 
     return market_context
+
+
+def safe_replace_pickle(df, filepath, retries=5, delay=0.3):
+    tmp_filepath = f"{filepath}.{os.getpid()}.tmp"
+
+    try:
+        df.to_pickle(tmp_filepath)
+
+        last_error = None
+
+        for attempt in range(1, retries + 1):
+            try:
+                os.replace(tmp_filepath, filepath)
+                return True
+
+            except PermissionError as e:
+                last_error = e
+                print(f"⚠️ 파일 교체 실패 재시도 {attempt}/{retries}: {filepath} {e}")
+                time.sleep(delay * attempt)
+
+        print(f"❌ 파일 교체 최종 실패: {filepath} {last_error}")
+        return False
+
+    finally:
+        try:
+            if os.path.exists(tmp_filepath):
+                os.remove(tmp_filepath)
+        except Exception:
+            pass

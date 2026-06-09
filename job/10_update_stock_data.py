@@ -8,7 +8,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 import pandas as pd
 from datetime import datetime, timedelta
-from utils import fetch_stock_data, get_kor_ticker_dict_list, get_stock_name
+from utils import fetch_stock_data, get_kor_ticker_dict_list, get_stock_name, safe_replace_pickle
 import time
 
 start = time.time()   # 시작 시간(초)
@@ -51,7 +51,7 @@ for count, ticker in enumerate(tickers):
         df = pd.read_pickle(filepath)
 
     except (EOFError, FileNotFoundError) as e:
-        print(f"⚠️ pickle 파일을 읽을 수 없습니다: {filepath}")
+        print(f"⚠️ pickle 파일을 읽을 수 없습니다-10: {filepath}")
         print(e)
         df = pd.DataFrame()
 
@@ -63,8 +63,8 @@ for count, ticker in enumerate(tickers):
         print(f"⚠️ fetch_stock_data 실패-10: {ticker} ({stock_name}) {e}")
         continue
 
-    if data is None or data.empty == 0:
-        print(f"⚠️ 데이터 없음: {ticker} ({stock_name})")
+    if data is None or data.empty:
+        print(f"⚠️ 데이터 없음-10: {ticker} ({stock_name})")
         continue
 
     data = data.sort_index(ascending=True)   # 오름차순
@@ -80,10 +80,7 @@ for count, ticker in enumerate(tickers):
         df = data.copy()
 
     # 파일 저장 (임시 파일 생성 후 교체)
-    tmp_filepath = filepath + ".tmp"
-
-    df.to_pickle(tmp_filepath)
-    os.replace(tmp_filepath, filepath)
+    safe_replace_pickle(df, filepath)
 
     # print(f"Processing {count+1}/{len(tickers)} : {stock_name} [{ticker}] - {len(df)}")
 

@@ -27,7 +27,7 @@ else:
 
 from utils import fetch_stock_data, get_kor_ticker_list, get_kor_ticker_dict_list, add_technical_features, \
     plot_candles_weekly, plot_candles_daily, drop_trading_halt_rows, drop_sparse_columns, get_stock_name, \
-    is_korean_stock_business_day, safe_rate, get_ticker_info, update_today_ohlcv_from_amount
+    is_korean_stock_business_day, safe_rate, get_ticker_info, update_today_ohlcv_from_amount, safe_replace_pickle
 
 if not is_korean_stock_business_day(verbose=False):
     # print("한국증시 영업일이 아니므로 실행하지 않습니다.")
@@ -87,7 +87,7 @@ for count, ticker in enumerate(tickers):
         df = pd.read_pickle(filepath)
 
     except (EOFError, FileNotFoundError) as e:
-        print(f"⚠️ pickle 파일을 읽을 수 없습니다: {filepath}")
+        print(f"⚠️ pickle 파일을 읽을 수 없습니다-2: {filepath}")
         print(e)
         continue
 
@@ -123,10 +123,7 @@ for count, ticker in enumerate(tickers):
     df, today_amount = update_today_ohlcv_from_amount(product_code, df, ticker, stock_name)
 
     # 파일 저장 (임시 파일 생성 후 교체)
-    tmp_filepath = filepath + ".tmp"
-
-    df.to_pickle(tmp_filepath)
-    os.replace(tmp_filepath, filepath)
+    safe_replace_pickle(df, filepath)
 
     ########################################################################
 

@@ -23,9 +23,10 @@ for parent in [here.parent, *here.parents]:
 else:
     raise FileNotFoundError("utils.py를 상위 디렉터리에서 찾지 못했습니다.")
 
-from utils import fetch_stock_data, get_kor_interest_ticker_dick_list, add_technical_features, \
-    plot_candles_weekly, plot_candles_daily, drop_sparse_columns, drop_trading_halt_rows, get_kor_low_ticker_dick_list, \
-    get_stock_name, is_korean_stock_business_day, update_today_ohlcv_from_amount, get_ticker_info
+from utils import fetch_stock_data, get_kor_interest_ticker_dick_list, add_technical_features, get_stock_name, \
+    plot_candles_weekly, plot_candles_daily, drop_sparse_columns, drop_trading_halt_rows, \
+    get_today_kor_low_ticker_dick_list, is_korean_stock_business_day, update_today_ohlcv_from_amount, \
+    get_ticker_info, safe_replace_pickle
 
 if not is_korean_stock_business_day(verbose=False):
     # print("한국증시 영업일이 아니므로 실행하지 않습니다.")
@@ -47,7 +48,7 @@ run_today = datetime.today().strftime('%Y%m%d')
 start_yesterday = (datetime.today() - timedelta(days=1)).strftime('%Y%m%d')
 
 tickers_dict = get_kor_interest_ticker_dick_list()
-low_tickers_dict = get_kor_low_ticker_dick_list()
+low_tickers_dict = get_today_kor_low_ticker_dick_list()
 tickers_dict.update(low_tickers_dict)
 tickers = list(tickers_dict.keys())
 
@@ -77,7 +78,7 @@ for count, ticker in enumerate(tickers):
         df = pd.read_pickle(filepath)
 
     except (EOFError, FileNotFoundError) as e:
-        print(f"⚠️ pickle 파일을 읽을 수 없습니다: {filepath}")
+        print(f"⚠️ pickle 파일을 읽을 수 없습니다-1: {filepath}")
         print(e)
         continue
 
@@ -110,10 +111,7 @@ for count, ticker in enumerate(tickers):
     df, today_amount = update_today_ohlcv_from_amount(product_code, df, ticker, product_code)
 
     # 파일 저장 (임시 파일 생성 후 교체)
-    tmp_filepath = filepath + ".tmp"
-
-    df.to_pickle(tmp_filepath)
-    os.replace(tmp_filepath, filepath)
+    safe_replace_pickle(df, filepath)
 
     ########################################################################
 

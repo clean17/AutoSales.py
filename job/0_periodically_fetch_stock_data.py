@@ -20,7 +20,8 @@ for parent in [here.parent, *here.parents]:
 else:
     raise FileNotFoundError("utils.py를 상위 디렉터리에서 찾지 못했습니다.")
 
-from utils import fetch_stock_data, get_kor_ticker_dict_list, get_stock_name, is_korean_stock_business_day
+from utils import fetch_stock_data, get_kor_ticker_dict_list, get_stock_name, is_korean_stock_business_day, \
+    safe_replace_pickle
 
 if not is_korean_stock_business_day(verbose=False):
     # print("한국증시 영업일이 아니므로 실행하지 않습니다.")
@@ -62,40 +63,36 @@ for count, ticker in enumerate(tickers):
         df = pd.read_pickle(filepath)
 
     except (EOFError, FileNotFoundError) as e:
-        print(f"⚠️ pickle 파일을 읽을 수 없습니다: {filepath}")
+        print(f"⚠️ pickle 파일을 읽을 수 없습니다-0: {filepath}")
         print(e)
         df = pd.DataFrame()
 
 
-    # 1일 데이터 받아서 병합
-    try:
-        data = fetch_stock_data(ticker, start_yesterday, today)
-    except Exception as e:
-        print(f"⚠️ fetch_stock_data 실패-0: {ticker} ({stock_name}) {e}")
-        continue
-
-    if data is None or data.empty == 0:
-        print(f"⚠️ 데이터 없음: {ticker} ({stock_name})")
-        continue
-
-    data = data.sort_index(ascending=True)   # 오름차순
-    # if count == 1:
-    #     print(data)
-    #     print('date_str', date_str)
-    #     print('today', today)
-
-
     # 중복 제거 & 새로운 날짜만 추가 >> 덮어쓰는 방식으로 수정
     if not df.empty:
+        # 1일 데이터 받아서 병합
+        try:
+            data = fetch_stock_data(ticker, start_yesterday, today)
+        except Exception as e:
+            print(f"⚠️ fetch_stock_data 실패-0: {ticker} ({stock_name}) {e}")
+            continue
+
+        if data is None or data.empty:
+            print(f"⚠️ 데이터 없음-0: {ticker} ({stock_name})")
+            continue
+
+        data = data.sort_index(ascending=True)   # 오름차순
+        # if count == 1:
+        #     print(data)
+        #     print('date_str', date_str)
+        #     print('today', today)
+
         # df와 data를 concat 후, data 값으로 덮어쓰기
         df = pd.concat([df, data])
         df = df[~df.index.duplicated(keep='last')]  # 같은 인덱스일 때 data가 남음
 
         # 파일 저장 (임시 파일 생성 후 교체)
-        tmp_filepath = filepath + ".tmp"
-
-        df.to_pickle(tmp_filepath)
-        os.replace(tmp_filepath, filepath)
+        safe_replace_pickle(df, filepath)
 
 end = time.time()     # 끝 시간(초)
 elapsed = end - start

@@ -23,8 +23,7 @@ for parent in [here.parent, *here.parents]:
 else:
     raise FileNotFoundError("utils.py를 상위 디렉터리에서 찾지 못했습니다.")
 
-from utils import get_usd_krw_rate, get_nasdaq_symbols, fetch_stock_data_us
-
+from utils import get_usd_krw_rate, get_nasdaq_symbols, fetch_stock_data_us, safe_replace_pickle
 
 start = time.time()   # 시작 시간(초)
 nowTime = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
@@ -93,8 +92,8 @@ for count, ticker in enumerate(tickers):
         df = data.copy()
 
 
-    # 파일 저장
-    df.to_pickle(filepath)
+    # 파일 저장 (임시 파일 생성 후 교체)
+    safe_replace_pickle(df, filepath)
 
 end = time.time()     # 끝 시간(초)
 elapsed = end - start
