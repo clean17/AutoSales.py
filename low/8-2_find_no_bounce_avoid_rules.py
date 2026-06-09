@@ -124,14 +124,14 @@ FEATURE_COLUMNS = [
 # Mining settings
 # =============================================================================
 
-N_QUANTILES = 18
+N_QUANTILES = 20
 MIN_UNIQUE_VALUES = 8
 
-BEAM = 28000
-TOP_N = 28000
+BEAM = 32000
+TOP_N = 32000
 MIN_CNT = 25
 MAX_DEPTH = 4
-MAX_RULES = 240
+MAX_RULES = 220
 
 MIN_CLASS0_RATE = 0.32
 MIN_LIFT = 0.66
@@ -862,17 +862,42 @@ def mine_class0_rules(
 def get_scenarios() -> list[dict]:
     """실전용 핵심 시나리오만 유지한다.
 
-    제거한 시나리오:
-    - cov4_c3_05_safe / cov4_c3_06_balanced:
-      V2+ 목표보다 느슨하거나 중복 성격.
-    - cov5_c23_10_strict:
-      너무 좁게 잡히는 경향. V2+ strict가 대체.
-    - cov5_c23_15_reach / cov5_c23_18_last_resort:
-      coverage는 늘 수 있지만 class23/class3 오염이 커져 기대수익률 관점에서 불리.
-    - cov5_c23_22_diagnostic / cov5_c23_25_diagnostic:
-      진단용. 실전 룰 export에는 불필요.
+    개선 방향:
+    - 기존 best였던 v2plus_cov5_c23_12_reach는 이미 매우 좋다.
+    - 추가 개선은 coverage 5%를 유지하면서 class23/class3 오염률을 더 낮추는 것이다.
+    - depth 5는 과적합 위험이 있어 사용하지 않는다.
     """
     return [
+        {
+            # 최우선 품질형:
+            # coverage 5%를 유지하면서 class23/class3 오염을 더 낮추는 것을 목표.
+            "name": "v2plus_cov5_c23_08_quality",
+            "alias": "v2plus_cov5_q",
+            "target_coverage": 0.050,
+            "min_acceptable_coverage": 0.048,
+            "soft_coverage": 0.040,
+
+            "max_class23": 0.080,
+            "max_class3": 0.030,
+            "max_class2": 0.070,
+
+            "min_rate_pre": 0.66,
+            "min_rate_post": 0.62,
+
+            "min_added_rate": 0.24,
+            "min_added_rate_fill": 0.08,
+
+            "max_added_c23": 0.20,
+            "max_added_c23_fill": 0.34,
+            "max_added_c3": 0.08,
+
+            "coverage_w": 6200.0,
+            "class0_w": 9.0,
+            "c23_penalty": 760.0,
+            "c3_penalty": 920.0,
+            "added_c23_penalty": 42.0,
+            "diagnostic": False,
+        },
         {
             # V2 개선 목표 1순위:
             # coverage 4% 이상, class23 10% 이하, class3 3.5% 이하를 노린다.
@@ -935,7 +960,7 @@ def get_scenarios() -> list[dict]:
         },
         {
             # coverage 5% 재도전.
-            # 단, class23/class3가 올라가면 select_best_result에서 밀린다.
+            # 현재까지 가장 좋은 결과가 나온 실전형 후보.
             "name": "v2plus_cov5_c23_12_reach",
             "alias": "v2plus_cov5",
             "target_coverage": 0.050,
@@ -1777,6 +1802,26 @@ def is_practical_met(result: dict) -> bool:
     )
 
 
+def _result_quality_score(r: dict) -> float:
+    """기대수익률형 선택 점수.
+
+    실제 return 컬럼 없이 no-bounce 회피룰만 평가할 때의 대리 점수:
+    - class0_rate: no-bounce 제거 정확도
+    - class0_coverage: 나쁜 후보를 얼마나 많이 잡는지
+    - class23/class3: 좋은 후보를 잘못 제거할 위험
+    - class3는 특히 손실 가능성이 큰 오염으로 보아 더 강하게 패널티
+    """
+    va = r["valid_eval"]
+
+    return (
+            va["class0_rate"] * 1000.0
+            + va["class0_coverage"] * 650.0
+            - va["class23_rate"] * 900.0
+            - va["class3_rate"] * 1350.0
+            + np.log1p(va["selected_count"]) * 8.0
+    )
+
+
 def select_best_result(results: list[dict]) -> dict:
     if not results:
         raise ValueError("No scenario results.")
@@ -1785,13 +1830,61 @@ def select_best_result(results: list[dict]) -> dict:
     # valid_class0_rate 63.50%, class0_coverage 4.03%, class23 8.76%, class3 2.92%
     #
     # 개선 목표:
-    # 1) coverage >= 4.0%
-    # 2) class23 <= 10~12%
-    # 3) class3 <= 3.5~4%
-    # 4) class0_rate >= 63%
+    # 1) coverage >= 5.0% 또는 최소 4.8%
+    # 2) class0_rate >= 68~70%
+    # 3) class23 <= 8~12%
+    # 4) class3 <= 3~4.5%
     #
-    # 기대수익률 관점에서는 class23/class3를 과도하게 올리면서 coverage만 늘린 룰은 제외한다.
+    # 핵심:
+    # coverage가 0.05%p 정도 더 높은 시나리오보다,
+    # class0_rate가 높고 class23/class3가 낮은 시나리오를 우선한다.
 
+    # 1순위: coverage 5% 이상, class23 8% 이하, class3 3% 이하
+    cov5_quality = [
+        r for r in results
+        if (
+                not r["scenario"].get("diagnostic", False)
+                and r["valid_eval"]["class0_coverage"] >= 0.050
+                and r["valid_eval"]["class0_rate"] >= 0.68
+                and r["valid_eval"]["class23_rate"] <= 0.080
+                and r["valid_eval"]["class3_rate"] <= 0.030
+        )
+    ]
+
+    if cov5_quality:
+        return sorted(cov5_quality, key=_result_quality_score, reverse=True)[0]
+
+    # 2순위: coverage 4.8% 이상, class23 8% 이하, class3 3% 이하
+    cov48_quality = [
+        r for r in results
+        if (
+                not r["scenario"].get("diagnostic", False)
+                and r["valid_eval"]["class0_coverage"] >= 0.048
+                and r["valid_eval"]["class0_rate"] >= 0.68
+                and r["valid_eval"]["class23_rate"] <= 0.080
+                and r["valid_eval"]["class3_rate"] <= 0.030
+        )
+    ]
+
+    if cov48_quality:
+        return sorted(cov48_quality, key=_result_quality_score, reverse=True)[0]
+
+    # 3순위: 기존 v2plus 기준. coverage 5% 이상, class23 12% 이하, class3 4.5% 이하.
+    cov5_balanced = [
+        r for r in results
+        if (
+                not r["scenario"].get("diagnostic", False)
+                and r["valid_eval"]["class0_coverage"] >= 0.050
+                and r["valid_eval"]["class0_rate"] >= 0.63
+                and r["valid_eval"]["class23_rate"] <= 0.120
+                and r["valid_eval"]["class3_rate"] <= 0.045
+        )
+    ]
+
+    if cov5_balanced:
+        return sorted(cov5_balanced, key=_result_quality_score, reverse=True)[0]
+
+    # 4순위: V2 개선 strict. coverage 4% 이상, class23 10% 이하, class3 3.5% 이하.
     v2plus_strict = [
         r for r in results
         if (
@@ -1804,17 +1897,9 @@ def select_best_result(results: list[dict]) -> dict:
     ]
 
     if v2plus_strict:
-        return sorted(
-            v2plus_strict,
-            key=lambda r: (
-                -r["valid_eval"]["class0_coverage"],
-                -r["valid_eval"]["class0_rate"],
-                r["valid_eval"]["class23_rate"],
-                r["valid_eval"]["class3_rate"],
-                -r["score"],
-            ),
-        )[0]
+        return sorted(v2plus_strict, key=_result_quality_score, reverse=True)[0]
 
+    # 5순위: V2 개선 balanced. coverage 4% 이상, class23 12% 이하, class3 4% 이하.
     v2plus_balanced = [
         r for r in results
         if (
@@ -1827,18 +1912,9 @@ def select_best_result(results: list[dict]) -> dict:
     ]
 
     if v2plus_balanced:
-        return sorted(
-            v2plus_balanced,
-            key=lambda r: (
-                -r["valid_eval"]["class0_coverage"],
-                r["valid_eval"]["class23_rate"],
-                r["valid_eval"]["class3_rate"],
-                -r["valid_eval"]["class0_rate"],
-                -r["score"],
-            ),
-        )[0]
+        return sorted(v2plus_balanced, key=_result_quality_score, reverse=True)[0]
 
-    # 4% coverage가 안 되면 class23/class3 방어가 되는 후보 중 coverage 최대
+    # 6순위: coverage 4% 미달이면 class23/class3 방어가 되는 후보 중 quality score 최대
     safe_under4 = [
         r for r in results
         if (
@@ -1850,61 +1926,24 @@ def select_best_result(results: list[dict]) -> dict:
     ]
 
     if safe_under4:
-        return sorted(
-            safe_under4,
-            key=lambda r: (
-                -r["valid_eval"]["class0_coverage"],
-                -r["valid_eval"]["class0_rate"],
-                r["valid_eval"]["class23_rate"],
-                r["valid_eval"]["class3_rate"],
-                -r["score"],
-            ),
-        )[0]
+        return sorted(safe_under4, key=_result_quality_score, reverse=True)[0]
 
     # 기존 target_met
     met = [r for r in results if is_target_met(r)]
 
     if met:
-        return sorted(
-            met,
-            key=lambda r: (
-                r["scenario"].get("diagnostic", False),
-                r["valid_eval"]["class23_rate"],
-                r["valid_eval"]["class3_rate"],
-                -r["valid_eval"]["class0_coverage"],
-                -r["valid_eval"]["class0_rate"],
-                -r["score"],
-            ),
-        )[0]
+        return sorted(met, key=_result_quality_score, reverse=True)[0]
 
     # 기존 practical 후보
     practical = [r for r in results if is_practical_met(r)]
 
     if practical:
-        return sorted(
-            practical,
-            key=lambda r: (
-                r["valid_eval"]["class3_rate"],
-                r["valid_eval"]["class23_rate"],
-                -r["valid_eval"]["class0_coverage"],
-                -r["valid_eval"]["class0_rate"],
-                -r["score"],
-            ),
-        )[0]
+        return sorted(practical, key=_result_quality_score, reverse=True)[0]
 
     non_diag = [r for r in results if not r["scenario"].get("diagnostic", False)]
 
     if non_diag:
-        return sorted(
-            non_diag,
-            key=lambda r: (
-                r["valid_eval"]["class3_rate"] > 0.08,
-                -r["valid_eval"]["class0_coverage"],
-                r["valid_eval"]["class3_rate"],
-                r["valid_eval"]["class23_rate"],
-                -r["valid_eval"]["class0_rate"],
-            ),
-        )[0]
+        return sorted(non_diag, key=_result_quality_score, reverse=True)[0]
 
     return sorted(
         results,
@@ -2269,6 +2308,7 @@ def scenario_summary_df(results: list[dict], main_scenario_name: str | None = No
                 "practical_met": practical_met,
                 "rules": len(r["selected"]),
                 "score": r["score"],
+                "quality_score": _result_quality_score(r) if "_result_quality_score" in globals() else np.nan,
 
                 "train_selected": tr["selected_count"],
                 "train_selected_rate": tr["selected_rate"],
@@ -2624,7 +2664,19 @@ def parse_args():
     parser.add_argument(
         "--save-all-scenarios",
         action="store_true",
-        help="save scenario-specific rule files and reports",
+        help="legacy flag: scenarios are saved into merged CSVs by default; does not create per-scenario files",
+    )
+
+    parser.add_argument(
+        "--save-each-scenario-files",
+        action="store_true",
+        help="optional: also save scenario-specific py/report/monthly_report files",
+    )
+
+    parser.add_argument(
+        "--save-detail-reports",
+        action="store_true",
+        help="optional: also save per-rule report and main monthly_report CSVs; default keeps only summary CSVs",
     )
 
     parser.add_argument(
@@ -2680,8 +2732,8 @@ if __name__ == "__main__":
         out_path=args.out,
         mode=args.mode,
         save_all_scenarios=args.save_all_scenarios,
-        save_each_scenario_files=args.save_each_scenario_files,
-        save_detail_reports=args.save_detail_reports,
+        save_each_scenario_files=getattr(args, "save_each_scenario_files", False),
+        save_detail_reports=getattr(args, "save_detail_reports", False),
         workers=args.workers,
     )
 
