@@ -25,9 +25,10 @@ for parent in [here.parent, *here.parents]:
 else:
     raise FileNotFoundError("utils.py를 상위 디렉터리에서 찾지 못했습니다.")
 
-from utils import add_technical_features, plot_candles_weekly, plot_candles_daily, \
-    drop_sparse_columns, drop_trading_halt_rows, get_kor_summary_ticker_dict_list, get_favorite_ticker_dict_list, \
-    get_stock_name, is_korean_stock_business_day, get_low_ticker_dict_list, get_stock_created_at
+from utils import add_technical_features, plot_candles_weekly, plot_candles_daily, drop_sparse_columns, \
+    drop_trading_halt_rows, get_kor_summary_ticker_dict_list, get_favorite_ticker_dict_list, \
+    get_stock_name, is_korean_stock_business_day, get_stock_created_at, extract_column, get_low_ticker_dict, \
+    convert_to_yymmdd
 
 # 현재 실행 파일 기준으로 루트 디렉토리 경로 잡기
 script_dir = os.path.dirname(os.path.abspath(__file__))  # 실행하는 파이썬 파일 위치(root/low)
@@ -41,17 +42,8 @@ day = datetime.now().strftime("%d")
 
 
 
-def convert_to_yymmdd(date_str: str) -> str:
-    """
-    'Thu, 28 May 2026 09:08:46 GMT' 같은 문자열을 'YYYYMMDD' 형식으로 변환
-    """
-    # 문자열을 datetime 객체로 파싱
-    dt = datetime.strptime(date_str, "%a, %d %b %Y %H:%M:%S %Z")
-    # YYYYMMDD 형식으로 변환
-    return dt.strftime("%Y%m%d")
 
-
-def process_one(idx, ticker, tickers_dict, low_tickers_cdate_dict):
+def process_one(idx, ticker, tickers_dict, low_tickers_cdate_dict, low_tickers_graph_dict):
     stock_name = get_stock_name(tickers_dict, ticker)
     created_at_list = get_stock_created_at(low_tickers_cdate_dict, ticker)
 
@@ -68,7 +60,7 @@ def process_one(idx, ticker, tickers_dict, low_tickers_cdate_dict):
         df = pd.read_pickle(filepath)
 
     except (EOFError, FileNotFoundError) as e:
-        print(f"⚠️ pickle 파일을 읽을 수 없습니다: {filepath}")
+        print(f"⚠️ pickle 파일을 읽을 수 없습니다-5: {filepath}")
         print(e)
         return
 
@@ -98,14 +90,24 @@ def process_one(idx, ticker, tickers_dict, low_tickers_cdate_dict):
     today = data.index[-1].strftime("%Y%m%d") # 마지막 인덱스
 
     today_str = str(today)
-    title = f"{today_str} {stock_name} [{ticker}] Daily Chart"
-    final_file_name = f"{today} {stock_name} [{ticker}].webp"
+
+    if created_at_list:
+        graph_file_name = low_tickers_graph_dict.get(ticker)
+        final_file_name = graph_file_name
+        title = graph_file_name.rsplit(".", 1)[0]
+    else:
+        final_file_name = f"{today_str} {stock_name} [{ticker}].webp"
+        title = f"{today_str} {stock_name} [{ticker}] Daily Chart"
 
     year = today[:4]
     month = today[4:6]
     day = today[6:8]
 
-    output_dir = f'F:\\interest_stocks\\{year}\\{month}\\{day}'
+    if created_at_list:
+        output_dir = r"F:\5below20"
+    else:
+        output_dir = f"F:\\interest_stocks\\{year}\\{month}\\{day}"
+
     os.makedirs(output_dir, exist_ok=True)
     final_file_path = os.path.join(output_dir, final_file_name)
 
@@ -169,19 +171,27 @@ if __name__ == "__main__":
     nowTime = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
     print(f'{nowTime} - 🕒 running 5_generate_interest_stocks_graph.py...')
 
-    tickers_dict = get_kor_summary_ticker_dict_list()
+    tickers_dict = get_kor_summary_ticker_dict_list()  # {code: name}
     fav_tickers_dict = get_favorite_ticker_dict_list()
-    low_tickers_dict = get_low_ticker_dict_list("stock_name")
+
+    low_data_dict = get_low_ticker_dict("all")
+    low_tickers_dict = extract_column(low_data_dict, "stock_name")
+    # low_tickers_dict = get_low_ticker_dict("stock_name")
 
     tickers_dict.update(fav_tickers_dict)
     tickers_dict.update(low_tickers_dict)
     tickers = list(set(tickers_dict.keys()))  # | 는 합집합 연산자
 
-    low_tickers_cdate_dict = get_low_ticker_dict_list("created_at")
+    low_tickers_cdate_dict = {}
+    for code, row in low_data_dict.items():
+        if isinstance(row, dict) and row.get("created_at"):
+            low_tickers_cdate_dict.setdefault(code, []).append(convert_to_yymmdd(row["created_at"]))
+    low_tickers_graph_dict = extract_column(low_data_dict, "graph_file")
+
 
     # 테스트
-    # tickers_dict = get_low_ticker_dict_list("stock_name")
-    # low_tickers_cdate_dict = get_low_ticker_dict_list("created_at")
+    # tickers_dict = get_low_ticker_dict("stock_name")
+    # low_tickers_cdate_dict = get_low_ticker_dict("created_at")
     # tickers = list(set(tickers_dict.keys()))
 
     plot_jobs = []
@@ -196,7 +206,7 @@ if __name__ == "__main__":
         while idx <= origin_idx:
             idx += 1
             for count, ticker in enumerate(tickers):
-                futures.append(executor.submit(process_one, idx, ticker, tickers_dict, low_tickers_cdate_dict))
+                futures.append(executor.submit(process_one, idx, ticker, tickers_dict, low_tickers_cdate_dict, low_tickers_graph_dict))
 
         # 완료된 것부터 하나씩 받아서 집계
         for f in as_completed(futures):
@@ -230,8 +240,6 @@ if __name__ == "__main__":
         if isinstance(job["created_at_list"], list):
             # 여러 날짜가 들어있으면 반복
             for created_at in job["created_at_list"]:
-                created_at = convert_to_yymmdd(created_at)
-
                 plot_candles_daily(
                     job["origin"],
                     show_months=4,
@@ -291,10 +299,7 @@ if __name__ == "__main__":
     hours, remainder = divmod(int(elapsed), 3600)
     minutes, seconds = divmod(remainder, 60)
 
-    # if elapsed > 20:
-    #     print(f"5_generate_interest_stocks_graph.py 총 소요 시간: {hours}시간 {minutes}분 {seconds}초")
-
     nowTime = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
-    print(f'{nowTime} - Complete 5_generate_interest_stocks_graph.py, 총 소요 시간: {hours}시간 {minutes}분 {seconds}초')
+    print(f'{nowTime} - Complete : 5_generate_interest_stocks_graph.py, 총 소요 시간: {hours}시간 {minutes}분 {seconds}초')
 
 
