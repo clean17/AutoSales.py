@@ -155,6 +155,16 @@ def insert_low_point_stock(row, data, market_value, save_path):
 
     final_file_name = save_path.split("\\")[-1]
 
+    rule_parts = [p for p in str(row.get("good_rule_names", "")).split(",") if p]
+    label_parts = []
+    if "rule_002_stable_forward" in rule_parts:
+        label_parts.append("s")
+    if "rule_001_precision_high" in rule_parts:
+        label_parts.append("h")
+    if "rule_003_coverage_expand" in rule_parts:
+        label_parts.append("c")
+    target = f"low_v1_{''.join(label_parts)}" if label_parts else "low_v1"
+
     try:
         requests.post(
             'https://chickchick.kr/stocks/interest/insert',
@@ -171,7 +181,7 @@ def insert_low_point_stock(row, data, market_value, save_path):
                 "trading_value_change_pct": str(trading_value_change_pct),
                 "graph_file": str(final_file_name),
                 "market_value": str(market_value),
-                "target": "low",
+                "target": target,
             },
             timeout=10
         )
@@ -626,13 +636,13 @@ if __name__ == "__main__":
                 continue
 
             today = row["today"].replace("-", "")
-            now_hm = datetime.now().strftime("%H:%M")
+            now_hm = datetime.now().strftime("%H_%M")
             rule_label = row.get("good_rule_label", "")
 
             title = (
                 f"{today}_({now_hm})_{stock_name}_{ticker}_"
-                f"등락률_{row['today_pct']}%_"
-                f"룰_v1_{rule_label}"
+                f"등락률_{row['today_pct']}%"
+                # f"_룰_v1_{rule_label}"
             )
 
             final_file_name = f"{title}.webp"
